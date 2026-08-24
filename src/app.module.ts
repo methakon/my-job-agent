@@ -10,6 +10,8 @@ import { QuestionAnswer } from './applications/question-answer.entity';
 import { ApplySetting } from './applications/apply-setting.entity';
 import { StatusUpdate } from './applications/status-update.entity';
 import { EmailTrackerService } from './applications/email-tracker.service';
+import { DirectChannelDetector } from './applications/direct-channel.detector';
+import { DirectApplyMailer } from './applications/direct-apply.mailer';
 import { ProfileOptimizer } from './profile/profile-optimizer.service';
 import { InterviewQuestion } from './interview/interview-question.entity';
 import { InterviewPrepService } from './interview/interview-prep.service';
@@ -46,6 +48,8 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		LeadRepository,
 		ApplyEngineService,
 		AnswerBankService,
+		DirectChannelDetector,
+		DirectApplyMailer,
 		ApplicationRepository,
 		ApplySettingRepository,
 		EmailTrackerService,

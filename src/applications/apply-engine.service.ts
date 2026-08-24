@@ -5,6 +5,8 @@ import { ApplicationRepository } from './application.repository';
 import { ApplySettingRepository } from './apply-setting.repository';
 import { AnswerBankService } from './answer-bank.service';
 import { EmailTrackerService } from './email-tracker.service';
+import { DirectChannelDetector, DirectChannel } from './direct-channel.detector';
+import { DirectApplyMailer } from './direct-apply.mailer';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -25,6 +27,8 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly profileService: ProfileService,
 		private readonly leadRepo: LeadRepository,
 		private readonly emailTracker: EmailTrackerService,
+		private readonly detector: DirectChannelDetector,
+		private readonly mailer: DirectApplyMailer,
 	) {}
 
 	onModuleInit(): void {
@@ -101,8 +105,13 @@ export class ApplyEngineService implements OnModuleInit {
 			}
 			const stillUnanswered = questions.filter((q) => !(q in resolved));
 
+			// PRIORITY: apply directly via company ATS or HR email when available;
+			// portal easy-apply is only the last resort (user rule).
 			let result: ApplyResult;
-			if (stillUnanswered.length > 0) {
+			const channel = await this.detector.detect(lead);
+			if (channel && stillUnanswered.length === 0) {
+				result = await this.applyDirect(lead, profileData, channel, application);
+			} else if (stillUnanswered.length > 0) {
 				result = { ok: false, status: 'needs_info', questions: stillUnanswered.map((q) => ({ question: q, answer: null })), missingInfo: stillUnanswered };
 			} else {
 				result = await adapter.apply(lead, profileData, resolved);
@@ -121,6 +130,37 @@ export class ApplyEngineService implements OnModuleInit {
 			await this.appRepo.save(application);
 			return { ok: false, status: 'failed', errorDetail: String(err), applicationId: application.id };
 		}
+	}
+
+	/**
+	 * Direct apply path (preferred): HR email via SMTP, or ATS page.
+	 * ATS submissions open a browser-automation session; email is sent directly.
+	 */
+	private async applyDirect(
+		lead: ScrapedLead,
+		profileData: Record<string, string>,
+		channel: DirectChannel,
+		application: { cvPath: string | null },
+	): Promise<ApplyResult> {
+		if (channel.kind === 'email') {
+			const coverLetter = application.cvPath ? null : this.generateCoverLetter(profileData, lead);
+			const sent = await this.mailer.send({
+				to: channel.target,
+				subject: `Application: ${lead.title} — ${profileData.name ?? 'Swarna Sekhar Dhar'}`,
+				html: coverLetter ?? this.generateCoverLetter(profileData, lead),
+				cvPath: application.cvPath ?? undefined,
+			});
+			return sent.ok
+				? { ok: true, status: 'submitted' }
+				: { ok: false, status: 'failed', errorDetail: `direct-email failed: ${sent.error}` };
+		}
+		// ATS: hand off to browser automation session for that portal's form.
+		// Filled from profileData + answer bank by the AtsApplyService (per-ATS adapter).
+		return {
+			ok: false,
+			status: 'needs_info',
+			missingInfo: [`direct ATS apply queued for ${channel.detectedBy}: ${channel.target} (browser automation pending)`],
+		};
 	}
 
 	/**
