@@ -37,6 +37,9 @@
       other channel
 - [x] FR-11 Self-improvement engine scaffold: outcome recording + learning
       stats (channel success, keyword replies, best send hour)
+- [x] FR-12 Gmail SMTP live (app-password AES-256 in DB); test email sent OK
+- [x] InboxReaderService: IMAP OTP reading (auto portal verification codes)
+      + recruiter reply polling — verified against live inbox
 
 ## Pending — engineering
 - [ ] finn.no adapter (scrape English-jobs filter) + account signup/apply flow
@@ -50,14 +53,12 @@
 - [ ] Production hardening: synchronize:false + migrations, helmet, rate limit
 
 ## Blocked on user
-- [🚫] Gmail app-password → activate direct HR email sending (primary)
-- [🚫] Outlook app-password → backup sender
-- [🚫] IMAP credentials (both accounts) → reply tracking activation
-- [🚫] finn.no: existing account? Norwegian phone number for OTP verification?
+- [🚫] Outlook app-password → backup sender (optional; Gmail primary live)
 - [🚫] Naukri/Monster: existing credentials or fresh signup approval?
 - [🚫] LinkedIn li_at session cookie (if easy-apply wanted)
 - [🚫] GitHub/portfolio URL → profile completeness 100%
 - [🚫] HK-dir statement PDF path (attach to Norway applications)
+- [🚫] finn.no login method: email+password or BankID? (account exists, bapay.9@gmail.com)
 
 ## Verification checklist (per release)
 - [ ] tsc clean + nest build passes

@@ -58,6 +58,15 @@ keywords get responses, best send hours, per-portal success. Future behaviour
 (cover-letter emphasis, channel choice, send timing) adapts from these stats.
 Scaffold live in ProcessLearningService; weights persistence next iteration.
 
+### FR-12 Email inbox reading — OTP + replies (added 2026-08-25)
+The agent reads the candidate's Gmail (and later Outlook) via IMAP using the
+same encrypted app-passwords stored in DB:
+1. **OTP auto-read:** when a portal login/signup sends a verification code,
+   the agent fetches it from the inbox automatically and completes the
+   login (no manual OTP input needed).
+2. **Recruiter reply polling:** application-related replies feed the
+   tracking table and the self-improvement loop.
+
 ### FR-4 Per-job document tailoring (user rule)
 - Agent reads each job description and **rewrites the CV to suit it**, then
   renders an **ATS-friendly PDF** (single column, standard headings,
