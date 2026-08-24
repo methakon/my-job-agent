@@ -6,35 +6,41 @@ export class JobLead {
 	@PrimaryGeneratedColumn('uuid')
 	id!: string;
 
-	@Column({ length: 30 })
-	@Index()
+	@Column({
+	type: 'varchar', length: 30 })
 	source!: string; // remotive | remoteok | wwr | naukri | monster | linkedin
 
-	@Column({ length: 190 })
+	@Column({
+	type: 'varchar', length: 190 })
 	externalId!: string;
 
-	@Column({ length: 250 })
+	@Column({
+	type: 'varchar', length: 250 })
 	title!: string;
 
-	@Column({ length: 160 })
+	@Column({
+	type: 'varchar', length: 160 })
 	company!: string;
 
-	@Column({ length: 180, nullable: true })
+	@Column({
+	type: 'varchar', length: 180, nullable: true })
 	location!: string | null;
 
 	@Column({ type: 'text', nullable: true })
 	description!: string | null;
 
-	@Column({ length: 500, nullable: true })
+	@Column({
+	type: 'varchar', length: 500, nullable: true })
 	url!: string | null;
 
 	@Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
 	matchScore!: number;
 
-	@Column({ simplejson: true, nullable: true })
+	@Column({ type: 'simple-json', nullable: true })
 	matchedSkills!: string[] | null;
 
-	@Column({ length: 20, default: 'new' })
+	@Column({
+	type: 'varchar', length: 20, default: 'new' })
 	status!: string; // new | queued | applied | skipped
 
 	@Column({ type: 'datetime', nullable: true })

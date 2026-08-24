@@ -6,7 +6,8 @@ export class ApplySetting {
 	id!: string;
 
 	/** Portal/source name — one row per adapter. */
-	@Column({ length: 30, unique: true })
+	@Column({
+	type: 'varchar', length: 30, unique: true })
 	source!: string;
 
 	@Column({ type: 'tinyint', width: 1, default: 0 })
@@ -18,7 +19,7 @@ export class ApplySetting {
 	@Column({ type: 'int', default: 60 })
 	minutesBetweenApplies!: number;
 
-	/** JSON — source-specific credentials config (cookie names, tokens). Never raw passwords. */
+	/** JSON — source-specific auth config (cookie names, tokens). Never raw passwords. */
 	@Column({ type: 'text', nullable: true })
 	authConfigJson!: string | null;
 

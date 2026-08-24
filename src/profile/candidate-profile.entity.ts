@@ -5,41 +5,51 @@ export class CandidateProfile {
 	@PrimaryGeneratedColumn('uuid')
 	id!: string;
 
-	@Column({ length: 120 })
+	@Column({
+	type: 'varchar', length: 120 })
 	name!: string;
 
-	@Column({ length: 180, nullable: true })
+	@Column({
+	type: 'varchar', length: 180, nullable: true })
 	email!: string;
 
-	@Column({ length: 40, nullable: true })
+	@Column({
+	type: 'varchar', length: 40, nullable: true })
 	phone!: string;
 
 	/** Comma-separated skill tags. */
 	@Column({ type: 'text', nullable: true })
 	skills!: string | null;
 
-	@Column({ length: 160, nullable: true })
+	@Column({
+	type: 'varchar', length: 160, nullable: true })
 	headline!: string | null;
 
 	@Column({ type: 'decimal', precision: 4, scale: 1, nullable: true })
 	experienceYears!: number | null;
 
-	@Column({ length: 60, nullable: true, comment: 'immediate|15|30|60 days' })
+	@Column({
+	type: 'varchar', length: 60, nullable: true, comment: 'immediate|15|30|60 days' })
 	noticePeriod!: string | null;
 
-	@Column({ length: 60, nullable: true, comment: 'expected salary with currency' })
+	@Column({
+	type: 'varchar', length: 60, nullable: true, comment: 'expected salary with currency' })
 	salaryExpectation!: string | null;
 
-	@Column({ length: 255, nullable: true })
+	@Column({
+	type: 'varchar', length: 255, nullable: true })
 	linkedinUrl!: string | null;
 
-	@Column({ length: 255, nullable: true })
+	@Column({
+	type: 'varchar', length: 255, nullable: true })
 	githubUrl!: string | null;
 
-	@Column({ length: 255, nullable: true })
+	@Column({
+	type: 'varchar', length: 255, nullable: true })
 	portfolioUrl!: string | null;
 
-	@Column({ length: 180, nullable: true })
+	@Column({
+	type: 'varchar', length: 180, nullable: true })
 	currentLocation!: string | null;
 
 	/** JSON array [{company, role, from, to, summary}] */
