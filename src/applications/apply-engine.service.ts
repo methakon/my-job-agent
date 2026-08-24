@@ -7,6 +7,8 @@ import { AnswerBankService } from './answer-bank.service';
 import { EmailTrackerService } from './email-tracker.service';
 import { DirectChannelDetector, DirectChannel } from './direct-channel.detector';
 import { DirectApplyMailer } from './direct-apply.mailer';
+import { MailService } from './mail.service';
+import { HumanEmailComposer } from './human-email-composer.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -28,7 +30,8 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly leadRepo: LeadRepository,
 		private readonly emailTracker: EmailTrackerService,
 		private readonly detector: DirectChannelDetector,
-		private readonly mailer: DirectApplyMailer,
+		private readonly mailer: MailService,
+		private readonly composer: HumanEmailComposer,
 	) {}
 
 	onModuleInit(): void {
@@ -143,11 +146,12 @@ export class ApplyEngineService implements OnModuleInit {
 		application: { cvPath: string | null },
 	): Promise<ApplyResult> {
 		if (channel.kind === 'email') {
-			const coverLetter = application.cvPath ? null : this.generateCoverLetter(profileData, lead);
+			const skills = (profileData.skills ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 5);
+			const email = this.composer.compose(lead, profileData, skills);
 			const sent = await this.mailer.send({
 				to: channel.target,
-				subject: `Application: ${lead.title} — ${profileData.name ?? 'Swarna Sekhar Dhar'}`,
-				html: coverLetter ?? this.generateCoverLetter(profileData, lead),
+				subject: email.subject,
+				html: email.bodyHtml,
 				cvPath: application.cvPath ?? undefined,
 			});
 			return sent.ok
