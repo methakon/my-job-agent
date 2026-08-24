@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { ScrapedLead } from '../applications/portal-adapter.interface';
 import { RemotiveAdapter, RemoteOkAdapter } from './public-api.adapters';
+import { NorwayJobsAdapter } from './norway-jobs.adapter';
 import { LeadRepository } from '../leads/lead.repository';
 import { ProfileService } from '../profile/profile.service';
 
@@ -10,7 +11,7 @@ const TARGET_SKILLS = ['nestjs', 'node', 'typescript', 'astro', 'mysql', 'react'
 @Injectable()
 export class ScoutService {
 	private readonly logger = new Logger(ScoutService.name);
-	private readonly adapters = [new RemotiveAdapter(), new RemoteOkAdapter()];
+	private readonly adapters = [new RemotiveAdapter(), new RemoteOkAdapter(), new NorwayJobsAdapter()];
 
 	constructor(
 		private readonly leadRepo: LeadRepository,
