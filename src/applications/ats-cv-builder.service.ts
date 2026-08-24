@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import PDFDocument = require('pdfkit');
 import * as fs from 'fs';
 import * as path from 'path';
+// pdfkit ships as a callable function with .constructor typing quirks —
+// use the documented require pattern.
+const PDFDocument: any = require('pdfkit');
 
 export interface CvWorkStint {
 	company: string;
@@ -105,7 +107,10 @@ export class AtsCvBuilder {
 			.text(`Tailored for ${input.jobTitle} @ ${input.jobCompany} — generated ${new Date().toISOString().slice(0, 10)}`);
 		doc.fillColor('#000000');
 
-		await new Promise<void>((resolve) => doc.end(resolve));
+		await new Promise<void>((resolve) => {
+			doc.on('end', () => resolve());
+			doc.end();
+		});
 		this.logger.log(`ATS CV generated: ${filePath}`);
 		return filePath;
 	}

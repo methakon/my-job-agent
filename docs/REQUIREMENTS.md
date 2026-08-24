@@ -45,6 +45,19 @@ applies on his behalf — asking him only when information is genuinely missing.
 3. **Portal easy-apply only as last resort.**
 - Global kill switch (`APPLY_KILL_SWITCH`) + per-source toggles + daily caps.
 
+### FR-10 JD application-process detection (added 2026-08-25)
+Before applying anywhere, the agent READS the job description for an explicit
+application process ("send CV to x@y.com", "apply via Greenhouse", "apply
+online at our portal") and follows THAT stated process first — before
+detector-found channels and long before portal easy-apply.
+
+### FR-11 Self-improvement engine (added 2026-08-25)
+The agent is self-improving: every outcome (submitted / replied / rejected /
+needs_info reason) feeds learning weights — channel success rates, which CV
+keywords get responses, best send hours, per-portal success. Future behaviour
+(cover-letter emphasis, channel choice, send timing) adapts from these stats.
+Scaffold live in ProcessLearningService; weights persistence next iteration.
+
 ### FR-4 Per-job document tailoring (user rule)
 - Agent reads each job description and **rewrites the CV to suit it**, then
   renders an **ATS-friendly PDF** (single column, standard headings,

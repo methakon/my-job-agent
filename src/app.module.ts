@@ -15,6 +15,8 @@ import { DirectChannelDetector } from './applications/direct-channel.detector';
 import { DirectApplyMailer } from './applications/direct-apply.mailer';
 import { MailService } from './applications/mail.service';
 import { HumanEmailComposer } from './applications/human-email-composer.service';
+import { AtsCvBuilder } from './applications/ats-cv-builder.service';
+import { ProcessLearningService } from './applications/process-learning.service';
 import { ProfileOptimizer } from './profile/profile-optimizer.service';
 import { InterviewQuestion } from './interview/interview-question.entity';
 import { InterviewPrepService } from './interview/interview-prep.service';
@@ -57,6 +59,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		MailService,
 		HumanEmailComposer,
 		AtsCvBuilder,
+		ProcessLearningService,
 		ApplicationRepository,
 		ApplySettingRepository,
 		EmailTrackerService,

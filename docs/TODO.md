@@ -28,7 +28,15 @@
 - [x] Docs: REQUIREMENTS.md + PROJECT_DETAILS.md (living docs, updated per prompt)
 
 ## In progress
-- [🔄] AtsCvBuilder: JD-tailored PDF CV (pdfkit import fix pending, then end-to-end test)
+- [ ] (none)
+
+## Recently completed (2026-08-25, latest session)
+- [x] AtsCvBuilder: JD-tailored ATS PDF CV — VERIFIED (valid 1-page PDF generated)
+- [x] FR-10 ProcessLearningService: reads job description for employer's stated
+      application process (email/ATS/portal-form) and follows it before any
+      other channel
+- [x] FR-11 Self-improvement engine scaffold: outcome recording + learning
+      stats (channel success, keyword replies, best send hour)
 
 ## Pending — engineering
 - [ ] finn.no adapter (scrape English-jobs filter) + account signup/apply flow

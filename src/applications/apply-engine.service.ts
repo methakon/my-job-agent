@@ -11,6 +11,7 @@ import { MailService } from './mail.service';
 import { HumanEmailComposer } from './human-email-composer.service';
 import { AtsCvBuilder } from './ats-cv-builder.service';
 import { ProfileOptimizer } from '../profile/profile-optimizer.service';
+import { ProcessLearningService, DetectedProcess } from './process-learning.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -36,6 +37,7 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly composer: HumanEmailComposer,
 		private readonly cvBuilder: AtsCvBuilder,
 		private readonly profileOptimizer: ProfileOptimizer,
+		public readonly processLearning: ProcessLearningService,
 	) {}
 
 	onModuleInit(): void {
@@ -112,12 +114,22 @@ export class ApplyEngineService implements OnModuleInit {
 			}
 			const stillUnanswered = questions.filter((q) => !(q in resolved));
 
-			// PRIORITY: apply directly via company ATS or HR email when available;
-			// portal easy-apply is only the last resort (user rule).
+			// PRIORITY: 1) follow the employer's OWN stated application process
+			// from the job description (user rule: read JD first). 2) direct ATS.
+			// 3) HR email. 4) portal easy-apply as last resort.
 			let result: ApplyResult;
-			const channel = await this.detector.detect(lead);
+			const stated = this.processLearning.detectProcess(lead.title, lead.description, lead.url);
+			const channel = stated ?? await this.detector.detect(lead);
+			if (stated) {
+				this.logger.log(`JD-stated process for "${lead.title}": ${stated.instruction}`);
+			}
 			if (channel && stillUnanswered.length === 0) {
-				result = await this.applyDirect(lead, profileData, channel, application);
+				const direct: DirectChannel = stated
+					? (stated.kind === 'email'
+						? { kind: 'email', target: stated.target ?? '', detectedBy: 'jd-email' }
+						: { kind: 'ats', target: stated.target ?? lead.url ?? '', detectedBy: `jd-${stated.kind}` })
+					: (channel as DirectChannel);
+				result = await this.applyDirect(lead, profileData, direct, application);
 			} else if (stillUnanswered.length > 0) {
 				result = { ok: false, status: 'needs_info', questions: stillUnanswered.map((q) => ({ question: q, answer: null })), missingInfo: stillUnanswered };
 			} else {
