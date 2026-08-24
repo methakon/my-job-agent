@@ -32,8 +32,7 @@ export class CandidateProfile {
 	type: 'varchar', length: 60, nullable: true, comment: 'immediate|15|30|60 days' })
 	noticePeriod!: string | null;
 
-	@Column({
-	type: 'varchar', length: 60, nullable: true, comment: 'expected salary with currency' })
+	@Column({ type: 'varchar', length: 255, nullable: true, comment: 'expected salary with currency' })
 	salaryExpectation!: string | null;
 
 	@Column({
