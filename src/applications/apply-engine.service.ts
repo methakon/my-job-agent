@@ -9,6 +9,8 @@ import { DirectChannelDetector, DirectChannel } from './direct-channel.detector'
 import { DirectApplyMailer } from './direct-apply.mailer';
 import { MailService } from './mail.service';
 import { HumanEmailComposer } from './human-email-composer.service';
+import { AtsCvBuilder } from './ats-cv-builder.service';
+import { ProfileOptimizer } from '../profile/profile-optimizer.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -32,6 +34,8 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly detector: DirectChannelDetector,
 		private readonly mailer: MailService,
 		private readonly composer: HumanEmailComposer,
+		private readonly cvBuilder: AtsCvBuilder,
+		private readonly profileOptimizer: ProfileOptimizer,
 	) {}
 
 	onModuleInit(): void {
@@ -148,11 +152,13 @@ export class ApplyEngineService implements OnModuleInit {
 		if (channel.kind === 'email') {
 			const skills = (profileData.skills ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 5);
 			const email = this.composer.compose(lead, profileData, skills);
+			// Rewrite CV per job description and attach as PDF
+			const cvPath = await this.buildCv(lead, profileData);
 			const sent = await this.mailer.send({
 				to: channel.target,
 				subject: email.subject,
 				html: email.bodyHtml,
-				cvPath: application.cvPath ?? undefined,
+				cvPath,
 			});
 			return sent.ok
 				? { ok: true, status: 'submitted' }
@@ -165,6 +171,29 @@ export class ApplyEngineService implements OnModuleInit {
 			status: 'needs_info',
 			missingInfo: [`direct ATS apply queued for ${channel.detectedBy}: ${channel.target} (browser automation pending)`],
 		};
+	}
+
+	/** Build the JD-tailored ATS PDF CV and record its path on the application. */
+	private async buildCv(lead: ScrapedLead, profileData: Record<string, string>): Promise<string | undefined> {
+		try {
+			const optimized = await this.profileOptimizer.optimize();
+			const allSkills = (profileData.skills ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+			const jd = `${lead.title} ${lead.description ?? ''}`.toLowerCase();
+			const matchedSkills = allSkills.filter((s) => jd.includes(s.toLowerCase()));
+			const cvPath = await this.cvBuilder.build({
+				profile: profileData,
+				workHistory: optimized.workHistory,
+				matchedSkills,
+				allSkills,
+				jobTitle: lead.title,
+				jobCompany: lead.company,
+				jobDescription: lead.description,
+			});
+			return cvPath;
+		} catch (err) {
+			this.logger.warn(`CV build failed, sending without attachment: ${String(err).slice(0, 150)}`);
+			return undefined;
+		}
 	}
 
 	/**

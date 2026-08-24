@@ -56,6 +56,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		DirectApplyMailer,
 		MailService,
 		HumanEmailComposer,
+		AtsCvBuilder,
 		ApplicationRepository,
 		ApplySettingRepository,
 		EmailTrackerService,

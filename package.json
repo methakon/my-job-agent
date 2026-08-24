@@ -22,6 +22,7 @@
     "mailparser": "^3.9.16",
     "mysql2": "^3.11.0",
     "nodemailer": "^9.0.5",
+    "pdfkit": "^0.20.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "typeorm": "^0.3.20"
@@ -32,6 +33,7 @@
     "@types/mailparser": "^3.4.6",
     "@types/node": "^22.4.0",
     "@types/nodemailer": "^8.0.1",
+    "@types/pdfkit": "^0.17.6",
     "typescript": "^5.5.4"
   }
 }
