@@ -3,6 +3,8 @@ import { Interval } from '@nestjs/schedule';
 import { ScrapedLead } from '../applications/portal-adapter.interface';
 import { RemotiveAdapter, RemoteOkAdapter } from './public-api.adapters';
 import { NorwayJobsAdapter } from './norway-jobs.adapter';
+import { NaukriAdapter } from './naukri.adapter';
+import { PortalCredentialService } from '../applications/portal-credential.service';
 import { LeadRepository } from '../leads/lead.repository';
 import { ProfileService } from '../profile/profile.service';
 
@@ -11,12 +13,27 @@ const TARGET_SKILLS = ['nestjs', 'node', 'typescript', 'astro', 'mysql', 'react'
 @Injectable()
 export class ScoutService {
 	private readonly logger = new Logger(ScoutService.name);
-	private readonly adapters = [new RemotiveAdapter(), new RemoteOkAdapter(), new NorwayJobsAdapter()];
+	private readonly adapters: Array<{ source: string; scrape(): Promise<ScrapedLead[]> }> = [
+		new RemotiveAdapter(),
+		new RemoteOkAdapter(),
+		new NorwayJobsAdapter(),
+	];
 
 	constructor(
 		private readonly leadRepo: LeadRepository,
 		private readonly profileService: ProfileService,
+		private readonly creds: PortalCredentialService,
 	) {}
+
+	/** Naukri needs DI-provided credential service, so it's created lazily. */
+	private naukriAdapter: NaukriAdapter | null = null;
+	private getNaukri(): NaukriAdapter {
+		if (!this.naukriAdapter) {
+			this.naukriAdapter = new NaukriAdapter(this.creds);
+			this.adapters.push(this.naukriAdapter);
+		}
+		return this.naukriAdapter;
+	}
 
 	/** Runs every SCOUT_INTERVAL_MINUTES (default 6h); also triggered manually. */
 	@Interval(Number(process.env.SCOUT_INTERVAL_MINUTES || 360) * 60 * 1000)
@@ -25,6 +42,7 @@ export class ScoutService {
 	}
 
 	async runOnce(): Promise<{ scraped: number; newLeads: number }> {
+		this.getNaukri(); // ensure naukri adapter registered
 		let scraped = 0;
 		let newLeads = 0;
 		for (const adapter of this.adapters) {
