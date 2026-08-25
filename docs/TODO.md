@@ -30,6 +30,18 @@
 ## In progress
 - [ ] (none)
 
+## Recently completed (2026-08-25 night session)
+- [x] Scorer fix: title veto (designer/QA/sales etc. never match), URL/HTML
+      boilerplate stripped, title-hit or 3+ skill rule — bad leads purged
+- [x] RetryBackoffService: failed applications auto-retried at 5→10→20→30min,
+      max 4 attempts; applications.retryCount column
+- [x] **SIDE-INCOME MODULE**: researched opportunities matched to user's
+      constraints (min involvement, zero-min investment, 11 Pound Road
+      Berhampore space): CSC VLE (92%), Amazon IHS (88%), Valmo/Meesho (85%),
+      Delhivery counter (75%), Amazon Easy (70%) — each with cost breakdown,
+      requirements, documents, apply steps, scam warnings; API + dark-theme
+      dashboard page at /side-income-dashboard/dashboard with status buttons
+
 ## Recently completed (2026-08-25 evening session)
 - [x] node-rsa import fix (exports {NodeRSA, default})
 - [x] Naukri adapter registered in ApplyEngine (was scout-only) — apply works
