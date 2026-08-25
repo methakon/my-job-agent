@@ -14,6 +14,7 @@ import { ProfileOptimizer } from '../profile/profile-optimizer.service';
 import { ProcessLearningService, DetectedProcess } from './process-learning.service';
 import { PortalCredentialService } from './portal-credential.service';
 import { NaukriAdapter } from '../scout/naukri.adapter';
+import { HrEmailInvestigator } from './hr-email-investigator.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -41,6 +42,7 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly profileOptimizer: ProfileOptimizer,
 		public readonly processLearning: ProcessLearningService,
 		private readonly portalCreds: PortalCredentialService,
+		private readonly investigator: HrEmailInvestigator,
 	) {}
 
 	onModuleInit(): void {
@@ -117,24 +119,33 @@ export class ApplyEngineService implements OnModuleInit {
 			}
 			const stillUnanswered = questions.filter((q) => !(q in resolved));
 
-			// PRIORITY: 1) follow the employer's OWN stated application process
-			// from the job description (user rule: read JD first). 2) direct ATS.
-			// 3) HR email. 4) portal easy-apply as last resort.
+			// PRIORITY: 1) employer's stated process from the JD. 2) ATS/HR email
+			// found in posting. 3) DEEP INVESTIGATION: job page → career pages →
+			// pattern-guess + MX verify (FR-13). 4) easy-apply last.
 			let result: ApplyResult;
 			const stated = this.processLearning.detectProcess(lead.title, lead.description, lead.url);
-			const channel = stated ?? await this.detector.detect(lead);
+			let channel: DirectChannel | null = stated
+				? (stated.kind === 'email'
+					? { kind: 'email', target: stated.target ?? '', detectedBy: 'jd-email' }
+					: { kind: 'ats', target: stated.target ?? lead.url ?? '', detectedBy: `jd-${stated.kind}` })
+				: await this.detector.detect(lead);
+			if (!channel || channel.kind !== 'email') {
+				const hr = await this.investigator.investigate(lead.company, lead.url, lead.description);
+				if (hr && hr.confidence !== 'low') {
+					this.logger.log(`investigator found HR contact for ${lead.company}: ${hr.email} (${hr.source})`);
+					channel = { kind: 'email', target: hr.email, detectedBy: hr.source };
+				}
+			}
 			if (stated) {
 				this.logger.log(`JD-stated process for "${lead.title}": ${stated.instruction}`);
 			}
 			if (channel && stillUnanswered.length === 0) {
-				const direct: DirectChannel = stated
-					? (stated.kind === 'email'
-						? { kind: 'email', target: stated.target ?? '', detectedBy: 'jd-email' }
-						: { kind: 'ats', target: stated.target ?? lead.url ?? '', detectedBy: `jd-${stated.kind}` })
-					: (channel as DirectChannel);
+				const direct: DirectChannel = channel;
 				result = await this.applyDirect(lead, profileData, direct, application);
 			} else if (stillUnanswered.length > 0) {
 				result = { ok: false, status: 'needs_info', questions: stillUnanswered.map((q) => ({ question: q, answer: null })), missingInfo: stillUnanswered };
+			} else if (channel && channel.kind === 'email' && channel.detectedBy.startsWith('pattern-guess')) {
+				result = { ok: false, status: 'needs_info', missingInfo: [`only low-confidence contact ${channel.target} — review in dashboard`] };
 			} else {
 				result = await adapter.apply(lead, profileData, resolved);
 			}

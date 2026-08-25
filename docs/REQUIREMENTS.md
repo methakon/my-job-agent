@@ -58,9 +58,21 @@ keywords get responses, best send hours, per-portal success. Future behaviour
 (cover-letter emphasis, channel choice, send timing) adapts from these stats.
 Scaffold live in ProcessLearningService; weights persistence next iteration.
 
+### FR-13 Deep HR-email investigation (added 2026-08-25, user rule)
+When a job description itself contains no HR email, the agent investigates
+before giving up, in escalating steps:
+1. Curl the actual job posting URL → scan page for emails.
+2. Find the company's website (from lead data / search) → curl careers/jobs
+   page → scan for HR/careers email.
+3. Try common career-page paths: /careers, /jobs, /about, /contact,
+   /careers/join-us etc.
+4. Pattern-guess role mailboxes on the company domain:
+   hr@, careers@, jobs@, talent@, recruiting@, hiring@<company-domain>.
+5. Verify deliverability before use (MX check at minimum).
+Every discovered address is cached in the DB with its source and confidence
+so future applications to the same company reuse it. Only high-confidence
+addresses are used; low confidence → flagged needs_info for user review.
 ### FR-12 Email inbox reading — OTP + replies (added 2026-08-25)
-The agent reads the candidate's Gmail (and later Outlook) via IMAP using the
-same encrypted app-passwords stored in DB:
 1. **OTP auto-read:** when a portal login/signup sends a verification code,
    the agent fetches it from the inbox automatically and completes the
    login (no manual OTP input needed).
