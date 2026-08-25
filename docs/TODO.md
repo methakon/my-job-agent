@@ -36,6 +36,13 @@
 - [x] **NAUKRI APPLY END-TO-END VERIFIED**: real application submitted
       (77% match SDE @ Bankbazaar, Remote); cloudgateway apply-workflow payload
       per NopeRi reference; applicationHistory() method added for tracking
+- [x] FR-13 Deep HR-email investigation: job page curl → domain resolve →
+      career pages → pattern-guess + MX verify; pattern-guesses usable per
+      user rule (posters often use official mailboxes)
+- [x] **AUTO-APPLY LOOP LIVE**: nightly 6h cron + POST /auto-apply/run;
+      applies leads ≥40% match, max 8/run, 90s human-like pacing,
+      kill-switch + completeness gates. FIRST RUN: multiple real Naukri
+      applications auto-submitted
 
 ## Earlier completed (2026-08-25 day session)
 - [x] AtsCvBuilder: JD-tailored ATS PDF CV — verified valid 1-page PDF

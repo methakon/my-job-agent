@@ -81,6 +81,13 @@ confidence level is logged on every application record.
 2. **Recruiter reply polling:** application-related replies feed the
    tracking table and the self-improvement loop.
 
+### FR-14 Nightly auto-apply loop (added 2026-08-25, user approved)
+Every 6 hours the agent automatically applies to all stored leads with
+match score ≥ 40% (AUTO_APPLY_MIN_MATCH), up to 8 per run
+(AUTO_APPLY_MAX_PER_RUN), with ~90s human-like pacing between submissions.
+Gates: global kill switch, profile completeness, per-source daily caps,
+single-run lock. Manual trigger: POST /auto-apply/run.
+
 ### FR-4 Per-job document tailoring (user rule)
 - Agent reads each job description and **rewrites the CV to suit it**, then
   renders an **ATS-friendly PDF** (single column, standard headings,

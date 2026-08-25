@@ -27,6 +27,8 @@ import { InboxController } from './applications/inbox.controller';
 import { PortalCredentialService } from './applications/portal-credential.service';
 import { PortalCredentialController } from './applications/portal-credential.controller';
 import { HrEmailInvestigator } from './applications/hr-email-investigator.service';
+import { AutoApplyLoopService } from './applications/auto-apply-loop.service';
+import { AutoApplyController } from './applications/auto-apply.controller';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
 import { ProfileService } from './profile/profile.service';
@@ -51,7 +53,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		}),
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount]),
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -71,6 +73,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		ApplySettingRepository,
 		PortalCredentialService,
 		HrEmailInvestigator,
+		AutoApplyLoopService,
 		EmailTrackerService,
 		InterviewPrepService,
 	],
