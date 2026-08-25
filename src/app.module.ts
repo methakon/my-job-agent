@@ -30,6 +30,7 @@ import { HrEmailInvestigator } from './applications/hr-email-investigator.servic
 import { AutoApplyLoopService } from './applications/auto-apply-loop.service';
 import { AutoApplyController } from './applications/auto-apply.controller';
 import { RetryBackoffService } from './applications/retry-backoff.service';
+import { SideIncomeModule } from './side-income/side-income.module';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
 import { ProfileService } from './profile/profile.service';
@@ -53,6 +54,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount]),
+		SideIncomeModule,
 	],
 	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController],
 	providers: [
