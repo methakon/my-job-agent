@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
-// node-rsa import quirk: package exports a callable with .default in some TS modes
-const NodeRSA: any = require('node-rsa');
+// node-rsa exports { NodeRSA, default } — handle both shapes
+const _nodeRsa = require('node-rsa');
+const NodeRSA: any = _nodeRsa.NodeRSA ?? _nodeRsa.default ?? _nodeRsa;
 
 /**
  * NkparamGenerator — generates Naukri's request-signature token.

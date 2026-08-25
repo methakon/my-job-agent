@@ -109,7 +109,7 @@ export class NaukriAdapter implements PortalAdapter {
 		return leads;
 	}
 
-	/** One-click easy apply on Naukri. */
+	/** One-click easy apply on Naukri (cloudgateway apply-workflow, verified format from NopeRi). */
 	async apply(
 		lead: ScrapedLead,
 		_profileData: Record<string, string>,
@@ -117,13 +117,50 @@ export class NaukriAdapter implements PortalAdapter {
 	): Promise<ApplyResult> {
 		const session = await this.ensureSession();
 		if (!session) return { ok: false, status: 'failed', errorDetail: 'naukri not authenticated' };
-		const res = await fetch(`${BASE}/jobapi/apply/${lead.externalId}`, {
+		const sid = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14) + '0000000';
+		const res = await fetch(`${BASE}/cloudgateway-workflow/workflow-services/apply-workflow/v1/apply`, {
 			method: 'POST',
-			headers: { ...this.searchHeaders(session), 'content-type': 'application/json' },
-			body: '{}',
+			headers: {
+				...this.searchHeaders(session),
+				appid: '121',
+				systemid: 'jobseeker',
+				clientid: 'd3skt0p',
+				'content-type': 'application/json',
+			},
+			body: JSON.stringify({
+				strJobsarr: [lead.externalId],
+				logstr: `--drecomm_apply-1-F-0-1--${sid}-`,
+				flowtype: 'show',
+				crossdomain: true,
+				jquery: 1,
+				rdxMsgId: '',
+				chatBotSDK: true,
+				mandatory_skills: [],
+				optional_skills: [],
+				applyTypeId: '107',
+				closebtn: 'y',
+				applySrc: 'drecomm_apply',
+				sid,
+				mid: '',
+			}),
 		});
 		if (res.ok) return { ok: true, status: 'submitted' };
 		const bodyText = await res.text().catch(() => '');
 		return { ok: false, status: 'failed', errorDetail: `naukri apply HTTP ${res.status}: ${bodyText.slice(0, 150)}` };
+	}
+
+	/** Application history from Naukri (tracking FR-8). */
+	async applicationHistory(): Promise<Array<Record<string, unknown>>> {
+		const session = await this.ensureSession();
+		if (!session) return [];
+		const res = await fetch(`${BASE}/cloudgateway-apply/whtma-services/v0/applyapi/v5/history`, {
+			headers: this.searchHeaders(session),
+		});
+		if (!res.ok) {
+			this.logger.warn(`naukri history HTTP ${res.status}`);
+			return [];
+		}
+		const data = (await res.json()) as { jobApplyDetails?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+		return Array.isArray(data) ? data : (data.jobApplyDetails ?? []);
 	}
 }

@@ -30,16 +30,18 @@
 ## In progress
 - [ ] (none)
 
-## Recently completed (2026-08-25, latest session)
-- [x] AtsCvBuilder: JD-tailored ATS PDF CV — VERIFIED (valid 1-page PDF generated)
-- [x] FR-10 ProcessLearningService: reads job description for employer's stated
-      application process (email/ATS/portal-form) and follows it before any
-      other channel
-- [x] FR-11 Self-improvement engine scaffold: outcome recording + learning
-      stats (channel success, keyword replies, best send hour)
-- [x] FR-12 Gmail SMTP live (app-password AES-256 in DB); test email sent OK
-- [x] InboxReaderService: IMAP OTP reading (auto portal verification codes)
-      + recruiter reply polling — verified against live inbox
+## Recently completed (2026-08-25 evening session)
+- [x] node-rsa import fix (exports {NodeRSA, default})
+- [x] Naukri adapter registered in ApplyEngine (was scout-only) — apply works
+- [x] **NAUKRI APPLY END-TO-END VERIFIED**: real application submitted
+      (77% match SDE @ Bankbazaar, Remote); cloudgateway apply-workflow payload
+      per NopeRi reference; applicationHistory() method added for tracking
+
+## Earlier completed (2026-08-25 day session)
+- [x] AtsCvBuilder: JD-tailored ATS PDF CV — verified valid 1-page PDF
+- [x] FR-10 ProcessLearningService: JD-stated application-process detection
+- [x] FR-11 Self-improvement engine scaffold (outcome recording + stats)
+- [x] FR-12 Gmail SMTP live; IMAP OTP auto-read + recruiter reply polling
 
 ## Pending — engineering
 - [ ] finn.no adapter (scrape English-jobs filter) + account signup/apply flow

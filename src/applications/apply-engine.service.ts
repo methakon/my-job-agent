@@ -12,6 +12,8 @@ import { HumanEmailComposer } from './human-email-composer.service';
 import { AtsCvBuilder } from './ats-cv-builder.service';
 import { ProfileOptimizer } from '../profile/profile-optimizer.service';
 import { ProcessLearningService, DetectedProcess } from './process-learning.service';
+import { PortalCredentialService } from './portal-credential.service';
+import { NaukriAdapter } from '../scout/naukri.adapter';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -38,10 +40,11 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly cvBuilder: AtsCvBuilder,
 		private readonly profileOptimizer: ProfileOptimizer,
 		public readonly processLearning: ProcessLearningService,
+		private readonly portalCreds: PortalCredentialService,
 	) {}
 
 	onModuleInit(): void {
-		for (const a of [new RemotiveAdapter(), new RemoteOkAdapter()]) {
+		for (const a of [new RemotiveAdapter(), new RemoteOkAdapter(), new NaukriAdapter(this.portalCreds)]) {
 			this.register(a);
 		}
 		void this.emailTracker.poll().catch(() => undefined);
