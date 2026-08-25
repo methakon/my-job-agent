@@ -30,6 +30,8 @@ import { HrEmailInvestigator } from './applications/hr-email-investigator.servic
 import { AutoApplyLoopService } from './applications/auto-apply-loop.service';
 import { AutoApplyController } from './applications/auto-apply.controller';
 import { RetryBackoffService } from './applications/retry-backoff.service';
+import { BrowserFormService } from './applications/browser-form.service';
+import { BrowserFormController } from './applications/browser-form.controller';
 import { SideIncomeModule } from './side-income/side-income.module';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
@@ -56,7 +58,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -78,6 +80,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		HrEmailInvestigator,
 		AutoApplyLoopService,
 		RetryBackoffService,
+		BrowserFormService,
 		EmailTrackerService,
 		InterviewPrepService,
 	],

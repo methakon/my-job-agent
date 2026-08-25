@@ -81,6 +81,17 @@ confidence level is logged on every application record.
 2. **Recruiter reply polling:** application-related replies feed the
    tracking table and the self-improvement loop.
 
+### FR-15 Browser automation for portal forms (added 2026-08-26)
+For portals without a usable HTTP API (Workday, Taleo, some Lever forms),
+the agent drives a real headless Chromium via Playwright:
+1. Load the application URL; detect form fields by label/placeholder/name.
+2. Fill from profile data + answer bank; unknown questions → needs_info.
+3. Upload the tailored ATS PDF CV when a file input exists.
+4. STOP BEFORE FINAL SUBMIT unless AUTO_SUBMIT_BROWSER=true — user reviews
+   in dashboard first (safety default). Screenshot saved at every step to
+   `generated/browser/` for audit.
+5. Kill-switch + per-source caps apply as everywhere else.
+
 ### FR-14 Nightly auto-apply loop (added 2026-08-25, user approved)
 Every 6 hours the agent automatically applies to all stored leads with
 match score ≥ 40% (AUTO_APPLY_MIN_MATCH), up to 8 per run
