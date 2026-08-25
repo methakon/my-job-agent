@@ -58,17 +58,51 @@ export class ScoutService {
 		return { scraped, newLeads };
 	}
 
+	/** Non-engineer role titles that must never match a dev profile. */
+	private static readonly VETO_RE = /\b(graphic|visual)\s+designer\b|\bux\/?ui\b|\bqa\b|\btester?\b|data\s+entry|recruiter|sales|marketing|account(ant|manager)|content\s+writer|support\s+engineer|devops\s+intern|technical\s+writer|administrat/i;
+
+	/**
+	 * Score a lead against the profile (title-aware, boilerplate-stripped).
+	 * - Title veto: non-dev roles score 0 and are not stored.
+	 * - Title matches count double; boilerplate URLs/links stripped first.
+	 */
+	private scoreLead(title: string, description: string | null | undefined, skills: string[], allSkills: string[]): { score: number; matched: string[] } {
+		const titleLower = title.toLowerCase();
+		if (ScoutService.VETO_RE.test(titleLower)) return { score: 0, matched: [] };
+
+		// strip URLs & HTML so boilerplate links can't contribute matches
+		const cleanDesc = (description ?? '')
+			.replace(/<a[^>]*>[\s\S]*?<\/a>/gi, ' ')
+			.replace(/https?:\/\/\S+/g, ' ')
+			.replace(/<[^>]+>/g, ' ');
+		const descWords = cleanDesc.toLowerCase();
+
+		const matched: string[] = [];
+		let score = 0;
+		for (const skill of skills) {
+			const inTitle = titleLower.includes(skill);
+			const inDesc = descWords.includes(skill);
+			if (!inTitle && !inDesc) continue;
+			matched.push(skill);
+			score += inTitle ? 2 : 1;
+		}
+		// require at least one skill hit IN THE TITLE or 3 distinct skills overall
+		const titleHits = matched.filter((s) => titleLower.includes(s)).length;
+		if (matched.length === 0 || (titleHits === 0 && matched.length < 3)) {
+			return { score: 0, matched: [] };
+		}
+		return { score: Math.min(100, Math.round((score / Math.max(allSkills.length, 5)) * 130)), matched };
+	}
+
 	private async storeAndScore(leads: ScrapedLead[]): Promise<number> {
 		const skills = ((await this.profileService.getResponse())?.skills ?? TARGET_SKILLS).map((s) => s.toLowerCase());
 		const haystackSkills = [...new Set([...skills, ...TARGET_SKILLS])];
 		let added = 0;
 		for (const lead of leads) {
 			if (await this.leadRepo.findByExternal(lead.source, lead.externalId)) continue;
-			const text = `${lead.title} ${lead.description ?? ''}`.toLowerCase();
-			const matched = haystackSkills.filter((s) => text.includes(s));
-			if (matched.length === 0) continue; // not relevant at all — skip storage
-			const matchScore = Math.min(100, Math.round((matched.length / Math.max(skills.length, 3)) * 100));
-			await this.leadRepo.upsert({ ...lead, matchScore, matchedSkills: matched, status: 'new', scrapedAt: new Date() });
+			const { score, matched } = this.scoreLead(lead.title, lead.description, haystackSkills, skills);
+			if (score === 0) continue; // irrelevant / vetoed — skip storage
+			await this.leadRepo.upsert({ ...lead, matchScore: score, matchedSkills: matched, status: 'new', scrapedAt: new Date() });
 			added++;
 		}
 		return added;

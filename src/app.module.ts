@@ -29,6 +29,7 @@ import { PortalCredentialController } from './applications/portal-credential.con
 import { HrEmailInvestigator } from './applications/hr-email-investigator.service';
 import { AutoApplyLoopService } from './applications/auto-apply-loop.service';
 import { AutoApplyController } from './applications/auto-apply.controller';
+import { RetryBackoffService } from './applications/retry-backoff.service';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
 import { ProfileService } from './profile/profile.service';
@@ -74,6 +75,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		PortalCredentialService,
 		HrEmailInvestigator,
 		AutoApplyLoopService,
+		RetryBackoffService,
 		EmailTrackerService,
 		InterviewPrepService,
 	],

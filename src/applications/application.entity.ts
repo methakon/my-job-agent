@@ -37,6 +37,10 @@ export class Application {
 	@Column({ type: 'text', nullable: true })
 	errorDetail!: string | null;
 
+	/** How many backoff retries have been made (0 = never retried). */
+	@Column({ type: 'int', default: 0 })
+	retryCount!: number;
+
 	@CreateDateColumn({ name: 'created_at' })
 	createdAt!: Date;
 
