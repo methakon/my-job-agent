@@ -131,9 +131,11 @@ export class ApplyEngineService implements OnModuleInit {
 				: await this.detector.detect(lead);
 			if (!channel || channel.kind !== 'email') {
 				const hr = await this.investigator.investigate(lead.company, lead.url, lead.description);
-				if (hr && hr.confidence !== 'low') {
-					this.logger.log(`investigator found HR contact for ${lead.company}: ${hr.email} (${hr.source})`);
-					channel = { kind: 'email', target: hr.email, detectedBy: hr.source };
+				if (hr) {
+					// user rule: pattern-guess addresses are acceptable — job posters
+					// often use their official mailboxes; log confidence but send.
+					this.logger.log(`investigator found HR contact for ${lead.company}: ${hr.email} (${hr.source}, ${hr.confidence})`);
+					channel = { kind: 'email', target: hr.email, detectedBy: `${hr.source}:${hr.confidence}` };
 				}
 			}
 			if (stated) {
@@ -144,8 +146,6 @@ export class ApplyEngineService implements OnModuleInit {
 				result = await this.applyDirect(lead, profileData, direct, application);
 			} else if (stillUnanswered.length > 0) {
 				result = { ok: false, status: 'needs_info', questions: stillUnanswered.map((q) => ({ question: q, answer: null })), missingInfo: stillUnanswered };
-			} else if (channel && channel.kind === 'email' && channel.detectedBy.startsWith('pattern-guess')) {
-				result = { ok: false, status: 'needs_info', missingInfo: [`only low-confidence contact ${channel.target} — review in dashboard`] };
 			} else {
 				result = await adapter.apply(lead, profileData, resolved);
 			}

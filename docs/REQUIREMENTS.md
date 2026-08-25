@@ -70,8 +70,10 @@ before giving up, in escalating steps:
    hr@, careers@, jobs@, talent@, recruiting@, hiring@<company-domain>.
 5. Verify deliverability before use (MX check at minimum).
 Every discovered address is cached in the DB with its source and confidence
-so future applications to the same company reuse it. Only high-confidence
-addresses are used; low confidence → flagged needs_info for user review.
+so future applications to the same company reuse it. Pattern-guess addresses
+(hr@, careers@ etc.) ARE used for sending (user rule 2026-08-25: job posters
+often use their official mailboxes); MX verification still required and the
+confidence level is logged on every application record.
 ### FR-12 Email inbox reading — OTP + replies (added 2026-08-25)
 1. **OTP auto-read:** when a portal login/signup sends a verification code,
    the agent fetches it from the inbox automatically and completes the
