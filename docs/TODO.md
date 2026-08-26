@@ -66,23 +66,17 @@
 - [x] FR-12 Gmail SMTP live; IMAP OTP auto-read + recruiter reply polling
 
 ## Pending — engineering
-- [ ] finn.no adapter (scrape English-jobs filter) + account signup/apply flow
+- [ ] finn.no adapter (scrape English-jobs filter + OTP login flow with bapay.9@gmail.com)
 - [ ] A1 Group careers adapter (jobs.a1.com)
-- [ ] Naukri adapter (scraping-based; login credentials needed)
-- [ ] Monster India adapter (same approach as Naukri)
 - [ ] LinkedIn easy-apply adapter (session cookie; toggle OFF by default)
-- [ ] Browser automation service for ATS form filling (Playwright)
-- [ ] Dashboard: mail-account management panel + interview-practice page
 - [ ] Daily digest of new high-match leads (email to self)
 - [ ] Production hardening: synchronize:false + migrations, helmet, rate limit
 
 ## Blocked on user
 - [🚫] Outlook app-password → backup sender (optional; Gmail primary live)
-- [🚫] Naukri/Monster: existing credentials or fresh signup approval?
 - [🚫] LinkedIn li_at session cookie (if easy-apply wanted)
 - [🚫] GitHub/portfolio URL → profile completeness 100%
 - [🚫] HK-dir statement PDF path (attach to Norway applications)
-- [🚫] finn.no login method: email+password or BankID? (account exists, bapay.9@gmail.com)
 
 ## Verification checklist (per release)
 - [ ] tsc clean + nest build passes

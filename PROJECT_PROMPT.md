@@ -63,8 +63,7 @@ push `origin/dev` — never skip even on interrupt.
 ## TODO next session (in order)
 1. **Activate LinkedIn snapshot** (user action): save profile HTML into
    data/linkedin/profile.html → POST /linkedin/refresh. Then CV tuning is live.
-2. **finn.no adapter**: login flow (account exists, bapay.9@gmail.com;
-   confirm password vs BankID with user) + scrape English jobs + apply.
+2. **finn.no adapter**: login flow (email: bapay.9@gmail.com → OTP email sent with subject containing "innloggingskoden til FINN.no" → read via `InboxReaderService.readOtp('finn')` → submit OTP) + scrape English/IT jobs + apply.
 3. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
 4. Outlook app-password (optional backup sender) — pending from user.
 5. GitHub/portfolio URL for profile → completeness 100% — pending from user.
