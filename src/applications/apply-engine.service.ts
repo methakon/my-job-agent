@@ -15,6 +15,7 @@ import { ProcessLearningService, DetectedProcess } from './process-learning.serv
 import { PortalCredentialService } from './portal-credential.service';
 import { NaukriAdapter } from '../scout/naukri.adapter';
 import { HrEmailInvestigator } from './hr-email-investigator.service';
+import { BrowserFormService } from './browser-form.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -43,6 +44,7 @@ export class ApplyEngineService implements OnModuleInit {
 		public readonly processLearning: ProcessLearningService,
 		private readonly portalCreds: PortalCredentialService,
 		private readonly investigator: HrEmailInvestigator,
+		private readonly browserForm: BrowserFormService,
 	) {}
 
 	onModuleInit(): void {
@@ -190,13 +192,38 @@ export class ApplyEngineService implements OnModuleInit {
 				? { ok: true, status: 'submitted' }
 				: { ok: false, status: 'failed', errorDetail: `direct-email failed: ${sent.error}` };
 		}
-		// ATS: hand off to browser automation session for that portal's form.
-		// Filled from profileData + answer bank by the AtsApplyService (per-ATS adapter).
+		// ATS: drive the portal form with headless Chrome (FR-15). Filled from
+		// profile data; stops before final submit unless AUTO_SUBMIT_BROWSER=true.
+		const cvPath = await this.buildCv(lead, profileData);
+		const values = this.profileToFormValues(profileData);
+		const browser = await this.browserForm.fillAndSubmit({
+			url: channel.target || lead.url || '',
+			values,
+			cvPath,
+			autoSubmit: process.env.AUTO_SUBMIT_BROWSER === 'true',
+		});
 		return {
-			ok: false,
-			status: 'needs_info',
-			missingInfo: [`direct ATS apply queued for ${channel.detectedBy}: ${channel.target} (browser automation pending)`],
+			ok: browser.ok,
+			status: browser.status === 'filled' ? 'needs_info' : browser.status,
+			missingInfo: browser.unansweredQuestions.length ? browser.unansweredQuestions : undefined,
+			errorDetail: browser.errorDetail ?? `browser fill: ${browser.filledFields.length} fields, ${browser.screenshots.length} screenshots`,
 		};
+	}
+
+	/** Map profile record to generic ATS form field values. */
+	private profileToFormValues(p: Record<string, string>): Record<string, string> {
+		const out: Record<string, string> = {};
+		for (const [k, v] of Object.entries(p)) out[k] = v;
+		// common alias keys portals use
+		out['fullname'] = out['name'] ?? out['fullName'] ?? '';
+		out['email'] = out['email'] ?? '';
+		out['phone'] = out['phone'] ?? out['mobile'] ?? '';
+		out['location'] = out['location'] ?? out['city'] ?? '';
+		out['linkedin'] = out['linkedin'] ?? out['linkedinUrl'] ?? '';
+		out['currentctc'] = out['currentCtc'] ?? '';
+		out['expectedctc'] = out['expectedCtc'] ?? '';
+		out['noticeperiod'] = out['noticePeriod'] ?? '';
+		return out;
 	}
 
 	/** Build the JD-tailored ATS PDF CV and record its path on the application. */
