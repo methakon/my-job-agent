@@ -40,4 +40,12 @@ export class ApplicationRepository {
 			.where('a.source = :source AND a.createdAt >= :since', { source, since })
 			.getCount();
 	}
+
+	/** FR-18: total non-failed applications per portal (portal cap check). */
+	countBySource(source: string): Promise<number> {
+		return this.repo
+			.createQueryBuilder('a')
+			.where('a.source = :source AND a.status != :failed', { source, failed: 'failed' })
+			.getCount();
+	}
 }

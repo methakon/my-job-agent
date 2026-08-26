@@ -1,7 +1,18 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-08-25
+> Last updated: 2026-08-27
+
+## Recently completed (2026-08-27 session — astro + pre-apply phase)
+- [x] finn.no adapter committed (SSR job scrape + Vend OTP login flow)
+- [x] FR-16 Astro module: MuhurtaService (panchanga via astronomy-engine, dynamic Lahiri aligned with MyLife shared ephemeris), shubh-window API — multiple windows/day, rahu kala/yamaganda/amavasya/ganda-mula vetoes verified
+- [x] FR-16 Job astro-match scoring (lead astro score + reasons)
+- [x] FR-17 Pre-apply queue entity/service (prepare → review → approve/hold/upload-cv → muhurta send)
+- [x] FR-17 MuhurtaSendService: sweep approved items at shubh windows — E2E verified (prepare→approve→sweep→sent, sandboxed)
+- [x] FR-18 Per-portal cap 27 (apply_settings.maxPerPortal) + hourly scout (SCOUT_INTERVAL_MINUTES=60)
+- [x] Pre-apply dashboard page `/pre-apply-page` (review CV + email + channel + astro plan; hold/pause/upload/approve)
+- [x] Auto-apply loop switched to prepare-only mode
+- [x] Astro scoring tables documented in REQUIREMENTS.md FR-16 (tithi/nakshatra/weekday lists, segments) — user may tune via env
 
 ## Completed
 - [x] Repo scaffold: NestJS + TypeORM + MySQL, MVCR, shared config (MyLife standards)

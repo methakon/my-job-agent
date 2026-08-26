@@ -50,8 +50,8 @@ export class ScoutService {
 		return this.finnAdapter;
 	}
 
-	/** Runs every SCOUT_INTERVAL_MINUTES (default 6h); also triggered manually. */
-	@Interval(Number(process.env.SCOUT_INTERVAL_MINUTES || 360) * 60 * 1000)
+	/** Runs every SCOUT_INTERVAL_MINUTES (default 60 — FR-18 hourly fetch). */
+	@Interval(Number(process.env.SCOUT_INTERVAL_MINUTES || 60) * 60 * 1000)
 	async runScheduled(): Promise<void> {
 		await this.runOnce();
 	}

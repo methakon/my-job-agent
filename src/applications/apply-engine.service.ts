@@ -307,6 +307,205 @@ export class ApplyEngineService implements OnModuleInit {
 	}
 
 	/**
+	 * FR-16/FR-17 — PREPARE mode. Runs the entire apply pipeline (dedupe,
+	 * channel detection, email composition, JD-tailored CV build) but NEVER
+	 * sends anything. Returns everything the user must review before the
+	 * application is approved; the pre-apply queue persists it.
+	 */
+	async prepareApplication(
+		leadId: string,
+	): Promise<{
+		ok: boolean;
+		status: string;
+		errorDetail?: string;
+		lead?: ScrapedLead;
+		channel?: DirectChannel | null;
+		coverLetter?: string;
+		email?: { subject: string; bodyHtml: string };
+		cvPath?: string | null;
+	}> {
+		const lead = await this.leadRepo.findRecent(500).then((all) => all.find((l) => l.id === leadId));
+		if (!lead) return { ok: false, status: 'failed', errorDetail: 'lead not found' };
+
+		const adapter = this.adapters.get(lead.source);
+		if (!adapter) return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };
+
+		const setting = await this.settingsRepo.findBySource(lead.source);
+		// FR-18: per-portal total cap (27) — count all non-failed applications.
+		if (setting) {
+			const totalCount = await this.appRepo.countBySource(lead.source);
+			if (totalCount >= setting.maxPerPortal) {
+				return { ok: false, status: 'needs_info', errorDetail: `portal cap reached for ${lead.source} (${totalCount}/${setting.maxPerPortal})` };
+			}
+		}
+
+		const profileData = await this.profileService.flatten();
+		const profileResp = await this.profileService.getResponse();
+		if (profileResp && profileResp.missingFields.length > 0) {
+			return { ok: false, status: 'needs_info', errorDetail: `profile incomplete: ${profileResp.missingFields.join(', ')}` };
+		}
+
+		try {
+			const questions = await (adapter as unknown as { probeQuestions?(lead: ScrapedLead): Promise<string[]> }).probeQuestions?.(lead) ?? [];
+			const resolved = await this.answers.resolve(questions);
+			const unanswered = questions.filter((q) => !(q in resolved));
+			if (unanswered.length > 0) {
+				await this.answers.seedFromProfile(profileData);
+				const reResolved = await this.answers.resolve(unanswered);
+				for (const q of unanswered.filter((q) => q in reResolved)) resolved[q] = reResolved[q];
+			}
+			const stillUnanswered = questions.filter((q) => !(q in resolved));
+			if (stillUnanswered.length > 0) {
+				return { ok: false, status: 'needs_info', errorDetail: `unanswered questions: ${stillUnanswered.join(', ')}` };
+			}
+
+			// channel detection — identical priority to applyToLead
+			const stated = this.processLearning.detectProcess(lead.title, lead.description, lead.url);
+			let channel: DirectChannel | null = stated
+				? (stated.kind === 'email'
+					? { kind: 'email', target: stated.target ?? '', detectedBy: 'jd-email' }
+					: { kind: 'ats', target: stated.target ?? lead.url ?? '', detectedBy: `jd-${stated.kind}` })
+				: await this.detector.detect(lead);
+			if (!channel || channel.kind !== 'email') {
+				const hr = await this.investigator.investigate(lead.company, lead.url, lead.description);
+				if (hr) channel = { kind: 'email', target: hr.email, detectedBy: `${hr.source}:${hr.confidence}` };
+			}
+
+			const coverLetter = this.generateCoverLetter(profileData, lead);
+			const cvPath = await this.buildCv(lead, profileData).catch(() => undefined);
+			const email = channel?.kind === 'email'
+				? this.composer.compose(lead, profileData, (profileData.skills ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 5))
+				: undefined;
+
+			return {
+				ok: true,
+				status: 'prepared',
+				lead,
+				channel,
+				coverLetter,
+				email,
+				cvPath,
+			};
+		} catch (err) {
+			return { ok: false, status: 'failed', errorDetail: String(err).slice(0, 1000) };
+		}
+	}
+
+	/**
+	 * FR-16/FR-17 — SEND a previously-prepared item (user approved it in the
+	 * pre-apply queue). Uses the stored channel, composed email and CV path;
+	 * a manually uploaded userCvPath (user rule) overrides the tailored CV.
+	 * Re-checks dedupe, kill switch, daily cap and FR-18 portal cap.
+	 */
+	async submitPrepared(item: {
+		id: string;
+		leadId: string;
+		source: string;
+		channelJson: string | null;
+		coverLetter: string | null;
+		emailSubject: string | null;
+		emailBody: string | null;
+		cvPath: string | null;
+		userCvPath: string | null;
+	}): Promise<ApplyResult & { applicationId?: string }> {
+		const lead = await this.leadRepo.findRecent(500).then((all) => all.find((l) => l.id === item.leadId));
+		if (!lead) return { ok: false, status: 'failed', errorDetail: 'lead not found' };
+
+		const existingByLead = await this.appRepo.findByLead(lead.id);
+		if (existingByLead && existingByLead.status !== 'failed') {
+			return { ok: false, status: 'needs_info', missingInfo: [`already applied (${existingByLead.status})`], applicationId: existingByLead.id };
+		}
+		const setting = await this.settingsRepo.findBySource(item.source);
+		if (this.killSwitchOn()) return { ok: false, status: 'failed', errorDetail: 'kill switch active' };
+		if (setting && !setting.autoApplyEnabled) return { ok: false, status: 'needs_info', missingInfo: [`auto-apply disabled for ${item.source}`] };
+		if (setting) {
+			const dailyCount = await this.appRepo.countTodayBySource(item.source);
+			if (dailyCount >= setting.maxPerDay) return { ok: false, status: 'needs_info', missingInfo: [`daily cap reached (${dailyCount}/${setting.maxPerDay})`] };
+			const totalCount = await this.appRepo.countBySource(item.source);
+			if (totalCount >= setting.maxPerPortal) return { ok: false, status: 'needs_info', missingInfo: [`portal cap reached (${totalCount}/${setting.maxPerPortal})`] };
+		}
+
+		const profileData = await this.profileService.flatten();
+		const channel: DirectChannel | null = item.channelJson ? JSON.parse(item.channelJson) : null;
+		const cvPath = item.userCvPath ?? item.cvPath;
+
+		const application = await this.appRepo.createPartial({
+			leadId: lead.id,
+			source: item.source,
+			status: 'submitting',
+			coverLetter: item.coverLetter ?? this.generateCoverLetter(profileData, lead),
+			isSandbox: this.sandboxOn(),
+		});
+		try {
+			let result: ApplyResult;
+			if (this.sandboxOn()) {
+				result = { ok: true, status: 'sandboxed', errorDetail: `SANDBOX: would send ${channel?.kind ?? 'portal'}${channel?.target ? ` -> ${channel.target}` : ''} with CV ${cvPath ?? '(none)'}` };
+			} else if (channel?.kind === 'email') {
+				const sent = await this.mailer.send({
+					to: channel.target,
+					subject: item.emailSubject ?? `${lead.title} — Swarna Sekhar Dhar`,
+					html: item.emailBody ?? (item.coverLetter ?? '').replace(/\n/g, '<br>'),
+					cvPath: cvPath ?? undefined,
+				});
+				result = sent.ok ? { ok: true, status: 'submitted' } : { ok: false, status: 'failed', errorDetail: `direct-email failed: ${sent.error}` };
+			} else if (channel?.kind === 'ats') {
+				const values = this.profileToFormValues(profileData);
+				const browser = await this.browserForm.fillAndSubmit({
+					url: channel.target || lead.url || '',
+					values,
+					cvPath: cvPath ?? undefined,
+					autoSubmit: process.env.AUTO_SUBMIT_BROWSER === 'true',
+				});
+				result = {
+					ok: browser.ok,
+					status: browser.status === 'filled' ? 'needs_info' : browser.status,
+					missingInfo: browser.unansweredQuestions.length ? browser.unansweredQuestions : undefined,
+					errorDetail: browser.errorDetail ?? `browser fill: ${browser.filledFields.length} fields`,
+				};
+			} else {
+				result = await this.adapterApplyFallback(lead, profileData, application.id);
+			}
+
+			application.status = result.status;
+			application.questionsJson = JSON.stringify(result.questions ?? []);
+			application.missingInfoJson = result.missingInfo ? JSON.stringify(result.missingInfo) : null;
+			application.errorDetail = result.errorDetail ?? null;
+			application.cvPath = cvPath;
+			await this.appRepo.save(application);
+			if (result.status === 'submitted') {
+				await this.leadRepo.setStatus(lead.id, 'applied');
+				try {
+					await this.learning.recordAttempt(channel?.kind ?? item.source, item.source, new Date().getHours());
+				} catch (e) {
+					this.logger.warn(`learning record failed: ${String(e).slice(0, 80)}`);
+				}
+			}
+			return { ...result, applicationId: application.id };
+		} catch (err) {
+			application.status = 'failed';
+			application.errorDetail = String(err).slice(0, 1000);
+			await this.appRepo.save(application);
+			return { ok: false, status: 'failed', errorDetail: String(err), applicationId: application.id };
+		}
+	}
+
+	/** Portal-easy-apply fallback used when no direct channel exists. */
+	private async adapterApplyFallback(
+		lead: ScrapedLead,
+		profileData: Record<string, string>,
+		applicationId: string,
+	): Promise<ApplyResult> {
+		try {
+			const adapter = this.adapters.get(lead.source);
+			if (!adapter) return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };
+			const result = await adapter.apply(lead, profileData, {});
+			return result;
+		} catch (err) {
+			return { ok: false, status: 'failed', errorDetail: `portal apply failed: ${String(err).slice(0, 300)}` };
+		}
+	}
+
+	/**
 	 * Tailored cover letter — customized per job: only the candidate's skills
 	 * that actually appear in THIS job description are highlighted, so the
 	 * letter reads focused and senior (user rule: trim skills to match JD).

@@ -59,6 +59,12 @@
 		<div id="apps">loading…</div>
 	</section>
 
+	<section class="card" style="border-color:rgba(180,140,255,.45)">
+		<h2>🕉️ Pre-Apply Queue <span class="meta">review before anything is sent · astro muhurta-gated</span> <a style="color:var(--accent);font-size:12px" href="/pre-apply-page">open review page →</a></h2>
+		<div id="preapply">loading…</div>
+		<div class="meta" id="muhurta" style="margin-top:8px">shubh muhurta: …</div>
+	</section>
+
 	<section class="card">
 		<h2>Portal Settings <span class="meta">kill switch in .env</span></h2>
 		<div id="settings">loading…</div>
@@ -229,7 +235,23 @@ async function loadInterviewPrep() {
 	).join('') || '<span class="meta">no interview questions</span>';
 }
 
-loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox(); loadMailAccounts(); loadInterviewPrep();
+async function loadPreApply() {
+	try {
+		const [items, win] = await Promise.all([api('/pre-apply/pending'), api('/astro/muhurta/latest')]);
+		document.getElementById('preapply').innerHTML = (items || []).slice(0, 8).map(i => {
+			const astro = i.astroJson ? JSON.parse(i.astroJson) : null;
+			const cls = i.status === 'approved' ? 'ok' : i.status === 'hold' ? 'warn' : '';
+			return `<div class="app"><div><b>${esc(i.source)}</b> · ${Math.round(i.astroScore)}/100 astro <span class="badge ${cls}">${esc(i.status)}</span></div>
+				<span class="meta">${astro?.muhurta?.label ?? ''}</span></div>`;
+		}).join('') || '<span class="meta">queue empty — approved items send at shubh muhurta</span>';
+		const w = (win || [])[0];
+		document.getElementById('muhurta').innerHTML = w
+			? `next shubh muhurta: ${new Date(w.startsAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} → ${new Date(w.endsAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} IST · ${esc(w.weekday)} tithi ${w.tithi} ${esc(w.nakshatra)}`
+			: 'no shubh window computed yet — run a scout/prepare to compute';
+	} catch { /* astro APIs unavailable — dashboard still works */ }
+}
+
+loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox(); loadMailAccounts(); loadInterviewPrep(); loadPreApply();
 </script>
 </body>
 </html>

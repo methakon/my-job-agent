@@ -21,6 +21,14 @@ import { ProcessLearningService } from './applications/process-learning.service'
 import { ProfileOptimizer } from './profile/profile-optimizer.service';
 import { InterviewQuestion } from './interview/interview-question.entity';
 import { InterviewPrepService } from './interview/interview-prep.service';
+import { AstroMuhurtaService } from './astro/astro-muhurta.service';
+import { AstroLeadScoringService } from './astro/astro-lead-scoring.service';
+import { PreApplyItem } from './astro/pre-apply-item.entity';
+import { PreApplyItemRepository } from './astro/pre-apply-item.repository';
+import { PreApplyService } from './astro/pre-apply.service';
+import { MuhurtaSendService } from './astro/muhurta-send.service';
+import { AstroController } from './astro/astro.controller';
+import { MuhurtaWindow } from './astro/muhurta-window.entity';
 import { InterviewPrepController } from './interview/interview-prep.controller';
 import { InterviewPracticePageController } from './interview/interview-practice-page.controller';
 import { MailController } from './applications/mail.controller';
@@ -36,6 +44,7 @@ import { BrowserFormService } from './applications/browser-form.service';
 import { BrowserFormController } from './applications/browser-form.controller';
 import { LearningController } from './applications/learning.controller';
 import { ApplicationsPageController } from './applications/applications-page.controller';
+import { PreApplyPageController } from './applications/pre-apply-page.controller';
 import { LinkedInController } from './applications/linkedin.controller';
 import { SandboxController } from './applications/sandbox.controller';
 import { LearningWeightsService } from './applications/learning-weights.service';
@@ -64,10 +73,10 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, AstroController, PreApplyPageController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -95,6 +104,11 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		LinkedInProfileService,
 		EmailTrackerService,
 		InterviewPrepService,
+		AstroMuhurtaService,
+		AstroLeadScoringService,
+		PreApplyItemRepository,
+		PreApplyService,
+		MuhurtaSendService,
 	],
 })
 export class AppModule {}

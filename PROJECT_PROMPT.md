@@ -55,18 +55,36 @@ push `origin/dev` — never skip even on interrupt.
 - Interview practice bank & page live at `/interview-practice-page` + Dashboard card
 - Mail accounts management panel live in dashboard (`/mail/accounts` endpoint integration)
 - Dashboard at `/`, Swagger at `/docs`, launcher `./start-agent.sh`
+- **Astro muhurta engine LIVE** (`/astro/muhurta?hours=N`): Vedic panchanga
+  (astronomy-engine, Lahiri ayanamsa dynamic, aligned with MyLife shared
+  ephemeris) — tithi/nakshatra/weekday/moon-house scoring, base 45, threshold
+  65, hard vetoes (rahu kala, yamaganda, amavasya, ganda-mula). Multiple shubh
+  windows per day; batch-send all approved applications inside windows.
+- **Pre-apply review queue LIVE** (`/pre-apply-page`): nothing sends without
+  user approval. Pipeline: hourly scout → prepare-only loop builds tailored
+  CV + cover letter + email draft → user reviews (approve/hold/pause/upload
+  corrected CV) → MuhurtaSendService sweep (10 min) sends ALL approved items
+  together inside a shubh window. Verified E2E (prepare→approve→sweep→sent,
+  sandboxed).
+- **Portal cap 27** (`apply_settings.maxPerPortal`) + **hourly fetch**
+  (`SCOUT_INTERVAL_MINUTES=60`) enforced.
+- Job astro-match scoring (`/astro/score`): lead↔chart match (Rahu MD
+  foreign/tech, Mercury dev/comm, Saturn+Mars backend/senior) with reasons.
 
 ## Credentials stored (encrypted AES-256 in mail_accounts table)
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
 ## TODO next session (in order)
-1. **Activate LinkedIn snapshot** (user action): save profile HTML into
+1. **Verify astro scoring tables with user** — tithi/nakshatra/weekday lists
+   + rahu/yamaganda/gulika segments are documented in REQUIREMENTS.md FR-16
+   and service header; user may tune (env: SHUBH_MIN_SCORE, MUHURTA_SWEEP_MINUTES).
+2. **Activate LinkedIn snapshot** (user action): save profile HTML into
    data/linkedin/profile.html → POST /linkedin/refresh. Then CV tuning is live.
-2. **finn.no adapter**: login flow (email: bapay.9@gmail.com → OTP email sent with subject containing "innloggingskoden til FINN.no" → read via `InboxReaderService.readOtp('finn')` → submit OTP) + scrape English/IT jobs + apply.
-3. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
-4. Outlook app-password (optional backup sender) — pending from user.
-5. GitHub/portfolio URL for profile → completeness 100% — pending from user.
+3. **finn.no adapter**: login flow (email: bapay.9@gmail.com → OTP email sent with subject containing "innloggingskoden til FINN.no" → read via `InboxReaderService.readOtp('finn')` → submit OTP) + scrape English/IT jobs + apply. Captcha verdict: NO bypass — legitimate path = one-time manual session-cookie capture (user hasn't chosen).
+4. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
+5. Outlook app-password (optional backup sender) — pending from user.
+6. GitHub/portfolio URL for profile → completeness 100% — pending from user.
 
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`

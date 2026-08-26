@@ -12,6 +12,9 @@ export class UpdateSettingDto {
 	maxPerDay?: number;
 
 	@IsOptional() @IsInt() @Min(1)
+	maxPerPortal?: number;
+
+	@IsOptional() @IsInt() @Min(1)
 	minutesBetweenApplies?: number;
 }
 
@@ -35,6 +38,7 @@ export class SettingsController {
 		if (!setting) return { ok: false, error: 'unknown source' };
 		if (dto.autoApplyEnabled !== undefined) setting.autoApplyEnabled = dto.autoApplyEnabled;
 		if (dto.maxPerDay !== undefined) setting.maxPerDay = dto.maxPerDay;
+		if (dto.maxPerPortal !== undefined) setting.maxPerPortal = dto.maxPerPortal;
 		if (dto.minutesBetweenApplies !== undefined) setting.minutesBetweenApplies = dto.minutesBetweenApplies;
 		return this.settingsRepo.save(setting);
 	}

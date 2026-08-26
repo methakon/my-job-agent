@@ -1,17 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { ApplyEngineService } from './apply-engine.service';
 import { LeadRepository } from '../leads/lead.repository';
 import { ProfileService } from '../profile/profile.service';
+import { PreApplyService } from '../astro/pre-apply.service';
 
 /**
- * AutoApplyLoop (user-approved nightly mode) — periodically applies to all
- * leads above MATCH_THRESHOLD automatically, respecting per-source daily caps,
- * the kill switch, and human-like pacing between submissions.
+ * AutoApplyLoop (FR-16/FR-17/FR-18) — every hour, looks at fresh leads above
+ * MATCH_THRESHOLD and PREPARES them into the pre-apply queue (tailored CV,
+ * email draft, channel, astro score, planned muhurta window). NOTHING is sent
+ * here — the user reviews items on /pre-apply-page and approves them; only
+ * MuhurtaSendService actually submits, and only inside a shubh muhurta.
  */
 const MATCH_THRESHOLD = Number(process.env.AUTO_APPLY_MIN_MATCH ?? 40);
-const MAX_PER_RUN = Number(process.env.AUTO_APPLY_MAX_PER_RUN ?? 8);
-const PAUSE_BETWEEN_MS = Number(process.env.AUTO_APPLY_PAUSE_MS ?? 90_000); // 1.5 min pacing
+const MAX_PER_RUN = Number(process.env.AUTO_APPLY_MAX_PER_RUN ?? 12);
 
 @Injectable()
 export class AutoApplyLoopService {
@@ -19,29 +20,29 @@ export class AutoApplyLoopService {
 	private running = false;
 
 	constructor(
-		private readonly engine: ApplyEngineService,
+		private readonly preApply: PreApplyService,
 		private readonly leadRepo: LeadRepository,
 		private readonly profileService: ProfileService,
 	) {}
 
-	/** Every 6 hours, offset from the scout's run. */
-	@Interval(6 * 60 * 60 * 1000)
+	/** FR-18: every hour, alongside the hourly scout fetch. */
+	@Interval(60 * 60 * 1000)
 	async runScheduled(): Promise<void> {
 		await this.runOnce();
 	}
 
-	async runOnce(): Promise<{ applied: number; needsInfo: number; failed: number; skipped: number }> {
-		if (this.running) return { applied: 0, needsInfo: 0, failed: 0, skipped: 0 };
+	async runOnce(): Promise<{ prepared: number; skipped: number; errors: number }> {
+		if (this.running) return { prepared: 0, skipped: 0, errors: 0 };
 		this.running = true;
-		const tally = { applied: 0, needsInfo: 0, failed: 0, skipped: 0 };
+		const tally = { prepared: 0, skipped: 0, errors: 0 };
 		try {
 			if (process.env.APPLY_KILL_SWITCH === 'true') {
-				this.logger.warn('kill switch ON — auto-apply skipped');
+				this.logger.warn('kill switch ON — prepare loop skipped');
 				return tally;
 			}
 			const profile = await this.profileService.getResponse();
 			if (!profile || profile.missingFields.length > 0) {
-				this.logger.warn(`profile incomplete (${profile?.missingFields.join(',') ?? 'no profile'}) — auto-apply skipped`);
+				this.logger.warn(`profile incomplete (${profile?.missingFields.join(',') ?? 'no profile'}) — prepare loop skipped`);
 				return tally;
 			}
 
@@ -50,20 +51,23 @@ export class AutoApplyLoopService {
 				.sort((a, b) => Number(b.matchScore) - Number(a.matchScore))
 				.slice(0, MAX_PER_RUN);
 
-			this.logger.log(`auto-apply: ${candidates.length} candidates >= ${MATCH_THRESHOLD}% match`);
+			this.logger.log(`prepare-loop: ${candidates.length} candidates >= ${MATCH_THRESHOLD}% match`);
 			for (const lead of candidates) {
 				try {
-					const result = await this.engine.applyToLead(lead.id);
-					tally[result.status === 'submitted' ? 'applied' : result.status === 'needs_info' ? 'needsInfo' : 'failed']++;
-					this.logger.log(`auto-apply ${lead.source} "${lead.title}" -> ${result.status}${result.errorDetail ? ' (' + result.errorDetail.slice(0, 80) + ')' : ''}`);
+					const result = await this.preApply.prepare(lead.id);
+					if ('error' in result) {
+						tally.skipped++;
+						this.logger.log(`prepare ${lead.source} "${lead.title}" -> skipped (${result.error})`);
+					} else {
+						tally.prepared++;
+						this.logger.log(`prepare ${lead.source} "${lead.title}" -> queued ${result.id} (astro ${result.astroScore}/100)`);
+					}
 				} catch (err) {
-					tally.failed++;
-					this.logger.warn(`auto-apply error on ${lead.id}: ${String(err).slice(0, 100)}`);
+					tally.errors++;
+					this.logger.warn(`prepare error on ${lead.id}: ${String(err).slice(0, 100)}`);
 				}
-				// human-like pacing between submissions
-				await new Promise((r) => setTimeout(r, PAUSE_BETWEEN_MS));
 			}
-			this.logger.log(`auto-apply done: ${JSON.stringify(tally)}`);
+			this.logger.log(`prepare-loop done: ${JSON.stringify(tally)}`);
 		} finally {
 			this.running = false;
 		}

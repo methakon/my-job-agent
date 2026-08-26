@@ -16,6 +16,10 @@ export class ApplySetting {
 	@Column({ type: 'int', default: 10 })
 	maxPerDay!: number;
 
+	/** FR-18 user rule: total application cap per portal (27). */
+	@Column({ type: 'int', default: 27 })
+	maxPerPortal!: number;
+
 	@Column({ type: 'int', default: 60 })
 	minutesBetweenApplies!: number;
 
