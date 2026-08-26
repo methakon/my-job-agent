@@ -35,8 +35,10 @@ import { BrowserFormService } from './applications/browser-form.service';
 import { BrowserFormController } from './applications/browser-form.controller';
 import { LearningController } from './applications/learning.controller';
 import { ApplicationsPageController } from './applications/applications-page.controller';
+import { LinkedInController } from './applications/linkedin.controller';
 import { LearningWeightsService } from './applications/learning-weights.service';
 import { DailyDigestService } from './applications/daily-digest.service';
+import { LinkedInProfileService } from './applications/linkedin-profile.service';
 import { SideIncomeModule } from './side-income/side-income.module';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
@@ -63,7 +65,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -88,6 +90,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		BrowserFormService,
 		LearningWeightsService,
 		DailyDigestService,
+		LinkedInProfileService,
 		EmailTrackerService,
 		InterviewPrepService,
 	],

@@ -17,6 +17,7 @@ import { NaukriAdapter } from '../scout/naukri.adapter';
 import { HrEmailInvestigator } from './hr-email-investigator.service';
 import { BrowserFormService } from './browser-form.service';
 import { LearningWeightsService } from './learning-weights.service';
+import { LinkedInProfileService } from './linkedin-profile.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -47,6 +48,7 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly investigator: HrEmailInvestigator,
 		private readonly browserForm: BrowserFormService,
 		public readonly learning: LearningWeightsService,
+		private readonly linkedin: LinkedInProfileService,
 	) {}
 
 	onModuleInit(): void {
@@ -257,12 +259,14 @@ export class ApplyEngineService implements OnModuleInit {
 			const optimized = await this.profileOptimizer.optimize();
 			const allSkills = (profileData.skills ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 			const jd = `${lead.title} ${lead.description ?? ''}`.toLowerCase();
-			const matchedSkills = allSkills.filter((s) => jd.includes(s.toLowerCase()));
+			// LinkedIn-informed tuning (user rule): add/remove keywords per job
+			const tuned = this.linkedin.tuneSkills(allSkills, allSkills.filter((s) => jd.includes(s.toLowerCase())), jd);
+			const matchedSkills = tuned.finalMatched;
 			const cvPath = await this.cvBuilder.build({
 				profile: profileData,
 				workHistory: optimized.workHistory,
 				matchedSkills,
-				allSkills,
+				allSkills: [...new Set([...allSkills, ...tuned.add])],
 				jobTitle: lead.title,
 				jobCompany: lead.company,
 				jobDescription: lead.description,

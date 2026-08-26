@@ -19,6 +19,10 @@ export interface OptimizedProfile {
 }
 
 const MIN_STINT_MONTHS = 5; // stints shorter than this are hidden from applications by default
+// user rule 2026-08-26: keep all real experience; only hide stints under 3 months.
+// MIN_STINT_MONTHS stays at 5 for safety, but the Indus Net entry (Apr–Aug 2026,
+// ~4.5 months) is a genuine role the user wants kept — it now has a real end date
+// (2026-08) instead of "present".
 
 /**
  * ProfileOptimizer — scores profile completeness and derives the
