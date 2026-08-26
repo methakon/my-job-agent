@@ -35,6 +35,7 @@ import { BrowserFormService } from './applications/browser-form.service';
 import { BrowserFormController } from './applications/browser-form.controller';
 import { LearningController } from './applications/learning.controller';
 import { LearningWeightsService } from './applications/learning-weights.service';
+import { DailyDigestService } from './applications/daily-digest.service';
 import { SideIncomeModule } from './side-income/side-income.module';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
@@ -85,6 +86,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		RetryBackoffService,
 		BrowserFormService,
 		LearningWeightsService,
+		DailyDigestService,
 		EmailTrackerService,
 		InterviewPrepService,
 	],

@@ -31,11 +31,11 @@ export class ApplyEngineService implements OnModuleInit {
 	private readonly adapters: Map<string, PortalAdapter> = new Map();
 
 	constructor(
-		private readonly appRepo: ApplicationRepository,
+		public readonly appRepo: ApplicationRepository,
 		private readonly settingsRepo: ApplySettingRepository,
 		private readonly answers: AnswerBankService,
 		private readonly profileService: ProfileService,
-		private readonly leadRepo: LeadRepository,
+		public readonly leadRepo: LeadRepository,
 		private readonly emailTracker: EmailTrackerService,
 		private readonly detector: DirectChannelDetector,
 		private readonly mailer: MailService,
@@ -46,7 +46,7 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly portalCreds: PortalCredentialService,
 		private readonly investigator: HrEmailInvestigator,
 		private readonly browserForm: BrowserFormService,
-		private readonly learning: LearningWeightsService,
+		public readonly learning: LearningWeightsService,
 	) {}
 
 	onModuleInit(): void {
