@@ -4,6 +4,7 @@ import { ScrapedLead } from '../applications/portal-adapter.interface';
 import { RemotiveAdapter, RemoteOkAdapter } from './public-api.adapters';
 import { NorwayJobsAdapter } from './norway-jobs.adapter';
 import { NaukriAdapter } from './naukri.adapter';
+import { MonsterAdapter } from './monster.adapter';
 import { PortalCredentialService } from '../applications/portal-credential.service';
 import { LeadRepository } from '../leads/lead.repository';
 import { ProfileService } from '../profile/profile.service';
@@ -17,6 +18,7 @@ export class ScoutService {
 		new RemotiveAdapter(),
 		new RemoteOkAdapter(),
 		new NorwayJobsAdapter(),
+		new MonsterAdapter(),
 	];
 
 	constructor(

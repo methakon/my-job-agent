@@ -74,6 +74,24 @@
 		<div id="sideIncome">loading…</div>
 		<details><summary>Open full side-income page</summary><p><a style="color:var(--accent)" href="/side-income-dashboard/dashboard">→ /side-income-dashboard/dashboard</a></p></details>
 	</section>
+
+	<section class="card">
+		<h2>📧 Mail Accounts <span class="meta">sender &amp; tracker</span></h2>
+		<div id="mailAccounts">loading…</div>
+		<details><summary>Add mail account</summary>
+			<form id="mform">
+				<label>Email</label><input name="email" placeholder="bapay.9@gmail.com">
+				<label>App Password / Pass plain</label><input name="passwordPlain" type="password">
+				<label>Provider (gmail / outlook)</label><input name="provider" value="gmail">
+				<div class="actions"><button type="submit">Connect Account</button></div>
+			</form>
+		</details>
+	</section>
+
+	<section class="card">
+		<h2>🎯 Interview Practice <a style="color:var(--accent);font-size:12px" href="/interview-practice-page">full bank →</a></h2>
+		<div id="interviewPrep">loading…</div>
+	</section>
 </div>
 
 <script>
@@ -187,7 +205,31 @@ function markSide(id, btn) {
 		.then(loadSideIncome);
 }
 
-loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox();
+async function loadMailAccounts() {
+	const accs = await api('/mail/accounts');
+	document.getElementById('mailAccounts').innerHTML = (accs || []).map(a =>
+		`<div class="lead"><div><b>${esc(a.email)}</b> <span class="meta">${esc(a.provider || 'smtp')}</span></div>` +
+		`<span class="badge ${a.isPrimary ? 'ok' : ''}">${a.isPrimary ? 'Primary' : 'Backup'}</span></div>`
+	).join('') || '<span class="meta">no accounts added yet</span>';
+}
+
+document.getElementById('mform').addEventListener('submit', async e => {
+	e.preventDefault();
+	const body = {};
+	for (const el of e.target.elements) if (el.name && el.value) body[el.name] = el.value;
+	await api('/mail/accounts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+	loadMailAccounts();
+});
+
+async function loadInterviewPrep() {
+	const qs = await api('/interview-prep');
+	const top = (qs || []).slice(0, 4);
+	document.getElementById('interviewPrep').innerHTML = top.map(q =>
+		`<div class="lead"><div><b>[${esc(q.topic)}]</b> ${esc(q.question.slice(0, 60))}…</div></div>`
+	).join('') || '<span class="meta">no interview questions</span>';
+}
+
+loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox(); loadMailAccounts(); loadInterviewPrep();
 </script>
 </body>
 </html>

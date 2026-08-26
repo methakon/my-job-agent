@@ -22,6 +22,7 @@ import { ProfileOptimizer } from './profile/profile-optimizer.service';
 import { InterviewQuestion } from './interview/interview-question.entity';
 import { InterviewPrepService } from './interview/interview-prep.service';
 import { InterviewPrepController } from './interview/interview-prep.controller';
+import { InterviewPracticePageController } from './interview/interview-practice-page.controller';
 import { MailController } from './applications/mail.controller';
 import { InboxReaderService } from './applications/inbox-reader.service';
 import { InboxController } from './applications/inbox.controller';
@@ -66,7 +67,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController],
 	providers: [
 		ProfileService,
 		ProfileRepository,

@@ -14,6 +14,7 @@ import { ProfileOptimizer } from '../profile/profile-optimizer.service';
 import { ProcessLearningService, DetectedProcess } from './process-learning.service';
 import { PortalCredentialService } from './portal-credential.service';
 import { NaukriAdapter } from '../scout/naukri.adapter';
+import { MonsterAdapter } from '../scout/monster.adapter';
 import { HrEmailInvestigator } from './hr-email-investigator.service';
 import { BrowserFormService } from './browser-form.service';
 import { LearningWeightsService } from './learning-weights.service';
@@ -52,7 +53,7 @@ export class ApplyEngineService implements OnModuleInit {
 	) {}
 
 	onModuleInit(): void {
-		for (const a of [new RemotiveAdapter(), new RemoteOkAdapter(), new NaukriAdapter(this.portalCreds)]) {
+		for (const a of [new RemotiveAdapter(), new RemoteOkAdapter(), new NaukriAdapter(this.portalCreds), new MonsterAdapter(this.portalCreds)]) {
 			this.register(a);
 		}
 		void this.emailTracker.poll().catch(() => undefined);

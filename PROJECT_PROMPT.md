@@ -51,6 +51,9 @@ push `origin/dev` — never skip even on interrupt.
   tracking per application; dashboard Apply button removed from leads
 - Side-income module: 5 researched opportunities + page at
   /side-income-dashboard/dashboard
+- Monster / foundit India adapter (`MonsterAdapter`) live in Scout and ApplyEngine
+- Interview practice bank & page live at `/interview-practice-page` + Dashboard card
+- Mail accounts management panel live in dashboard (`/mail/accounts` endpoint integration)
 - Dashboard at `/`, Swagger at `/docs`, launcher `./start-agent.sh`
 
 ## Credentials stored (encrypted AES-256 in mail_accounts table)
@@ -62,11 +65,9 @@ push `origin/dev` — never skip even on interrupt.
    data/linkedin/profile.html → POST /linkedin/refresh. Then CV tuning is live.
 2. **finn.no adapter**: login flow (account exists, bapay.9@gmail.com;
    confirm password vs BankID with user) + scrape English jobs + apply.
-3. Monster India adapter (same pattern as Naukri).
-4. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
-5. Dashboard: mail accounts panel + interview-practice page.
-6. Outlook app-password (optional backup sender) — pending from user.
-7. GitHub/portfolio URL for profile → completeness 100% — pending from user.
+3. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
+4. Outlook app-password (optional backup sender) — pending from user.
+5. GitHub/portfolio URL for profile → completeness 100% — pending from user.
 
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`

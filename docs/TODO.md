@@ -27,8 +27,11 @@
 - [x] Swagger at `/docs`
 - [x] Docs: REQUIREMENTS.md + PROJECT_DETAILS.md (living docs, updated per prompt)
 
-## In progress
-- [ ] (none)
+## Recently completed (2026-08-26 / 2026-08-27 session)
+- [x] Monster / foundit India adapter (`MonsterAdapter`) live in Scout + ApplyEngine
+- [x] Interactive Interview Practice Prep bank & page live at `/interview-practice-page`
+- [x] Dashboard: Mail accounts management panel live (`GET/POST /mail/accounts`)
+- [x] Dashboard: Interview practice card with link to `/interview-practice-page`
 
 ## Recently completed (2026-08-25 night session)
 - [x] Scorer fix: title veto (designer/QA/sales etc. never match), URL/HTML
