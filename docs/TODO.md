@@ -13,6 +13,9 @@
 - [x] Pre-apply dashboard page `/pre-apply-page` (review CV + email + channel + astro plan; hold/pause/upload/approve)
 - [x] Auto-apply loop switched to prepare-only mode
 - [x] Astro scoring tables documented in REQUIREMENTS.md FR-16 (tithi/nakshatra/weekday lists, segments) — user may tune via env
+- [x] Panchanga engine INDEPENDENTLY VERIFIED vs published panchang for 2026-08-27:
+      Shukla Chaturdashi (tithi 14) + Dhanishta + Thursday + Rahu kaal ~13:59–15:36
+      (HT, bhaktiras.net, samvat.in, kundligpt all agree with engine output)
 
 ## Completed
 - [x] Repo scaffold: NestJS + TypeORM + MySQL, MVCR, shared config (MyLife standards)
@@ -77,10 +80,9 @@
 - [x] FR-12 Gmail SMTP live; IMAP OTP auto-read + recruiter reply polling
 
 ## Pending — engineering
-- [ ] finn.no adapter (scrape English-jobs filter + OTP login flow with bapay.9@gmail.com)
-- [ ] A1 Group careers adapter (jobs.a1.com)
+- [ ] finn.no adapter (scrape English-jobs filter + OTP login flow with bapay.9@gmail.com) — scrape LIVE (English/IT filter + Norwegian-char drop in place); login blocked on captcha verdict (NO bypass → one-time manual session-cookie capture, user hasn't chosen)
+- [ ] A1 Group careers adapter (jobs.a1.com) — INVESTIGATED 2026-08-27: WordPress site; REST API live (`/wp-json/wp/v2/types` works, `job-template` post type exists); custom endpoint `/wp-json/a1-group/v1/content-listing` returns pages only (postType filter unsupported); real vacancy list renders client-side via block `./job-listing/assets/index.js` (needs bundle analysis for its fetch params); department taxonomy route 404s. Next: read job-listing block JS for actual data source.
 - [ ] LinkedIn easy-apply adapter (session cookie; toggle OFF by default)
-- [ ] Daily digest of new high-match leads (email to self)
 - [ ] Production hardening: synchronize:false + migrations, helmet, rate limit
 
 ## Blocked on user

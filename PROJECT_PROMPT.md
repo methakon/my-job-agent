@@ -70,21 +70,36 @@ push `origin/dev` — never skip even on interrupt.
   (`SCOUT_INTERVAL_MINUTES=60`) enforced.
 - Job astro-match scoring (`/astro/score`): lead↔chart match (Rahu MD
   foreign/tech, Mercury dev/comm, Saturn+Mars backend/senior) with reasons.
+- Panchanga engine cross-checked vs published panchang (2026-08-27: Shukla
+  Chaturdashi + Dhanishta + Thursday + rahu kaal ~13:59–15:36 — matches
+  Hindustan Times, bhaktiras.net, samvat.in, kundligpt).
+- A1 Group (jobs.a1.com) investigated: WordPress, REST API live; vacancy list
+  client-side via job-listing block — adapter TODO (docs/TODO.md).
 
 ## Credentials stored (encrypted AES-256 in mail_accounts table)
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
 ## TODO next session (in order)
-1. **Verify astro scoring tables with user** — tithi/nakshatra/weekday lists
+1. **Pre-apply queue is FULL (10 ready items, astro 35–95)** — user reviews at
+   `/pre-apply-page` and approves; MuhurtaSendService sweep (10 min) batch-sends
+   all approved inside the next shubh window (today: 06:56–13:16 IST, then
+   14:56–05:16 IST next day). Sandbox currently OFF (real sends once approved).
+2. **Verify astro scoring tables with user** — tithi/nakshatra/weekday lists
    + rahu/yamaganda/gulika segments are documented in REQUIREMENTS.md FR-16
    and service header; user may tune (env: SHUBH_MIN_SCORE, MUHURTA_SWEEP_MINUTES).
-2. **Activate LinkedIn snapshot** (user action): save profile HTML into
+   Engine cross-checked vs published panchang 2026-08-27 ✓ (Shukla Chaturdashi,
+   Dhanishta, Thursday, rahu kaal ~13:59–15:36 — HT/bhaktiras/samvat/kundligpt agree).
+3. **A1 Group careers adapter (jobs.a1.com)**: WordPress; REST live; real
+   vacancy list renders client-side via block `./job-listing/assets/index.js`
+   — next step: read that block's JS for the data source/fetch params.
+4. **Activate LinkedIn snapshot** (user action): save profile HTML into
    data/linkedin/profile.html → POST /linkedin/refresh. Then CV tuning is live.
-3. **finn.no adapter**: login flow (email: bapay.9@gmail.com → OTP email sent with subject containing "innloggingskoden til FINN.no" → read via `InboxReaderService.readOtp('finn')` → submit OTP) + scrape English/IT jobs + apply. Captcha verdict: NO bypass — legitimate path = one-time manual session-cookie capture (user hasn't chosen).
-4. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
-5. Outlook app-password (optional backup sender) — pending from user.
-6. GitHub/portfolio URL for profile → completeness 100% — pending from user.
+5. **finn.no login**: captcha verdict NO bypass — legitimate path = one-time
+   manual session-cookie capture (user hasn't chosen). Scrape side live.
+6. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
+7. Outlook app-password (optional backup sender) — pending from user.
+8. GitHub/portfolio URL for profile → completeness 100% — pending from user.
 
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`
