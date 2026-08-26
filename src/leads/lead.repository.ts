@@ -13,6 +13,10 @@ export class LeadRepository {
 		return this.repo.findOne({ where: { source, externalId } });
 	}
 
+	findOneById(id: string): Promise<JobLead | null> {
+		return this.repo.findOne({ where: { id } });
+	}
+
 	findRecent(limit = 100, status?: string): Promise<JobLead[]> {
 		const where = status ? { status } : {};
 		return this.repo.find({ where, order: { matchScore: 'DESC', createdAt: 'DESC' }, take: limit });

@@ -17,6 +17,14 @@ export class ApplicationRepository {
 		return this.repo.find({ order: { createdAt: 'DESC' }, take: limit });
 	}
 
+	findOneById(id: string): Promise<Application | null> {
+		return this.repo.findOne({ where: { id } });
+	}
+
+	findByLead(leadId: string): Promise<Application | null> {
+		return this.repo.findOne({ where: { leadId }, order: { createdAt: 'DESC' } });
+	}
+
 	findByStatus(status: string): Promise<Application[]> {
 		return this.repo.find({ where: { status }, order: { createdAt: 'DESC' } });
 	}

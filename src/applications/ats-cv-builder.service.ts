@@ -102,10 +102,7 @@ export class AtsCvBuilder {
 		doc.text('MCA — T. John College, Bangalore (2005–2008)');
 		doc.text('BCA — Dumkal Institute of Engineering & Technology (2002–2005)');
 		doc.text('HK-dir verified foreign education (Norway recognition statement available)');
-		doc.moveDown(0.3);
-		doc.fontSize(8).fillColor('#666666')
-			.text(`Tailored for ${input.jobTitle} @ ${input.jobCompany} — generated ${new Date().toISOString().slice(0, 10)}`);
-		doc.fillColor('#000000');
+		// user rule: no "Tailored for…" watermark line on the CV
 
 		await new Promise<void>((resolve) => {
 			doc.on('end', () => resolve());

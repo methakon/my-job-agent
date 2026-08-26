@@ -88,6 +88,20 @@ export class ApplyEngineService implements OnModuleInit {
 		const lead = await this.leadRepo.findRecent(500).then((all) => all.find((l) => l.id === leadId));
 		if (!lead) return { ok: false, status: 'failed', errorDetail: 'lead not found' };
 
+		// DEDUPE (user rule): never re-apply to the same portal job id. Check
+		// both this lead id and any application whose lead shares the externalId.
+		const existingByLead = await this.appRepo.findByLead(lead.id);
+		if (existingByLead && existingByLead.status !== 'failed') {
+			return { ok: false, status: 'needs_info', missingInfo: [`already applied to this job (${existingByLead.status}, ${new Date(existingByLead.createdAt).toLocaleDateString()})`], applicationId: existingByLead.id };
+		}
+		const twinLeads = await this.leadRepo.findByExternal(lead.source, lead.externalId);
+		if (twinLeads && twinLeads.id !== lead.id) {
+			const twinApp = await this.appRepo.findByLead(twinLeads.id);
+			if (twinApp && twinApp.status !== 'failed') {
+				return { ok: false, status: 'needs_info', missingInfo: [`already applied to this ${lead.source} job id (${twinApp.status})`], applicationId: twinApp.id };
+			}
+		}
+
 		const setting = await this.settingsRepo.findBySource(lead.source);
 		const adapter = this.adapters.get(lead.source);
 		if (!adapter) return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };

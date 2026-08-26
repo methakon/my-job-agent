@@ -34,6 +34,25 @@ export class ApplicationController {
 		return this.engine.applyToLead(leadId);
 	}
 
+	/** Detail of one application (for the dashboard's sent-info popover). */
+	@Get(':id')
+	async detail(@Param('id') id: string) {
+		const a = await this.appRepo.findOneById(id);
+		if (!a) return null;
+		return {
+			id: a.id,
+			source: a.source,
+			status: a.status,
+			cvPath: a.cvPath,
+			coverLetter: a.coverLetter,
+			errorDetail: a.errorDetail,
+			missingInfo: a.missingInfoJson ? JSON.parse(a.missingInfoJson) : [],
+			retryCount: a.retryCount ?? 0,
+			createdAt: a.createdAt,
+			updatedAt: a.updatedAt,
+		};
+	}
+
 	@Post('poll-email')
 	pollEmail() {
 		return this.emailTracker.poll();

@@ -50,7 +50,7 @@
 	</section>
 
 	<section class="card">
-		<h2>Applications &amp; Tracking</h2>
+		<h2>Applications &amp; Tracking <a id="appsLink" style="display:none;color:var(--accent);font-size:12px" href="/applications-page">full history →</a></h2>
 		<div id="apps">loading…</div>
 	</section>
 
@@ -104,8 +104,9 @@ async function loadLeads() {
 	document.getElementById('leads').innerHTML = leads.slice(0, 15).map(l =>
 		`<div class="lead"><div><b>${esc(l.title)}</b> <span class="meta">@ ${esc(l.company)}</span>` +
 		`<div class="meta">${esc(l.source)} · match ${Math.round(l.matchScore)}%</div></div>` +
-		`<button onclick="apply('${l.id}', this)">Apply</button></div>`
+		`<span class="badge">auto</span></div>`
 	).join('') || '<span class="meta">no leads yet</span>';
+	document.getElementById('appsLink').style.display = 'inline';
 }
 
 function scout() { api('/leads/scout', { method:'POST' }).then(loadLeads); }
