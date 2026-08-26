@@ -49,20 +49,17 @@ push `origin/dev` — never skip even on interrupt.
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
 ## TODO next session (in order)
-1. **Wire BrowserFormService into apply engine fallback chain**: portal-only
-   leads → browser-fill instead of failing; review-before-submit flow in
-   dashboard (filled forms listed for one-click submit).
-2. **finn.no adapter**: login flow (account exists, bapay.9@gmail.com;
-   confirm password vs BankID with user) + scrape English jobs + apply.
-3. **Self-improvement persistence**: store learning weights in DB table
+1. **Self-improvement persistence**: store learning weights in DB table
    (channel success, keyword replies, best hour); wire outcome recording into
    applyDirect/email tracker.
-4. Monster India adapter (same pattern as Naukri).
-5. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
-6. Dashboard: add Mail accounts panel + interview-practice page + side-income
-   link.
-7. Outlook app-password (optional backup sender) — pending from user.
-8. GitHub/portfolio URL for profile → completeness 100% — pending from user.
+2. **finn.no adapter**: login flow (account exists, bapay.9@gmail.com;
+   confirm password vs BankID with user) + scrape English jobs + apply.
+3. Monster India adapter (same pattern as Naukri).
+4. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
+5. Dashboard: add Mail accounts panel + interview-practice page + side-income
+   link + review-before-submit list for browser-filled forms.
+6. Outlook app-password (optional backup sender) — pending from user.
+7. GitHub/portfolio URL for profile → completeness 100% — pending from user.
 
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`
