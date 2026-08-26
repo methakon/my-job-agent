@@ -21,7 +21,7 @@ export interface PortalQuestion {
 
 export interface ApplyResult {
 	ok: boolean;
-	status: 'submitted' | 'needs_info' | 'failed';
+	status: 'submitted' | 'needs_info' | 'failed' | 'sandboxed';
 	questions?: PortalQuestion[];
 	missingInfo?: string[];
 	errorDetail?: string;

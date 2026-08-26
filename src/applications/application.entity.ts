@@ -41,6 +41,15 @@ export class Application {
 	@Column({ type: 'int', default: 0 })
 	retryCount!: number;
 
+	/**
+	 * Sandbox flag (user rule): while SANDBOX=true the agent runs the whole
+	 * pipeline (scout, score, tailor CV, compose, "submit") but does NOT
+	 * actually send anything — the row is marked is_sandbox=1 and status
+	 * 'sandboxed'. Real mode (SANDBOX unset/false) ignores these rows.
+	 */
+	@Column({ type: 'tinyint', width: 1, default: 0 })
+	isSandbox!: boolean;
+
 	@CreateDateColumn({ name: 'created_at' })
 	createdAt!: Date;
 

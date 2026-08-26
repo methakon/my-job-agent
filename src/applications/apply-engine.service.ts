@@ -81,6 +81,11 @@ export class ApplyEngineService implements OnModuleInit {
 		return process.env.APPLY_KILL_SWITCH === 'true';
 	}
 
+	/** Sandbox mode (user rule): full pipeline runs, nothing actually sent. */
+	sandboxOn(): boolean {
+		return process.env.SANDBOX === 'true';
+	}
+
 	/**
 	 * Attempt one application for a stored lead.
 	 * Generates cover letter from profile + job title/company, resolves custom
@@ -126,6 +131,7 @@ export class ApplyEngineService implements OnModuleInit {
 			source: lead.source,
 			status: 'submitting',
 			coverLetter: this.generateCoverLetter(profileData, lead),
+			isSandbox: this.sandboxOn(),
 		});
 
 		try {
@@ -161,7 +167,19 @@ export class ApplyEngineService implements OnModuleInit {
 			if (stated) {
 				this.logger.log(`JD-stated process for "${lead.title}": ${stated.instruction}`);
 			}
-			if (channel && stillUnanswered.length === 0) {
+			// SANDBOX (user rule): run everything up to the send, then stop —
+			// mark sandboxed with full detail instead of actually submitting.
+			if (this.sandboxOn() && stillUnanswered.length === 0) {
+				const cvPath = await this.buildCv(lead, profileData).catch(() => undefined);
+				result = {
+					ok: true,
+					status: 'sandboxed',
+					errorDetail:
+						`SANDBOX: channel would be ${channel ? channel.kind : adapter.source}` +
+						(channel?.target ? ` -> ${channel.target}` : '') +
+						`; tailored CV ${cvPath ?? '(failed)'}; no real submission made`,
+				};
+			} else if (channel && stillUnanswered.length === 0) {
 				const direct: DirectChannel = channel;
 				result = await this.applyDirect(lead, profileData, direct, application);
 			} else if (stillUnanswered.length > 0) {

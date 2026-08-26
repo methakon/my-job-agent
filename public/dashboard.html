@@ -29,7 +29,12 @@
 </head>
 <body>
 <h1>my-job-agent</h1>
-<div class="sub">Autonomous job agent for Swarna Sekhar Dhar — <a style="color:var(--accent)" href="/docs">API docs</a></div>
+<div class="sub">Autonomous job agent for Swarna Sekhar Dhar — <a style="color:var(--accent)" href="/docs">API docs</a> · <a style="color:var(--accent)" href="/applications-page">application history</a></div>
+<div class="card" style="margin-bottom:16px;display:flex;gap:10px;align-items:center">
+	<b>Sandbox mode:</b> <span id="sandboxState" class="badge">…</span>
+	<button class="ghost" id="sandboxBtn" onclick="toggleSandbox()">toggle</button>
+	<span class="meta">ON = full pipeline runs but nothing is actually sent (is_sandbox=1). OFF = real submissions.</span>
+</div>
 
 <div class="grid">
 	<section class="card" id="profileCard">
@@ -123,10 +128,23 @@ async function loadApps() {
 	const apps = await api('/applications');
 	document.getElementById('apps').innerHTML = apps.map(a => {
 		const cls = a.status === 'submitted' ? 'ok' : a.status === 'needs_info' ? 'warn' : a.status === 'failed' ? 'bad' : '';
-		return `<div class="app"><div>${esc(a.source)} · ${esc(a.coverLetter?.slice(0, 60))}…
+		const sand = a.isSandbox ? ' 🧪' : '';
+		return `<div class="app"><div>${esc(a.source)}${sand} · ${esc(a.coverLetter?.slice(0, 60))}…
 			${a.missingInfoJson && a.missingInfoJson !== 'null' ? `<details><summary>needs info</summary><ul class="miss">${JSON.parse(a.missingInfoJson).map(m=>`<li>${esc(m)}</li>`).join('')}</ul></details>` : ''}
 			</div><span class="badge ${cls}">${esc(a.status)}</span></div>`;
 	}).join('') || '<span class="meta">nothing yet</span>';
+}
+
+async function loadSandbox() {
+	const s = await api('/sandbox');
+	const el = document.getElementById('sandboxState');
+	el.textContent = s.sandbox ? '🧪 ON (dry-run)' : '🔴 OFF (real)';
+	el.style.color = s.sandbox ? 'var(--warn)' : 'var(--ok)';
+}
+
+function toggleSandbox() {
+	api('/sandbox/toggle', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled: document.getElementById('sandboxState').textContent.includes('OFF') }) })
+		.then(loadSandbox);
 }
 
 async function loadSettings() {
@@ -169,7 +187,7 @@ function markSide(id, btn) {
 		.then(loadSideIncome);
 }
 
-loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome();
+loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox();
 </script>
 </body>
 </html>
