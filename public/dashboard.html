@@ -58,6 +58,17 @@
 		<h2>Portal Settings <span class="meta">kill switch in .env</span></h2>
 		<div id="settings">loading…</div>
 	</section>
+
+	<section class="card">
+		<h2>🧠 Learning Stats <span class="meta" id="bestChannel"></span></h2>
+		<div id="learning">loading…</div>
+	</section>
+
+	<section class="card">
+		<h2>💰 Side Income <span class="meta">Berhampore opportunities</span></h2>
+		<div id="sideIncome">loading…</div>
+		<details><summary>Open full side-income page</summary><p><a style="color:var(--accent)" href="/side-income-dashboard/dashboard">→ /side-income-dashboard/dashboard</a></p></details>
+	</section>
 </div>
 
 <script>
@@ -129,7 +140,35 @@ function toggleSrc(source, enabled) {
 	api(`/settings/${source}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ autoApplyEnabled: enabled }) }).then(loadSettings);
 }
 
-loadProfile(); loadLeads(); loadApps(); loadSettings();
+async function loadLearning() {
+	const s = await api('/learning/stats');
+	document.getElementById('bestChannel').textContent = s.bestSendHour !== null ? `best send hour: ${s.bestSendHour}:00` : '';
+	const ch = Object.entries(s.channelSuccess || {}).map(([k, v]) =>
+		`<div class="lead"><div><b>${esc(k)}</b> <span class="meta">${v.sent} sent</span></div><span class="badge ${v.rate >= 20 ? 'ok' : v.rate > 0 ? 'warn' : ''}">${v.rate}% replies</span></div>`).join('');
+	const po = Object.entries(s.portalSuccess || {}).map(([k, v]) =>
+		`<div class="lead"><div><b>${esc(k)}</b> <span class="meta">${v.sent} sent</span></div><span class="badge">${v.rate}%</span></div>`).join('');
+	const kw = (s.topKeywords || []).map(k => `<span class="badge ok">${esc(k.keyword)} ×${k.replies}</span>`).join(' ');
+	document.getElementById('learning').innerHTML =
+		`<div class="meta">total applications: ${s.totalApplications}</div>` + ch +
+		(po ? `<details><summary>per-portal success</summary>${po}</details>` : '') +
+		(kw ? `<div style="margin-top:6px">${kw}</div>` : '');
+}
+
+async function loadSideIncome() {
+	const ops = await api('/side-income');
+	document.getElementById('sideIncome').innerHTML = ops.map(o => {
+		const cls = o.status === 'applied' || o.status === 'in_progress' ? 'ok' : o.status === 'rejected' ? 'bad' : '';
+		return `<div class="lead"><div><b>${o.fitScore}% ${esc(o.provider)}</b> <span class="meta">${esc(o.investmentRange || '')}</span></div>` +
+			`<button class="${cls ? 'ghost' : ''}" onclick="markSide('${o.id}', this)">${esc(o.status)}</button></div>`;
+	}).join('');
+}
+
+function markSide(id, btn) {
+	api(`/side-income/${id}/status`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'applied' }) })
+		.then(loadSideIncome);
+}
+
+loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome();
 </script>
 </body>
 </html>
