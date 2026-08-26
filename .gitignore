@@ -3,3 +3,5 @@ dist/
 *.tsbuildinfo
 generated/
 generated/
+logs/
+agent.pid
