@@ -15,9 +15,11 @@ import { ProcessLearningService, DetectedProcess } from './process-learning.serv
 import { PortalCredentialService } from './portal-credential.service';
 import { NaukriAdapter } from '../scout/naukri.adapter';
 import { MonsterAdapter } from '../scout/monster.adapter';
+import { FinnAdapter } from '../scout/finn.adapter';
 import { HrEmailInvestigator } from './hr-email-investigator.service';
 import { BrowserFormService } from './browser-form.service';
 import { LearningWeightsService } from './learning-weights.service';
+import { InboxReaderService } from './inbox-reader.service';
 import { LinkedInProfileService } from './linkedin-profile.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
@@ -50,10 +52,17 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly browserForm: BrowserFormService,
 		public readonly learning: LearningWeightsService,
 		private readonly linkedin: LinkedInProfileService,
+		private readonly inbox: InboxReaderService,
 	) {}
 
 	onModuleInit(): void {
-		for (const a of [new RemotiveAdapter(), new RemoteOkAdapter(), new NaukriAdapter(this.portalCreds), new MonsterAdapter(this.portalCreds)]) {
+		for (const a of [
+			new RemotiveAdapter(),
+			new RemoteOkAdapter(),
+			new NaukriAdapter(this.portalCreds),
+			new MonsterAdapter(this.portalCreds),
+			new FinnAdapter(this.portalCreds, this.inbox),
+		]) {
 			this.register(a);
 		}
 		void this.emailTracker.poll().catch(() => undefined);

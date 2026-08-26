@@ -5,7 +5,9 @@ import { RemotiveAdapter, RemoteOkAdapter } from './public-api.adapters';
 import { NorwayJobsAdapter } from './norway-jobs.adapter';
 import { NaukriAdapter } from './naukri.adapter';
 import { MonsterAdapter } from './monster.adapter';
+import { FinnAdapter } from './finn.adapter';
 import { PortalCredentialService } from '../applications/portal-credential.service';
+import { InboxReaderService } from '../applications/inbox-reader.service';
 import { LeadRepository } from '../leads/lead.repository';
 import { ProfileService } from '../profile/profile.service';
 
@@ -25,6 +27,7 @@ export class ScoutService {
 		private readonly leadRepo: LeadRepository,
 		private readonly profileService: ProfileService,
 		private readonly creds: PortalCredentialService,
+		private readonly inbox: InboxReaderService,
 	) {}
 
 	/** Naukri needs DI-provided credential service, so it's created lazily. */
@@ -37,6 +40,16 @@ export class ScoutService {
 		return this.naukriAdapter;
 	}
 
+	/** FINN needs creds (email) + inbox (OTP), so it's also lazy. */
+	private finnAdapter: FinnAdapter | null = null;
+	private getFinn(): FinnAdapter {
+		if (!this.finnAdapter) {
+			this.finnAdapter = new FinnAdapter(this.creds, this.inbox);
+			this.adapters.push(this.finnAdapter);
+		}
+		return this.finnAdapter;
+	}
+
 	/** Runs every SCOUT_INTERVAL_MINUTES (default 6h); also triggered manually. */
 	@Interval(Number(process.env.SCOUT_INTERVAL_MINUTES || 360) * 60 * 1000)
 	async runScheduled(): Promise<void> {
@@ -45,6 +58,7 @@ export class ScoutService {
 
 	async runOnce(): Promise<{ scraped: number; newLeads: number }> {
 		this.getNaukri(); // ensure naukri adapter registered
+		this.getFinn(); // ensure finn adapter registered (scrape needs no login)
 		let scraped = 0;
 		let newLeads = 0;
 		for (const adapter of this.adapters) {
