@@ -16,6 +16,7 @@ import { PortalCredentialService } from './portal-credential.service';
 import { NaukriAdapter } from '../scout/naukri.adapter';
 import { HrEmailInvestigator } from './hr-email-investigator.service';
 import { BrowserFormService } from './browser-form.service';
+import { LearningWeightsService } from './learning-weights.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 
@@ -45,6 +46,7 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly portalCreds: PortalCredentialService,
 		private readonly investigator: HrEmailInvestigator,
 		private readonly browserForm: BrowserFormService,
+		private readonly learning: LearningWeightsService,
 	) {}
 
 	onModuleInit(): void {
@@ -157,7 +159,16 @@ export class ApplyEngineService implements OnModuleInit {
 			application.missingInfoJson = result.missingInfo ? JSON.stringify(result.missingInfo) : null;
 			application.errorDetail = result.errorDetail ?? null;
 			await this.appRepo.save(application);
-			if (result.status === 'submitted') await this.leadRepo.setStatus(lead.id, 'applied');
+			if (result.status === 'submitted') {
+				await this.leadRepo.setStatus(lead.id, 'applied');
+				// FR-11: feed outcome into learning weights (channel/portal/hour)
+				try {
+					const channelKind = channel?.kind ?? adapter.source;
+					await this.learning.recordAttempt(channelKind, lead.source, new Date().getHours());
+				} catch (e) {
+					this.logger.warn(`learning record failed: ${String(e).slice(0, 80)}`);
+				}
+			}
 			return { ...result, applicationId: application.id };
 		} catch (err) {
 			application.status = 'failed';

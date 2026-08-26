@@ -6,6 +6,7 @@ import { mysqlConfig } from './shared/db.config';
 import { CandidateProfile } from './profile/candidate-profile.entity';
 import { JobLead } from './leads/job-lead.entity';
 import { Application } from './applications/application.entity';
+import { LearningWeight } from './applications/learning-weight.entity';
 import { QuestionAnswer } from './applications/question-answer.entity';
 import { ApplySetting } from './applications/apply-setting.entity';
 import { MailAccount } from './applications/mail-account.entity';
@@ -32,6 +33,8 @@ import { AutoApplyController } from './applications/auto-apply.controller';
 import { RetryBackoffService } from './applications/retry-backoff.service';
 import { BrowserFormService } from './applications/browser-form.service';
 import { BrowserFormController } from './applications/browser-form.controller';
+import { LearningController } from './applications/learning.controller';
+import { LearningWeightsService } from './applications/learning-weights.service';
 import { SideIncomeModule } from './side-income/side-income.module';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
@@ -55,10 +58,10 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -81,6 +84,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		AutoApplyLoopService,
 		RetryBackoffService,
 		BrowserFormService,
+		LearningWeightsService,
 		EmailTrackerService,
 		InterviewPrepService,
 	],
