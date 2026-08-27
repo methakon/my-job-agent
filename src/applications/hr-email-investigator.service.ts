@@ -24,8 +24,12 @@ const CAREER_PATHS = ['/careers', '/jobs', '/career', '/about', '/contact', '/co
 const ROLE_PREFIXES = ['hr', 'careers', 'jobs', 'talent', 'recruiting', 'recruitment', 'hiring', 'apply'];
 const NOISE_RE = /(noreply|no-reply|donotreply|example\.(com|org)|sentry\.io|wixpress|googlemail.*noreply|w3\.org|wcap|privacy|dataprotection|gdpr|webmaster|abuse|postmaster|feedback|unsubscribe)/i;
 
-/** Last-two-labels base domain (naukri.com, co.uk etc.) for cross-domain guards. */
-const baseDomain = (d: string): string => d.replace(/^www\./, '').toLowerCase().split('.').slice(-2).join('.');
+/** Last-two-labels base domain (naukri.com, co.uk etc.) for cross-domain guards.
+ *  Accepts either a bare hostname or an email address (domain after @ is used). */
+const baseDomain = (d: string): string => {
+	const host = d.includes('@') ? d.split('@')[1] : d;
+	return host.replace(/^www\./, '').toLowerCase().split('.').slice(-2).join('.');
+};
 
 @Injectable()
 export class HrEmailInvestigator {
@@ -77,18 +81,28 @@ export class HrEmailInvestigator {
 	 *  Domain guard: emails must share the page host's base domain — footer/badge
 	 *  addresses from unrelated domains (w3.org, github.io, portals) are dropped. */
 	private async curlAndScan(url: string, source: string): Promise<HrContact[]> {
-		try {
-			const res = await fetch(url, {
-				headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121 Safari/537.36' },
-				signal: AbortSignal.timeout(12_000),
-			});
-			if (!res.ok) return [];
-			const html = await res.text();
-			const pageHost = new URL(url).hostname;
-			return this.scanText(html, source).filter((c) => baseDomain(c.email) === baseDomain(pageHost));
-		} catch {
-			return [];
+		const attempts = [url];
+		// bare-domain self-redirect loops are common (301 -> same URL); the
+		// www. variant usually serves fine — retry it before giving up
+		if (!url.includes('://www.')) {
+			attempts.push(url.replace('://', '://www.'));
 		}
+		for (const target of attempts) {
+			try {
+				const res = await fetch(target, {
+					headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/121 Safari/537.36' },
+					signal: AbortSignal.timeout(12_000),
+					redirect: 'follow',
+				});
+				if (!res.ok) continue;
+				const html = await res.text();
+				const pageHost = new URL(res.url).hostname;
+				return this.scanText(html, source).filter((c) => baseDomain(c.email) === baseDomain(pageHost));
+			} catch {
+				continue;
+			}
+		}
+		return [];
 	}
 
 	private scanText(text: string, source: string): HrContact[] {
@@ -119,8 +133,18 @@ export class HrEmailInvestigator {
 		// heuristic 1: direct guesses, verified via DNS A record (DoH) — more
 		// reliable than HTTP HEAD (small sites often block HEAD or have TLS quirks)
 		const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '');
-		for (const dom of [`${slug}.com`, `${slug}.io`, `${slug}.co`, `${slug}.in`, `${slug}.tech`, `${slug}.net`]) {
-			if (await this.dnsResolves(dom)) return dom;
+		const brands = [slug];
+		// brand-name candidates: "(iCloudEMS)" parentheticals and the leading word(s)
+		// before "Pvt"/"Ltd"/"Inc"/"LLC" — the legal name slug often fails DNS while
+		// the brand domain resolves (e.g. "CNV Labs India Pvt. Ltd (iCloudEMS)" -> icloudems.com)
+		const paren = company.match(/\(([^)]+)\)/);
+		if (paren) brands.push(paren[1].toLowerCase().replace(/[^a-z0-9]+/g, ''));
+		const legalTrim = company.toLowerCase().replace(/\b(pvt|ltd|inc|llc|private|limited|technologies?|solutions?|systems?|labs?|labs|india|ind)\b\.?/g, '').replace(/[^a-z0-9]+/g, '');
+		if (legalTrim.length >= 4) brands.push(legalTrim);
+		for (const b of [...new Set(brands)]) {
+			for (const dom of [`${b}.com`, `${b}.io`, `${b}.co`, `${b}.in`, `${b}.tech`, `${b}.net`]) {
+				if (await this.dnsResolves(dom)) return dom;
+			}
 		}
 		// heuristic 2: DuckDuckGo HTML search — parse ONLY real result links
 		try {
