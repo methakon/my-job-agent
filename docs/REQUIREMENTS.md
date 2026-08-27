@@ -337,6 +337,22 @@ reload:
 - Astro engine is pure-JS (`astronomy-engine`, MIT) — no native builds;
   Lahiri ayanamsa constant 24° for sidereal positions.
 
+### Mail & reply-tracking (updated 2026-08-28)
+
+- **Sending account**: job-application emails go out from
+  `swarna.s.jobs@gmail.com` (new Gmail, added as primary sender in
+  `mail_accounts`). Naukri + LinkedIn keep the OLD email
+  (`bapay.9@gmail.com`) — portal credentials are untouched.
+- **Reply tracking checks BOTH mailboxes**: `EmailTrackerService` polls every
+  `active` row in `mail_accounts` (old + new) via IMAP with the encrypted
+  app-passwords stored in the DB — it no longer reads `IMAP_HOST/IMAP_USER/
+  IMAP_PASSWORD` env vars (those were never set, so tracking silently never
+  ran). Matched employer replies are stored in `status_updates` as
+  `sourceType='email'` with the full mail content (`contentHtml`) and the
+  received date (`created_at`) — date-wise tracking with content.
+- Poll cadence: every 30 minutes (`@Interval`), plus manual trigger on boot
+  and via the existing poll endpoint.
+
 ## 5. Out of scope (current phase)
 
 - Browser automation of LinkedIn/Naukri/Monster form filling (adapters reserved;
