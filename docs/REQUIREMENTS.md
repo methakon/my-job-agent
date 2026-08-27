@@ -100,6 +100,23 @@ astro muhurta plan) and parked in a `pre_apply_items` queue:
 5. Portal **cap 27 applications** (user rule): `apply_settings.maxPerPortal`
    defaults to 27 per portal; engine refuses when a portal's submitted
    application count reaches the cap.
+6. **Explicit approval only — silence is NEVER approval** (user rule, added
+   2026-08-27 after an incident where a timed-out approval question was
+   auto-approved and 3 jobs were emailed without the user's consent):
+   approval questions must never auto-approve on timeout; nothing sends
+   without the user's explicit `approve`. Own-judgment/auto-approval may be
+   enabled only when the system is "near to perfection" (user rule) — not at
+   this early stage.
+7. **Retries never duplicate** (user defect report 2026-08-27: repeated sent
+   mails for the same job): a failed application row is retried IN PLACE
+   (same row updated, backoff 5/10/20/30 min, max 4 attempts); retries never
+   INSERT new application rows. RetryBackoffService additionally skips any
+   lead that has a pre-apply queue item (queue governs resends) and skips
+   permanent failures (kill switch, caps, already-applied).
+8. **Portal caps never block the HR-email channel** (user defect report
+   2026-08-27): `maxPerPortal` and per-source daily caps apply to
+   portal/ATS submissions only; email sends are governed solely by the
+   MailService mailbox cap (15/day/account, calendar-day rollover).
 
 ### FR-18 Hourly fetch + cap (added 2026-08-27, user rule)
 - Scout interval default changed **6h → 1h** (SCOUT_INTERVAL_MINUTES=60):
@@ -118,6 +135,19 @@ astro muhurta plan) and parked in a `pre_apply_items` queue:
   postings dropped — veto on (w/m/d), (m/w/d), `:in`, ä/ö/ü/ß and German
   role words (Mitarbeiter, Praktikum, Verkauf, Berater); non-IT roles
   (sales/shop/retail) dropped too. English + IT keyword roles kept.
+
+### FR-23 CV professional-experience rules (added 2026-08-27, user rule)
+The ATS CV builder renders PROFESSIONAL EXPERIENCE strictly per user rule
+(verbatim: "it can remove only the company which i have worke duration of
+less than 3-4 month but last job should not be removed"):
+1. **Order**: descending by start (join) date, then end (leave) date —
+   newest role first. NEVER reorder by JD-keyword relevance (that was the
+   "random arrangement" defect).
+2. **Drop rule**: a stint may be hidden ONLY when its duration is under
+   4 months AND it is not the most recent role. The **last job is NEVER
+   removed**, whatever its duration. Stints ≥ 12 months are never removed.
+3. Same-company adjacent stints merge (earliest join → latest leave);
+   `present` sorts as latest.
 - Apply chain: A1 uses **Workday** ATS (a1group.wd3.myworkdayjobs.com).
   Adapter resolves the Workday apply URL from each kept lead's detail page
   at scrape time and embeds it in the lead so the direct-channel detector

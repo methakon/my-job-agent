@@ -29,7 +29,7 @@ export class LearningWeightsService {
 			.execute();
 		// MySQL ON DUPLICATE KEY with expressions needs raw fallback:
 		await this.repo.query(
-			`UPDATE learning_weights SET sent = sent + 1, replies = replies + ${replied ? 1 : 0} WHERE metric_key = ?`,
+			`UPDATE learning_weights SET sent = sent + 1, replies = replies + ${replied ? 1 : 0} WHERE \`metricKey\` = ?`,
 			[metricKey],
 		);
 	}

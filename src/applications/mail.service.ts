@@ -92,7 +92,15 @@ export class MailService implements OnModuleInit {
 
 	/** Try primary first, then backup accounts. Daily cap per mailbox keeps volume human. */
 	async send(app: ApplicationEmail): Promise<{ ok: boolean; via?: string; error?: string }> {
+		// Daily rollover: the 15/day mailbox cap resets with the calendar
+		// (2026-08-27 defect: a stale sentToday permanently blocked the only
+		// active mailbox, so every send fell through to dead portal rows).
+		const today = new Date().toDateString();
 		const accounts = (await this.repo.find({ where: { active: true }, order: { isPrimary: 'DESC' } }))
+			.map((a) => {
+				if (a.sentToday > 0 && a.lastSentAt && new Date(a.lastSentAt).toDateString() !== today) a.sentToday = 0;
+				return a;
+			})
 			.filter((a) => a.sentToday < 15);
 		if (accounts.length === 0) return { ok: false, error: 'no-active-mail-account' };
 

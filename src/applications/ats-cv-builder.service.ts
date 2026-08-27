@@ -76,18 +76,19 @@ export class AtsCvBuilder {
 		doc.text([...input.matchedSkills, ...rest].join(' • '));
 		doc.moveDown(0.5);
 
-		// Experience — reorder so roles most relevant to the JD come first within recency tiers
+		// Experience — STRICTLY descending by start (join) date, then end (leave)
+		// date. User rule 2026-08-27: chronological order only; never reorder by
+		// JD relevance (that produced the "random" arrangement users complained of).
 		doc.font('Helvetica-Bold').fontSize(11).text('PROFESSIONAL EXPERIENCE');
 		const jdText = `${input.jobTitle} ${input.jobDescription ?? ''}`.toLowerCase();
-		const scored = input.workHistory.map((w) => ({
-			...w,
-			score: this.relevance(w.summary ?? '', jdText),
-		}));
-		// stable sort: keep recency order but boost strongly-relevant older roles to top group
-		const sorted = [...scored].sort((a, b) => b.score - a.score);
-		const primary = sorted.filter((s) => s.score > 0);
-		const secondary = sorted.filter((s) => s.score === 0);
-		for (const stint of [...primary, ...secondary]) {
+		const sorted = [...input.workHistory].sort((a, b) => {
+			const byFrom = b.from.localeCompare(a.from);
+			if (byFrom !== 0) return byFrom;
+			const aTo = a.to === 'present' ? '9999-99' : a.to;
+			const bTo = b.to === 'present' ? '9999-99' : b.to;
+			return bTo.localeCompare(aTo);
+		});
+		for (const stint of sorted) {
 			doc.font('Helvetica-Bold').fontSize(10).text(`${stint.role} — ${stint.company}`);
 			doc.font('Helvetica').fontSize(9).fillColor('#444444')
 				.text(`${this.fmt(stint.from)} – ${stint.to === 'present' ? 'Present' : this.fmt(stint.to)}`, { continued: false });

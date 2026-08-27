@@ -18,11 +18,13 @@ export interface OptimizedProfile {
 	notes: string[];
 }
 
-const MIN_STINT_MONTHS = 5; // stints shorter than this are hidden from applications by default
-// user rule 2026-08-26: keep all real experience; only hide stints under 3 months.
-// MIN_STINT_MONTHS stays at 5 for safety, but the Indus Net entry (Apr–Aug 2026,
-// ~4.5 months) is a genuine role the user wants kept — it now has a real end date
-// (2026-08) instead of "present".
+const MIN_STINT_MONTHS = 4; // drop ONLY stints shorter than this (user rule 2026-08-27)
+// user rule 2026-08-27 (verbatim): "it can remove only the company which i have
+// worke duration of less than 3-4 month but last job should not be removed".
+// So: stints under 4 months may be hidden — EXCEPT the most recent stint (the
+// last job), which is NEVER removed regardless of duration; stints >= 12 months
+// are never removed either. Ordering is the CV builder's job (descending by
+// join date, then leave date).
 
 /**
  * ProfileOptimizer — scores profile completeness and derives the
@@ -76,11 +78,19 @@ export class ProfileOptimizer {
 		const dropped: WorkStint[] = [];
 		const notes: string[] = [];
 
+		// The most recent stint (last job) is identified by the latest start date,
+		// then latest end date — it is NEVER dropped (user rule 2026-08-27).
+		const ranked = [...merged].sort((a, b) => b.from.localeCompare(a.from) || b.to.localeCompare(a.to));
+		const mostRecent = ranked[0];
+		const isMostRecent = (s: WorkStint): boolean =>
+			mostRecent !== undefined && s.company === mostRecent.company && s.from === mostRecent.from && s.to === mostRecent.to;
+
 		for (const stint of merged) {
 			const months = this.monthsBetween(stint.from, stint.to);
-			if (months < MIN_STINT_MONTHS && months >= 0) {
+			// drop only stints under the threshold (and under 12 months); never the last job
+			if (months >= 0 && months < MIN_STINT_MONTHS && months < 12 && !isMostRecent(stint)) {
 				dropped.push(stint);
-				notes.push(`hidden ${stint.company} (${months} mo — below ${MIN_STINT_MONTHS} month threshold)`);
+				notes.push(`hidden ${stint.company} (${months} mo — under ${MIN_STINT_MONTHS} month threshold, not the last job)`);
 			} else {
 				kept.push(stint);
 			}

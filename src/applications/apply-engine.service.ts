@@ -24,6 +24,7 @@ import { InboxReaderService } from './inbox-reader.service';
 import { LinkedInProfileService } from './linkedin-profile.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
+import { Application } from './application.entity';
 
 /**
  * ApplyEngine — registry of PortalAdapters + submission loop.
@@ -103,7 +104,7 @@ export class ApplyEngineService implements OnModuleInit {
 	 * Generates cover letter from profile + job title/company, resolves custom
 	 * questions via the answer bank; unknown questions → needs_info.
 	 */
-	async applyToLead(leadId: string): Promise<ApplyResult & { applicationId?: string }> {
+	async applyToLead(leadId: string, existingApp?: Application): Promise<ApplyResult & { applicationId?: string }> {
 		const lead = await this.leadRepo.findRecent(500).then((all) => all.find((l) => l.id === leadId));
 		if (!lead) return { ok: false, status: 'failed', errorDetail: 'lead not found' };
 
@@ -138,13 +139,19 @@ export class ApplyEngineService implements OnModuleInit {
 			return { ok: false, status: 'needs_info', missingInfo: profileResp.missingFields.map((f) => `profile.${f}`) };
 		}
 
-		const application = await this.appRepo.createPartial({
-			leadId: lead.id,
-			source: lead.source,
-			status: 'submitting',
-			coverLetter: this.generateCoverLetter(profileData, lead),
-			isSandbox: this.sandboxOn(),
-		});
+		// REUSE the failed row on retry — never spawn duplicate application rows
+		// (user defect report 2026-08-27: repeated sends for the same job).
+		const application =
+			existingApp && existingApp.status === 'failed'
+				? existingApp
+				: await this.appRepo.createPartial({
+						leadId: lead.id,
+						source: lead.source,
+						status: 'submitting',
+						coverLetter: this.generateCoverLetter(profileData, lead),
+						isSandbox: this.sandboxOn(),
+					});
+		if (existingApp && existingApp.status === 'failed') application.status = 'submitting';
 
 		try {
 			const questions = await (adapter as unknown as { probeQuestions?(lead: ScrapedLead): Promise<string[]> }).probeQuestions?.(lead) ?? [];
@@ -420,7 +427,13 @@ export class ApplyEngineService implements OnModuleInit {
 		const setting = await this.settingsRepo.findBySource(item.source);
 		if (this.killSwitchOn()) return { ok: false, status: 'failed', errorDetail: 'kill switch active' };
 		if (setting && !setting.autoApplyEnabled) return { ok: false, status: 'needs_info', missingInfo: [`auto-apply disabled for ${item.source}`] };
-		if (setting) {
+
+		// Resolve the stored channel BEFORE cap checks. FR-18 per-portal caps and
+		// per-source daily caps govern portal/ATS submissions only — HR-email sends
+		// are governed by the MailService mailbox cap (15/day/account). A saturated
+		// portal must never block the email channel (user defect 2026-08-27).
+		const channel: DirectChannel | null = item.channelJson ? JSON.parse(item.channelJson) : null;
+		if (setting && channel?.kind !== 'email') {
 			const dailyCount = await this.appRepo.countTodayBySource(item.source);
 			if (dailyCount >= setting.maxPerDay) return { ok: false, status: 'needs_info', missingInfo: [`daily cap reached (${dailyCount}/${setting.maxPerDay})`] };
 			const totalCount = await this.appRepo.countBySource(item.source);
@@ -428,16 +441,21 @@ export class ApplyEngineService implements OnModuleInit {
 		}
 
 		const profileData = await this.profileService.flatten();
-		const channel: DirectChannel | null = item.channelJson ? JSON.parse(item.channelJson) : null;
 		const cvPath = item.userCvPath ?? item.cvPath;
 
-		const application = await this.appRepo.createPartial({
-			leadId: lead.id,
-			source: item.source,
-			status: 'submitting',
-			coverLetter: item.coverLetter ?? this.generateCoverLetter(profileData, lead),
-			isSandbox: this.sandboxOn(),
-		});
+		// DEDUPE + row reuse: a failed row is RETRIED IN PLACE — retries must never
+		// spawn new application rows (user defect 2026-08-27: repeated sends).
+		const application =
+			existingByLead && existingByLead.status === 'failed'
+				? existingByLead
+				: await this.appRepo.createPartial({
+						leadId: lead.id,
+						source: item.source,
+						status: 'submitting',
+						coverLetter: item.coverLetter ?? this.generateCoverLetter(profileData, lead),
+						isSandbox: this.sandboxOn(),
+					});
+		application.status = 'submitting';
 		try {
 			let result: ApplyResult;
 			if (this.sandboxOn()) {

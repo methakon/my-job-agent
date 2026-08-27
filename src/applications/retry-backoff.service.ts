@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Application } from './application.entity';
 import { LeadRepository } from '../leads/lead.repository';
 import { ApplyEngineService } from './apply-engine.service';
+import { PreApplyItemRepository } from '../astro/pre-apply-item.repository';
 
 /**
  * RetryBackoffService (user rule: auto-retry failed applications after
@@ -22,16 +23,23 @@ export class RetryBackoffService {
 		private readonly appRepo: Repository<Application>,
 		private readonly leadRepo: LeadRepository,
 		private readonly engine: ApplyEngineService,
+		private readonly preApplyRepo: PreApplyItemRepository,
 	) {}
 
 	/** Check every minute for applications whose backoff has elapsed. */
 	@Interval(60_000)
 	async tick(): Promise<void> {
-		const due = await this.appRepo
+		// FR-19: queue-governed leads are NEVER auto-retried — the user decides
+		// resends via the pre-apply queue (approval rule 2026-08-27: silence ≠ yes).
+		// Permanent failures (caps, kill switch, no mailbox) are never retried.
+		const queuedLeadIds = new Set((await this.preApplyRepo.findAll(500)).map((q) => q.leadId));
+		const due = (await this.appRepo
 			.createQueryBuilder('a')
 			.where('a.status = :s', { s: 'failed' })
 			.andWhere('a.retryCount < :max', { max: BACKOFF_STEPS_MS.length })
-			.getMany();
+			.getMany())
+			.filter((a) => !queuedLeadIds.has(a.leadId))
+			.filter((a) => !/kill switch|portal cap|daily cap|already applied|no-active-mail-account/i.test(a.errorDetail ?? ''));
 
 		const now = Date.now();
 		for (const app of due) {
@@ -45,7 +53,7 @@ export class RetryBackoffService {
 			await this.appRepo.save(app); // persist first so a crash can't loop
 
 			try {
-				const result = await this.engine.applyToLead(app.leadId);
+				const result = await this.engine.applyToLead(app.leadId, app);
 				app.status = result.status === 'submitted' ? 'submitted' : result.status;
 				if (result.errorDetail) app.errorDetail = result.errorDetail;
 				await this.appRepo.save(app);
