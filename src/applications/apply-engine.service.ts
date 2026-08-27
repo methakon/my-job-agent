@@ -302,6 +302,7 @@ export class ApplyEngineService implements OnModuleInit {
 			const cvPath = await this.cvBuilder.build({
 				profile: profileData,
 				workHistory: optimized.workHistory,
+				education: optimized.education,
 				matchedSkills,
 				allSkills: [...new Set([...allSkills, ...tuned.add])],
 				jobTitle: lead.title,

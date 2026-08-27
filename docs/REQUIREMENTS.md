@@ -148,6 +148,13 @@ less than 3-4 month but last job should not be removed"):
    removed**, whatever its duration. Stints ≥ 12 months are never removed.
 3. Same-company adjacent stints merge (earliest join → latest leave);
    `present` sorts as latest.
+4. **Education history gets the same treatment** (user rule, added 2026-08-27):
+   all education entries from the profile (`educationJson` — school, degree,
+   from, to, note) are rendered, strictly descending by start then end date,
+   never dropped, never relevance-ordered. Profile API (GET /profile) and
+   the upsert DTO expose `education`; seeded with MCA (T. John College,
+   2005–2008) + BCA (Dumkal Institute, 2002–2005); the HK-dir Norway
+   recognition statement line stays after the list.
 - Apply chain: A1 uses **Workday** ATS (a1group.wd3.myworkdayjobs.com).
   Adapter resolves the Workday apply URL from each kept lead's detail page
   at scrape time and embeds it in the lead so the direct-channel detector

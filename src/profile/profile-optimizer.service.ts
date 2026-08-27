@@ -10,11 +10,21 @@ export interface WorkStint {
 	summary?: string;
 }
 
+export interface EducationEntry {
+	school: string;
+	degree: string;
+	from: string;
+	to: string;
+	note?: string;
+}
+
 export interface OptimizedProfile {
 	completenessScore: number; // 0-100
 	profile: Record<string, string>;
 	workHistory: WorkStint[];
 	droppedStints: WorkStint[];
+	/** Education history — ALL entries, descending by start then end date. */
+	education: EducationEntry[];
 	notes: string[];
 }
 
@@ -47,7 +57,7 @@ export class ProfileOptimizer {
 	async optimize(): Promise<OptimizedProfile> {
 		const p = await this.profileRepo.findFirst();
 		if (!p) {
-			return { completenessScore: 0, profile: {}, workHistory: [], droppedStints: [], notes: ['no profile saved yet'] };
+			return { completenessScore: 0, profile: {}, workHistory: [], droppedStints: [], education: [], notes: ['no profile saved yet'] };
 		}
 
 		let stints: WorkStint[] = [];
@@ -102,6 +112,16 @@ export class ProfileOptimizer {
 			notes.push(`kept ${longest.company} as longest experience despite short duration`);
 		}
 
+		// Education history — same rules as experience (FR-23): ALL entries kept,
+		// descending by start then end date. Never dropped, never relevance-ordered.
+		let education: EducationEntry[] = [];
+		try {
+			education = p.educationJson ? JSON.parse(p.educationJson) : [];
+		} catch {
+			education = [];
+		}
+		education = [...education].sort((a, b) => b.from.localeCompare(a.from) || b.to.localeCompare(a.to));
+
 		// completeness score across application-critical fields
 		const fields: Array<[() => unknown, number]> = [
 			[() => p.name, 10],
@@ -120,11 +140,12 @@ export class ProfileOptimizer {
 			completenessScore: score,
 			profile: Object.fromEntries(
 				Object.entries(p as unknown as Record<string, unknown>)
-					.filter(([k, v]) => !k.startsWith('workHistory') && (typeof v === 'string' || typeof v === 'number'))
+					.filter(([k, v]) => !k.startsWith('workHistory') && !k.startsWith('education') && (typeof v === 'string' || typeof v === 'number'))
 					.map(([k, v]) => [k, String(v)]),
 			),
 			workHistory: kept,
 			droppedStints: dropped,
+			education,
 			notes,
 		};
 	}

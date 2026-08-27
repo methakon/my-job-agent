@@ -13,9 +13,19 @@ export interface CvWorkStint {
 	summary?: string;
 }
 
+export interface CvEducation {
+	school: string;
+	degree: string;
+	from: string;
+	to: string;
+	note?: string;
+}
+
 export interface TailoredCvInput {
 	profile: Record<string, string>;
 	workHistory: CvWorkStint[];
+	/** Education history — rendered ALL, descending by start then end date. */
+	education?: CvEducation[];
 	/** Skills present in THIS job description — ordered by relevance. */
 	matchedSkills: string[];
 	/** Full skill list (rest, listed after matched). */
@@ -97,11 +107,25 @@ export class AtsCvBuilder {
 			doc.moveDown(0.4);
 		}
 
-		// Education & eligibility
+		// Education & eligibility — same rules as experience (FR-23): ALL entries
+		// kept, strictly descending by start then end date, never relevance-ordered.
 		doc.font('Helvetica-Bold').fontSize(11).text('EDUCATION & CERTIFICATIONS');
 		doc.font('Helvetica').fontSize(10);
-		doc.text('MCA — T. John College, Bangalore (2005–2008)');
-		doc.text('BCA — Dumkal Institute of Engineering & Technology (2002–2005)');
+		const education = [...(input.education ?? [])].sort((a, b) => {
+			const byFrom = b.from.localeCompare(a.from);
+			if (byFrom !== 0) return byFrom;
+			return b.to.localeCompare(a.to);
+		});
+		if (education.length === 0) {
+			// fallback (profile not yet populated): keep the known history visible
+			doc.text('MCA — T. John College, Bangalore (2005–2008)');
+			doc.text('BCA — Dumkal Institute of Engineering & Technology (2002–2005)');
+		}
+		for (const edu of education) {
+			const yrs = edu.to && edu.to !== 'present' ? `${edu.from}–${edu.to}` : `${edu.from}–present`;
+			const label = [edu.degree, edu.school].filter(Boolean).join(' — ');
+			doc.text(`${label} (${yrs})${edu.note ? ` — ${edu.note}` : ''}`);
+		}
 		doc.text('HK-dir verified foreign education (Norway recognition statement available)');
 		// user rule: no "Tailored for…" watermark line on the CV
 

@@ -16,6 +16,7 @@ export class ProfileResponseDto {
 	portfolioUrl!: string | null;
 	currentLocation!: string | null;
 	workHistory!: Array<{ company: string; role: string; from: string; to: string; summary?: string }>;
+	education!: Array<{ school: string; degree: string; from: string; to: string; note?: string }>;
 	missingFields!: string[];
 }
 
@@ -58,4 +59,7 @@ export class UpsertProfileDto {
 
 	@IsOptional() @IsArray()
 	workHistory?: Array<{ company: string; role: string; from: string; to: string; summary?: string }>;
+
+	@IsOptional() @IsArray()
+	education?: Array<{ school: string; degree: string; from: string; to: string; note?: string }>;
 }

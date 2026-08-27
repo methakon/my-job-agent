@@ -55,6 +55,10 @@ export class CandidateProfile {
 	@Column({ type: 'text', nullable: true })
 	workHistoryJson!: string | null;
 
+	/** JSON array [{school, degree, from, to, note?}] */
+	@Column({ type: 'text', nullable: true })
+	educationJson!: string | null;
+
 	@CreateDateColumn({ name: 'created_at' })
 	createdAt!: Date;
 
