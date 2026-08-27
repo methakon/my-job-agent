@@ -169,7 +169,6 @@ export class AtsCvBuilder {
 			const label = [edu.degree, edu.school].filter(Boolean).join(' — ');
 			doc.text(`${label} (${yrs})${edu.note ? ` — ${edu.note}` : ''}`);
 		}
-		doc.text('HK-dir verified foreign education (Norway recognition statement available)');
 		// user rule: no "Tailored for…" watermark line on the CV
 
 		// resolve only when the file is FULLY flushed to disk (doc 'end' fires
