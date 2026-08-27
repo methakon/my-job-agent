@@ -21,11 +21,22 @@ export interface CvEducation {
 	note?: string;
 }
 
+export interface CvProject {
+	name: string;
+	client?: string;
+	tech: string[];
+	from?: string;
+	to?: string;
+	summary?: string;
+}
+
 export interface TailoredCvInput {
 	profile: Record<string, string>;
 	workHistory: CvWorkStint[];
 	/** Education history — rendered ALL, descending by start then end date. */
 	education?: CvEducation[];
+	/** Major projects — selected & ordered by JD skill relevance (user rule 2026-08-27). */
+	projects?: CvProject[];
 	/** Skills present in THIS job description — ordered by relevance. */
 	matchedSkills: string[];
 	/** Full skill list (rest, listed after matched). */
@@ -54,7 +65,8 @@ export class AtsCvBuilder {
 		const filePath = path.join(dir, `Swarna_Sekhar_Dhar_${safe}.pdf`);
 
 		const doc = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 40, left: 48, right: 48 } });
-		doc.pipe(fs.createWriteStream(filePath));
+		const out = fs.createWriteStream(filePath);
+		doc.pipe(out);
 
 		const p = input.profile;
 
@@ -107,6 +119,37 @@ export class AtsCvBuilder {
 			doc.moveDown(0.4);
 		}
 
+		// PROJECTS — user rule 2026-08-27: add/remove projects per the JD's
+		// skill requirement. Only real profile projects are ever shown (never
+		// fabricated): scored by skill overlap with the job (matchedSkills ×2,
+		// allSkills ×1), tie-broken by recency; top 2 always kept, further ones
+		// only when they overlap the JD; capped at 5 to keep the CV tight.
+		const norm = (s: string): string => s.trim().toLowerCase();
+		const jdMatched = new Set(input.matchedSkills.map(norm));
+		const jdSkills = new Set([...input.matchedSkills, ...input.allSkills].map(norm));
+		const projects = [...(input.projects ?? [])]
+			.map((pr) => ({
+				pr,
+				score: (pr.tech ?? []).reduce((s, t) => {
+					const k = norm(t);
+					return s + (jdMatched.has(k) ? 2 : jdSkills.has(k) ? 1 : 0);
+				}, 0),
+			}))
+			.sort((a, b) => b.score - a.score || String(b.pr.from ?? '').localeCompare(String(a.pr.from ?? '')))
+			.filter((x, i) => x.score > 0 || i < 2)
+			.slice(0, 5)
+			.map((x) => x.pr);
+		if (projects.length > 0) {
+			doc.font('Helvetica-Bold').fontSize(11).text('PROJECTS');
+			doc.font('Helvetica').fontSize(10);
+			for (const pr of projects) {
+				const who = [pr.name, pr.client].filter(Boolean).join(' — ');
+				const tech = pr.tech && pr.tech.length > 0 ? ` (${pr.tech.join(', ')})` : '';
+				doc.text(`• ${who}: ${pr.summary ?? ''}${tech}`);
+			}
+			doc.moveDown(0.4);
+		}
+
 		// Education & eligibility — same rules as experience (FR-23): ALL entries
 		// kept, strictly descending by start then end date, never relevance-ordered.
 		doc.font('Helvetica-Bold').fontSize(11).text('EDUCATION & CERTIFICATIONS');
@@ -129,8 +172,12 @@ export class AtsCvBuilder {
 		doc.text('HK-dir verified foreign education (Norway recognition statement available)');
 		// user rule: no "Tailored for…" watermark line on the CV
 
-		await new Promise<void>((resolve) => {
-			doc.on('end', () => resolve());
+		// resolve only when the file is FULLY flushed to disk (doc 'end' fires
+		// when the readable is done — the write stream may still be buffering;
+		// awaiting 'finish' on the stream guarantees callers get a complete PDF)
+		await new Promise<void>((resolve, reject) => {
+			out.on('finish', () => resolve());
+			out.on('error', (e) => reject(e));
 			doc.end();
 		});
 		this.logger.log(`ATS CV generated: ${filePath}`);

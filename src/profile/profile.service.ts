@@ -31,6 +31,7 @@ export class ProfileService {
 		if (dto.currentLocation !== undefined) profile.currentLocation = dto.currentLocation;
 		if (dto.workHistory !== undefined) profile.workHistoryJson = JSON.stringify(dto.workHistory);
 		if (dto.education !== undefined) profile.educationJson = JSON.stringify(dto.education);
+		if (dto.projects !== undefined) profile.projectsJson = JSON.stringify(dto.projects);
 		return this.profileRepo.save(profile);
 	}
 
@@ -58,6 +59,12 @@ export class ProfileService {
 		} catch {
 			education = [];
 		}
+		let projects: ProfileResponseDto['projects'] = [];
+		try {
+			projects = p.projectsJson ? JSON.parse(p.projectsJson) : [];
+		} catch {
+			projects = [];
+		}
 		return {
 			id: p.id,
 			name: p.name,
@@ -74,6 +81,7 @@ export class ProfileService {
 			currentLocation: p.currentLocation,
 			workHistory,
 			education,
+			projects,
 			missingFields: missing,
 		};
 	}

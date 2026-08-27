@@ -18,6 +18,15 @@ export interface EducationEntry {
 	note?: string;
 }
 
+export interface ProjectEntry {
+	name: string;
+	client?: string;
+	tech: string[];
+	from?: string;
+	to?: string;
+	summary?: string;
+}
+
 export interface OptimizedProfile {
 	completenessScore: number; // 0-100
 	profile: Record<string, string>;
@@ -25,6 +34,8 @@ export interface OptimizedProfile {
 	droppedStints: WorkStint[];
 	/** Education history — ALL entries, descending by start then end date. */
 	education: EducationEntry[];
+	/** Major projects — ALL kept here; the CV builder selects/orders by JD skill relevance. */
+	projects: ProjectEntry[];
 	notes: string[];
 }
 
@@ -57,7 +68,7 @@ export class ProfileOptimizer {
 	async optimize(): Promise<OptimizedProfile> {
 		const p = await this.profileRepo.findFirst();
 		if (!p) {
-			return { completenessScore: 0, profile: {}, workHistory: [], droppedStints: [], education: [], notes: ['no profile saved yet'] };
+			return { completenessScore: 0, profile: {}, workHistory: [], droppedStints: [], education: [], projects: [], notes: ['no profile saved yet'] };
 		}
 
 		let stints: WorkStint[] = [];
@@ -122,6 +133,15 @@ export class ProfileOptimizer {
 		}
 		education = [...education].sort((a, b) => b.from.localeCompare(a.from) || b.to.localeCompare(a.to));
 
+		// Major projects — ALL kept (never dropped); selection/ordering for the
+		// CV happens in the builder by JD skill relevance (user rule 2026-08-27).
+		let projects: ProjectEntry[] = [];
+		try {
+			projects = p.projectsJson ? JSON.parse(p.projectsJson) : [];
+		} catch {
+			projects = [];
+		}
+
 		// completeness score across application-critical fields
 		const fields: Array<[() => unknown, number]> = [
 			[() => p.name, 10],
@@ -140,12 +160,13 @@ export class ProfileOptimizer {
 			completenessScore: score,
 			profile: Object.fromEntries(
 				Object.entries(p as unknown as Record<string, unknown>)
-					.filter(([k, v]) => !k.startsWith('workHistory') && !k.startsWith('education') && (typeof v === 'string' || typeof v === 'number'))
+					.filter(([k, v]) => !k.startsWith('workHistory') && !k.startsWith('education') && !k.startsWith('projects') && (typeof v === 'string' || typeof v === 'number'))
 					.map(([k, v]) => [k, String(v)]),
 			),
 			workHistory: kept,
 			droppedStints: dropped,
 			education,
+			projects,
 			notes,
 		};
 	}

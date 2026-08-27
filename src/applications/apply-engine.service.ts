@@ -303,6 +303,7 @@ export class ApplyEngineService implements OnModuleInit {
 				profile: profileData,
 				workHistory: optimized.workHistory,
 				education: optimized.education,
+				projects: optimized.projects,
 				matchedSkills,
 				allSkills: [...new Set([...allSkills, ...tuned.add])],
 				jobTitle: lead.title,

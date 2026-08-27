@@ -17,6 +17,7 @@ export class ProfileResponseDto {
 	currentLocation!: string | null;
 	workHistory!: Array<{ company: string; role: string; from: string; to: string; summary?: string }>;
 	education!: Array<{ school: string; degree: string; from: string; to: string; note?: string }>;
+	projects!: Array<{ name: string; client?: string; tech: string[]; from?: string; to?: string; summary?: string }>;
 	missingFields!: string[];
 }
 
@@ -62,4 +63,7 @@ export class UpsertProfileDto {
 
 	@IsOptional() @IsArray()
 	education?: Array<{ school: string; degree: string; from: string; to: string; note?: string }>;
+
+	@IsOptional() @IsArray()
+	projects?: Array<{ name: string; client?: string; tech: string[]; from?: string; to?: string; summary?: string }>;
 }

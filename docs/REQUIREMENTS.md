@@ -155,6 +155,17 @@ less than 3-4 month but last job should not be removed"):
    the upsert DTO expose `education`; seeded with MCA (T. John College,
    2005–2008) + BCA (Dumkal Institute, 2002–2005); the HK-dir Norway
    recognition statement line stays after the list.
+5. **Major projects section — profile + JD-driven selection** (user rule,
+   added 2026-08-27): profile stores `projectsJson` (name, client?, tech[],
+   from?, to?, summary?) via the upsert DTO and GET /profile response;
+   seeded with the 9 projects from the user's Final ATS CV. The CV builder
+   selects/orders projects by overlap with the job's skills (matchedSkills
+   ×2, allSkills ×1), tie-broken by recency; the top 2 are always shown,
+   further projects only when they overlap the JD; capped at 5. Only real
+   profile projects are ever rendered — never fabricated.
+6. **CV PDF flush guarantee**: AtsCvBuilder awaits the write stream's
+   `finish` (not the document's `end`), so callers never read a
+   half-written PDF.
 - Apply chain: A1 uses **Workday** ATS (a1group.wd3.myworkdayjobs.com).
   Adapter resolves the Workday apply URL from each kept lead's detail page
   at scrape time and embeds it in the lead so the direct-channel detector
