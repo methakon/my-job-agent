@@ -59,8 +59,13 @@ export class ProfileOptimizer {
 	constructor(private readonly profileRepo: ProfileRepository) {}
 
 	private monthsBetween(from: string, to: string): number {
-		const f = new Date(`${from}-01T00:00:00Z`).getTime();
-		const t = to === 'present' ? Date.now() : new Date(`${to}-01T00:00:00Z`).getTime();
+		const parse = (s: string): number => {
+			if (s === 'present') return Date.now();
+			const iso = /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00Z` : `${s}-01T00:00:00Z`;
+			return new Date(iso).getTime();
+		};
+		const f = parse(from);
+		const t = parse(to);
 		if (Number.isNaN(f) || Number.isNaN(t)) return 999;
 		return Math.round((t - f) / (30.44 * 864e5));
 	}

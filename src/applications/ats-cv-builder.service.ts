@@ -201,8 +201,8 @@ export class AtsCvBuilder {
 
 	private fmt(ym: string): string {
 		const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-		const [y, m] = ym.split('-');
-		const idx = Number(m) - 1;
-		return `${months[idx] ?? m} ${y}`;
+		const [y, m, d] = ym.split('-');
+		const mon = months[Number(m) - 1] ?? m;
+		return d ? `${Number(d)} ${mon} ${y}` : `${mon} ${y}`;
 	}
 }
