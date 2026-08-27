@@ -100,10 +100,11 @@ push `origin/dev` — never skip even on interrupt.
 6. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
 7. Outlook app-password (optional backup sender) — pending from user.
 8. GitHub/portfolio URL for profile → completeness 100% — pending from user.
-9. **Company-redirect apply handling** (FR-19): jobs whose apply link redirects
-   to the company's own page — detect, drive form (FR-15 rules), and if the page
-   needs login/register, handle that too (legit automation or flag manual-apply
-   with staged data in pre-apply queue).
+9. **Company-redirect apply handling** (FR-19, **always-company rule**: no quick
+   apply → ALWAYS apply via company website, never skip/email-only): jobs whose
+   apply link redirects to the company's own page — detect, drive form (FR-15
+   rules), and if the page needs login/register, handle that too (legit
+   automation or flag manual-apply with staged data in pre-apply queue).
 10. **Quick-question user input** (FR-20): `/quick-question` takes free text
     from user; answer from live state (leads, astro, muhurta, applications).
 11. **Live list updates while applying** (FR-21): per-item status transitions

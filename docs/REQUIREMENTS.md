@@ -48,6 +48,13 @@ panchanga) and gated by a **pre-apply review queue** the user controls.
    the posting — Greenhouse offers verified live via public API.
 2. **HR email** found in posting → send tailored email + PDF CV via SMTP.
 3. **Portal easy-apply only as last resort.**
+- **Always-company rule (added 2026-08-27, user rule): whenever quick apply is
+  NOT available, ALWAYS apply through the company website** — do not skip the
+  lead and do not fall back to email-only; drive the company's own application
+  page per FR-19 (redirect detection + form automation per FR-15, incl. the
+  login/register scenario). Quick apply (portal easy-apply) is used only when
+  the company-website route is genuinely not available (no apply link, no
+  discoverable ATS, company site down/geo-blocked).
 - Global kill switch (`APPLY_KILL_SWITCH`) + per-source toggles + daily caps.
 
 ### FR-16 Astro-enabled application timing — shubh muhurta (added 2026-08-27, user rule)
@@ -196,6 +203,8 @@ POST /auto-apply/run.
 - Daily cap 15 emails/account.
 
 ### FR-19 Company-redirect application handling (added 2026-08-27, user request)
+**MANDATORY channel per FR-3 always-company rule (2026-08-27):** when quick
+apply is not available, the agent ALWAYS applies through the company website.
 When a job's apply link redirects to the company's own application page
 (not a portal adapter the agent can drive directly), handle it:
 1. Detect redirect apply URLs (http redirect chain, meta refresh, or apply-link
