@@ -61,10 +61,24 @@ export class AtsCvBuilder {
 	private readonly logger = new Logger(AtsCvBuilder.name);
 
 	async build(input: TailoredCvInput): Promise<string> {
-		const dir = path.join(process.cwd(), 'generated', 'cv');
-		fs.mkdirSync(dir, { recursive: true });
-		const safe = `${input.jobCompany}-${input.jobTitle}`.replace(/[^a-z0-9]+/gi, '_').slice(0, 60);
-		const filePath = path.join(dir, `Swarna_Sekhar_Dhar_${safe}.pdf`);
+		const baseDir = path.join(process.cwd(), 'generated', 'cv');
+		// Date-wise folder (user request 2026-08-27): save each generated CV into a
+		// folder named DDMMYYYY, e.g. generated/cv/27082026/. Keep all generated CVs
+		// — never overwrite; the folder name is the generation date so a given day's
+		// output lands in one place and earlier dates remain intact.
+		const today = new Date();
+		const folderName = `${
+			String(today.getDate()).padStart(2, '0')
+		}${String(today.getMonth() + 1).padStart(2, '0')}${today.getFullYear()}`;
+		const folderPath = path.join(baseDir, folderName);
+		fs.mkdirSync(folderPath, { recursive: true });
+		const safe = `${input.jobCompany}-${input.jobTitle}`
+			.replace(/[^a-z0-9]+/gi, '_')
+			.slice(0, 60);
+		const filePath = path.join(
+			folderPath,
+			`Swarna_Sekhar_Dhar_${safe}.pdf`,
+		);
 
 		const doc = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 40, left: 48, right: 48 } });
 		const out = fs.createWriteStream(filePath);
