@@ -80,8 +80,12 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-08-27)
+- **Indus folder → profile verification DONE** (commits 1d2a8b5, 5422903, 5f85e8d): folder sectionised by content type; all docs OCR'd; profile now 11 verified stints + 4 education entries with EXACT dates from official letters (rendered "19 Aug 2013" style) + golden-CV job descriptions for the added stints; Experis end fixed to 21-07-2020; added 10th (WBBSE 1999) + 12th (WBCHSE 2002, 55% 2nd div); HK-dir junk line removed from CV builder; optimizer/builder handle day-level dates. Full detail in docs/TODO.md (marked [x]).
+- **Processed on the free model** (upstage/solar-pro4:free via Nous) per user's plan — revert model after.
+
 ## TODO next session (in order)
-0. **Indus folder documents → profile verification** (user rule: "check the documents and sectionised them depending on the content type"; WAIT — user to switch model to a free one first, then process; revert model after). Folder sectionised + OCR done; full verified facts + remaining steps in docs/TODO.md (top of Pending — engineering).
+0. **Tag-<4-month + LinkedIn easy-apply policy** (user instruction verbatim 2026-08-27): "keep all of them in profile section document tagged for those who are less than 4 month but ignore them while creating tailored cv for sending or appliying . and for linkedin easy apply use the last uploaded cv only no need to custom tailor them". Profile already keeps all 11 stints ✓; add explicit TAG (tagged/shortStint flag in workHistory + DTO); AtsCvBuilder skips tagged; LinkedIn easy-apply sends last uploaded CV, no tailoring. Also ASK USER the DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology).
 1. **Pre-apply queue is FULL (10 ready items, astro 35–95)** — user reviews at
    `/pre-apply-page` and approves; MuhurtaSendService sweep (10 min) batch-sends
    all approved inside the next shubh window (today: 06:56–13:16 IST, then
