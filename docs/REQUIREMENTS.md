@@ -187,7 +187,7 @@ keywords get responses, best send hours, per-portal success. Future behaviour
 (cover-letter emphasis, channel choice, send timing) adapts from these stats.
 Scaffold live in ProcessLearningService; weights persistence next iteration.
 
-### FR-13 Deep HR-email investigation (added 2026-08-25, user rule)
+### FR-13 Deep HR-email investigation (added 2026-08-25; AMENDED 2026-08-27 — evidence-only)
 When a job description itself contains no HR email, the agent investigates
 before giving up, in escalating steps:
 1. Curl the actual job posting URL → scan page for emails.
@@ -195,14 +195,16 @@ before giving up, in escalating steps:
    page → scan for HR/careers email.
 3. Try common career-page paths: /careers, /jobs, /about, /contact,
    /careers/join-us etc.
-4. Pattern-guess role mailboxes on the company domain:
-   hr@, careers@, jobs@, talent@, recruiting@, hiring@<company-domain>.
-5. Verify deliverability before use (MX check at minimum).
+**EVIDENCE ONLY (user rule 2026-08-27 — supersedes 2026-08-25)**: pattern-guessing
+role mailboxes (hr@, careers@, jobs@, talent@, recruiting@, hiring@) is FORBIDDEN.
+A guessed address is never a channel. Only addresses actually found on the JD,
+job page, or company pages (domain-guarded against noise/footers) may be used.
+If no evidence-based contact exists, the engine falls through per channel
+priority: portal easy-apply with the LAST UPLOADED CV (no tailoring) or the
+company ATS link (external apply link → company portal).
 Every discovered address is cached in the DB with its source and confidence
-so future applications to the same company reuse it. Pattern-guess addresses
-(hr@, careers@ etc.) ARE used for sending (user rule 2026-08-25: job posters
-often use their official mailboxes); MX verification still required and the
-confidence level is logged on every application record.
+so future applications to the same company reuse it. Confidence is logged on
+every application record.
 ### FR-12 Email inbox reading — OTP + replies (added 2026-08-25)
 1. **OTP auto-read:** when a portal login/signup sends a verification code,
    the agent fetches it from the inbox automatically and completes the

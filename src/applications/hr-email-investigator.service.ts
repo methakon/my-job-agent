@@ -5,8 +5,12 @@ import { Injectable, Logger } from '@nestjs/common';
  * contact for a company when the job description itself has none:
  *   1. curl the job posting URL → scan for emails
  *   2. curl company site career pages (/careers /jobs /about /contact …)
- *   3. pattern-guess role mailboxes on the company domain (hr@ careers@ jobs@
- *      talent@ recruiting@ hiring@) — verified via MX record
+ *   3. homepage scan
+ * EVIDENCE ONLY (user rule 2026-08-27): pattern-guessing role mailboxes
+ * (hr@ careers@ …) is FORBIDDEN — a guessed address is never a channel.
+ * If no evidence-based contact exists, return null; the apply engine then
+ * falls through to portal apply (last uploaded CV, no tailoring) or the
+ * company ATS link instead.
  * Results are cached per company (in-memory + DB later) with confidence.
  */
 export interface HrContact {
@@ -63,14 +67,9 @@ export class HrEmailInvestigator {
 		const home = await this.curlAndScan(`https://${domain}`, 'home-page');
 		if (home.length > 0) return this.pickBest(home, 'medium');
 
-		// 4. pattern-guess role mailboxes + MX verification
-		for (const prefix of ROLE_PREFIXES) {
-			const guess = `${prefix}@${domain}`;
-			if (await this.hasMxRecord(domain)) {
-				this.logger.log(`pattern-guess contact ${guess} (MX verified for ${domain})`);
-				return { email: guess, confidence: 'low', source: `pattern-guess:${prefix}` };
-			}
-		}
+		// EVIDENCE ONLY (user rule 2026-08-27): no pattern-guessing role
+		// mailboxes (hr@ careers@ …). A guessed address is never a channel —
+		// return null so the engine falls through to portal / ATS apply.
 		return null;
 	}
 
@@ -152,20 +151,6 @@ export class HrEmailInvestigator {
 			});
 			const data = (await res.json()) as { Answer?: Array<{ type: number }> };
 			return Array.isArray(data.Answer) && data.Answer.some((a) => a.type === 1);
-		} catch {
-			return false;
-		}
-	}
-
-	private async hasMxRecord(domain: string): Promise<boolean> {
-		// DNS-over-HTTPS MX lookup via Cloudflare
-		try {
-			const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=MX`, {
-				headers: { accept: 'application/dns-json' },
-				signal: AbortSignal.timeout(6_000),
-			});
-			const data = (await res.json()) as { Answer?: Array<{ type: number }> };
-			return Array.isArray(data.Answer) && data.Answer.some((a) => a.type === 15);
 		} catch {
 			return false;
 		}

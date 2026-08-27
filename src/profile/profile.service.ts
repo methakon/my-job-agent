@@ -79,6 +79,7 @@ export class ProfileService {
 			githubUrl: p.githubUrl,
 			portfolioUrl: p.portfolioUrl,
 			currentLocation: p.currentLocation,
+			lastUploadedCvPath: p.lastUploadedCvPath,
 			workHistory,
 			education,
 			projects,

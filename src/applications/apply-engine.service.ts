@@ -124,7 +124,10 @@ export class ApplyEngineService implements OnModuleInit {
 
 		const setting = await this.settingsRepo.findBySource(lead.source);
 		const adapter = this.adapters.get(lead.source);
-		if (!adapter) return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };
+		// LinkedIn leads have no portal adapter (easy-apply automation is off by
+		// policy — ban risk) but CAN still apply via a detected direct channel
+		// (company ATS / HR email) or run the sandbox pipeline. Do not gate them.
+		if (!adapter && lead.source !== 'linkedin') return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };
 		if (this.killSwitchOn()) return { ok: false, status: 'failed', errorDetail: 'kill switch active' };
 		if (setting && !setting.autoApplyEnabled) return { ok: false, status: 'needs_info', missingInfo: [`auto-apply disabled for ${lead.source} — enable in settings`] };
 
@@ -154,7 +157,7 @@ export class ApplyEngineService implements OnModuleInit {
 		if (existingApp && existingApp.status === 'failed') application.status = 'submitting';
 
 		try {
-			const questions = await (adapter as unknown as { probeQuestions?(lead: ScrapedLead): Promise<string[]> }).probeQuestions?.(lead) ?? [];
+			const questions = await (adapter as unknown as { probeQuestions?(lead: ScrapedLead): Promise<string[]> } | undefined)?.probeQuestions?.(lead) ?? [];
 			const resolved = await this.answers.resolve(questions);
 			const unanswered = questions.filter((q) => !(q in resolved));
 			if (unanswered.length > 0) {
@@ -165,8 +168,9 @@ export class ApplyEngineService implements OnModuleInit {
 			const stillUnanswered = questions.filter((q) => !(q in resolved));
 
 			// PRIORITY: 1) employer's stated process from the JD. 2) ATS/HR email
-			// found in posting. 3) DEEP INVESTIGATION: job page → career pages →
-			// pattern-guess + MX verify (FR-13). 4) easy-apply last.
+			// found in posting. 3) EVIDENCE-ONLY investigation (FR-13): job page
+			// → career pages → homepage — real addresses only, NO pattern-guess
+			// (user rule 2026-08-27). 4) portal easy-apply / company ATS last.
 			let result: ApplyResult;
 			const stated = this.processLearning.detectProcess(lead.title, lead.description, lead.url);
 			let channel: DirectChannel | null = stated
@@ -177,8 +181,8 @@ export class ApplyEngineService implements OnModuleInit {
 			if (!channel || channel.kind !== 'email') {
 				const hr = await this.investigator.investigate(lead.company, lead.url, lead.description);
 				if (hr) {
-					// user rule: pattern-guess addresses are acceptable — job posters
-					// often use their official mailboxes; log confidence but send.
+					// evidence-only: hr is a real address found on a page, never
+					// a pattern-guess (guessing is FORBIDDEN — user rule 2026-08-27).
 					this.logger.log(`investigator found HR contact for ${lead.company}: ${hr.email} (${hr.source}, ${hr.confidence})`);
 					channel = { kind: 'email', target: hr.email, detectedBy: `${hr.source}:${hr.confidence}` };
 				}
@@ -194,25 +198,28 @@ export class ApplyEngineService implements OnModuleInit {
 					ok: true,
 					status: 'sandboxed',
 					errorDetail:
-						`SANDBOX: channel would be ${channel ? channel.kind : adapter.source}` +
+						`SANDBOX: channel would be ${channel ? channel.kind : (adapter?.source ?? lead.source)}` +
 						(channel?.target ? ` -> ${channel.target}` : '') +
 						`; tailored CV ${cvPath ?? '(failed)'}; no real submission made`,
 				};
+			} else if (channel && stillUnanswered.length === 0) {
+				// Direct channel first (channel priority: company ATS / HR email
+				// beats portal easy-apply) — works for LinkedIn leads too, which
+				// have no portal adapter but a detected ATS/email target.
+				const direct: DirectChannel = channel;
+				result = await this.applyDirect(lead, profileData, direct, application);
 			} else if (lead.source === 'linkedin') {
-						// User policy (2026-08-27): LinkedIn easy-apply uses the last uploaded CV
-						// only, no custom tailoring. Skip CV build entirely; use the stored path.
-						const lastCv = await this.profileService.getLastUploadedCvPath();
-						if (lastCv) {
-							application.cvPath = lastCv;
-						}
-						result = await this.adapterApplyFallback(lead, profileData, application.id);
-					} else if (channel && stillUnanswered.length === 0) {
- 		const direct: DirectChannel = channel;
- 		result = await this.applyDirect(lead, profileData, direct, application);
- 	} else if (stillUnanswered.length > 0) {
+				// User policy (2026-08-27): LinkedIn easy-apply uses the last uploaded CV
+				// only, no custom tailoring. Skip CV build entirely; use the stored path.
+				const lastCv = await this.profileService.getLastUploadedCvPath();
+				if (lastCv) {
+					application.cvPath = lastCv;
+				}
+				result = await this.adapterApplyFallback(lead, profileData, application.id);
+			} else if (stillUnanswered.length > 0) {
 				result = { ok: false, status: 'needs_info', questions: stillUnanswered.map((q) => ({ question: q, answer: null })), missingInfo: stillUnanswered };
 			} else {
-				result = await adapter.apply(lead, profileData, resolved);
+				result = await adapter!.apply(lead, profileData, resolved);
 			}
 
 			application.status = result.status;
@@ -224,7 +231,7 @@ export class ApplyEngineService implements OnModuleInit {
 				await this.leadRepo.setStatus(lead.id, 'applied');
 				// FR-11: feed outcome into learning weights (channel/portal/hour)
 				try {
-					const channelKind = channel?.kind ?? adapter.source;
+					const channelKind = channel?.kind ?? adapter?.source ?? lead.source;
 					await this.learning.recordAttempt(channelKind, lead.source, new Date().getHours());
 				} catch (e) {
 					this.logger.warn(`learning record failed: ${String(e).slice(0, 80)}`);
@@ -347,7 +354,9 @@ export class ApplyEngineService implements OnModuleInit {
 		if (!lead) return { ok: false, status: 'failed', errorDetail: 'lead not found' };
 
 		const adapter = this.adapters.get(lead.source);
-		if (!adapter) return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };
+		// LinkedIn leads have no portal adapter but CAN use a detected direct
+		// channel (company ATS / HR email) or the pre-apply queue — don't gate.
+		if (!adapter && lead.source !== 'linkedin') return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };
 
 		const setting = await this.settingsRepo.findBySource(lead.source);
 		// FR-18: per-portal total cap (27) — count all non-failed applications.
@@ -365,7 +374,7 @@ export class ApplyEngineService implements OnModuleInit {
 		}
 
 		try {
-			const questions = await (adapter as unknown as { probeQuestions?(lead: ScrapedLead): Promise<string[]> }).probeQuestions?.(lead) ?? [];
+			const questions = await (adapter as unknown as { probeQuestions?(lead: ScrapedLead): Promise<string[]> } | undefined)?.probeQuestions?.(lead) ?? [];
 			const resolved = await this.answers.resolve(questions);
 			const unanswered = questions.filter((q) => !(q in resolved));
 			if (unanswered.length > 0) {
