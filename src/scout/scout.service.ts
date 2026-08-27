@@ -6,6 +6,7 @@ import { NorwayJobsAdapter } from './norway-jobs.adapter';
 import { NaukriAdapter } from './naukri.adapter';
 import { MonsterAdapter } from './monster.adapter';
 import { FinnAdapter } from './finn.adapter';
+import { A1GroupAdapter } from './a1-group.adapter';
 import { PortalCredentialService } from '../applications/portal-credential.service';
 import { InboxReaderService } from '../applications/inbox-reader.service';
 import { LeadRepository } from '../leads/lead.repository';
@@ -21,6 +22,7 @@ export class ScoutService {
 		new RemoteOkAdapter(),
 		new NorwayJobsAdapter(),
 		new MonsterAdapter(),
+		new A1GroupAdapter(),
 	];
 
 	constructor(

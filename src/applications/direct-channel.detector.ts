@@ -15,6 +15,7 @@ const ATS_PATTERNS: Array<[RegExp, string]> = [
 	[/jobs\.lever\.co\/([a-z0-9-]+)\/([a-z0-9-]+)/i, 'lever'],
 	[/jobs\.workable\.com\/([a-z0-9-]+)\/jobs\/(\d+)/i, 'workable'],
 	[/ashbyhq\.com\/([a-z0-9-]+)\/([a-f0-9-]+)/i, 'ashby'],
+	[/https?:\/\/[a-z0-9.-]*myworkdayjobs\.com\/(?:[a-z0-9_-]+\/)?(?:job|details)\/[^\s"'<>]+/i, 'workday'],
 ];
 
 /**

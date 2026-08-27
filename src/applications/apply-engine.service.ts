@@ -16,6 +16,7 @@ import { PortalCredentialService } from './portal-credential.service';
 import { NaukriAdapter } from '../scout/naukri.adapter';
 import { MonsterAdapter } from '../scout/monster.adapter';
 import { FinnAdapter } from '../scout/finn.adapter';
+import { A1GroupAdapter } from '../scout/a1-group.adapter';
 import { HrEmailInvestigator } from './hr-email-investigator.service';
 import { BrowserFormService } from './browser-form.service';
 import { LearningWeightsService } from './learning-weights.service';
@@ -62,6 +63,7 @@ export class ApplyEngineService implements OnModuleInit {
 			new NaukriAdapter(this.portalCreds),
 			new MonsterAdapter(this.portalCreds),
 			new FinnAdapter(this.portalCreds, this.inbox),
+			new A1GroupAdapter(),
 		]) {
 			this.register(a);
 		}

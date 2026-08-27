@@ -107,6 +107,25 @@ astro muhurta plan) and parked in a `pre_apply_items` queue:
 - Per-portal application cap **27** (`maxPerPortal` on apply_settings,
   default 27; enforced in ApplyEngine before any submission attempt).
 
+### FR-22 A1 Group careers source (added 2026-08-27)
+- Source: `a1group` (jobs.a1.com — A1 Telekom Austria Group, 6 countries:
+  Austria, Bulgaria, Croatia, North Macedonia, Serbia, Slovenia).
+- Data API (reverse-engineered from the job-listing block bundle):
+  `GET https://jobs.a1.com/wp-json/a1-group/v1/filter-jobs?country=<slug>`
+  — JSON items {id, title, url, company, location, type{category,timeType,
+  remoteType}}; `per_page` capped at 6 server-side, paginate via `page=`.
+- Language filter (user rule, mirrors Norway adapter): German-language
+  postings dropped — veto on (w/m/d), (m/w/d), `:in`, ä/ö/ü/ß and German
+  role words (Mitarbeiter, Praktikum, Verkauf, Berater); non-IT roles
+  (sales/shop/retail) dropped too. English + IT keyword roles kept.
+- Apply chain: A1 uses **Workday** ATS (a1group.wd3.myworkdayjobs.com).
+  Adapter resolves the Workday apply URL from each kept lead's detail page
+  at scrape time and embeds it in the lead so the direct-channel detector
+  labels it `workday` (company ATS) and the pre-apply queue stages it
+  (FR-19: no quick apply, company site only; Workday needs an account →
+  staged as manual-apply until browser automation covers it).
+- Workday pattern added to DirectChannelDetector ATS_PATTERNS.
+
 ### FR-10 JD application-process detection (added 2026-08-25)
 Before applying anywhere, the agent READS the job description for an explicit
 application process ("send CV to x@y.com", "apply via Greenhouse", "apply

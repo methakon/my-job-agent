@@ -4,6 +4,7 @@
 > Last updated: 2026-08-27
 
 ## Recently completed (2026-08-27 session — astro + pre-apply phase)
+- [x] **A1 Group careers adapter** (`a1group` source, jobs.a1.com): data API reverse-engineered from job-listing block bundle — `GET /wp-json/a1-group/v1/filter-jobs?country=<slug>` (6 countries, 193 jobs live; per_page capped at 6 → page param); German-language veto (w/m/d, :in, ä/ö/ü/ß, German role words) + IT-role filter like Norway adapter; Workday apply URL resolved per lead and embedded for channel detection; Workday added to DirectChannelDetector; registered in Scout + ApplyEngine. Apply = Workday ATS → staged in pre-apply queue (FR-19 company-site rule).
 - [x] finn.no adapter committed (SSR job scrape + Vend OTP login flow)
 - [x] FR-16 Astro module: MuhurtaService (panchanga via astronomy-engine, dynamic Lahiri aligned with MyLife shared ephemeris), shubh-window API — multiple windows/day, rahu kala/yamaganda/amavasya/ganda-mula vetoes verified
 - [x] FR-16 Job astro-match scoring (lead astro score + reasons)
@@ -85,7 +86,7 @@
 - [ ] **Quick-question section enhancement**: `/quick-question` (or equivalent) should take free-text input from the user — user asks a question (e.g. about a lead, scoring, muhurta, next steps) and gets an answer; not just canned/static. Added 2026-08-27 (user request).
 - [ ] **Live list update while applying through portal**: leads/applications list should refresh in real time as the apply run progresses through the portal (per-item status: preparing → submitting → submitted → failed + error), so the same list can be reused/monitored without manual refresh. Added 2026-08-27 (user request).
 - [ ] finn.no adapter (scrape English-jobs filter + OTP login flow with bapay.9@gmail.com) — scrape LIVE (English/IT filter + Norwegian-char drop in place); login blocked on captcha verdict (NO bypass → one-time manual session-cookie capture, user hasn't chosen)
-- [ ] A1 Group careers adapter (jobs.a1.com) — INVESTIGATED 2026-08-27: WordPress site; REST API live (`/wp-json/wp/v2/types` works, `job-template` post type exists); custom endpoint `/wp-json/a1-group/v1/content-listing` returns pages only (postType filter unsupported); real vacancy list renders client-side via block `./job-listing/assets/index.js` (needs bundle analysis for its fetch params); department taxonomy route 404s. Next: read job-listing block JS for actual data source.
+- [x] A1 Group careers adapter (jobs.a1.com) — DONE 2026-08-27: data API found (`/wp-json/a1-group/v1/filter-jobs?country=<slug>`, 6 countries/193 jobs, page-paginated, per_page capped at 6); German-language + non-IT veto; Workday apply URL resolved per lead; Workday in DirectChannelDetector; registered Scout + ApplyEngine. Apply via Workday ATS staged in pre-apply queue.
 - [ ] LinkedIn easy-apply adapter (session cookie; toggle OFF by default)
 - [ ] Production hardening: synchronize:false + migrations, helmet, rate limit
 
