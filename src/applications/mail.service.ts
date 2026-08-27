@@ -90,19 +90,22 @@ export class MailService implements OnModuleInit {
 		});
 	}
 
-	/** Try primary first, then backup accounts. Daily cap per mailbox keeps volume human. */
+	/** Send via the PRIMARY account only (user rule 2026-08-28: all application
+	 *  emails go through swarna.s.jobs@gmail.com; Naukri/LinkedIn keep the old
+	 *  email via their own portal credentials — never fall back to the old
+	 *  mailbox for sends). Daily cap per mailbox keeps volume human. */
 	async send(app: ApplicationEmail): Promise<{ ok: boolean; via?: string; error?: string }> {
 		// Daily rollover: the 15/day mailbox cap resets with the calendar
 		// (2026-08-27 defect: a stale sentToday permanently blocked the only
 		// active mailbox, so every send fell through to dead portal rows).
 		const today = new Date().toDateString();
-		const accounts = (await this.repo.find({ where: { active: true }, order: { isPrimary: 'DESC' } }))
+		const accounts = (await this.repo.find({ where: { active: true, isPrimary: true } }))
 			.map((a) => {
 				if (a.sentToday > 0 && a.lastSentAt && new Date(a.lastSentAt).toDateString() !== today) a.sentToday = 0;
 				return a;
 			})
 			.filter((a) => a.sentToday < 15);
-		if (accounts.length === 0) return { ok: false, error: 'no-active-mail-account' };
+		if (accounts.length === 0) return { ok: false, error: 'no-active-primary-mail-account' };
 
 		for (const account of accounts) {
 			try {
@@ -120,9 +123,10 @@ export class MailService implements OnModuleInit {
 				this.logger.log(`application sent via ${account.email} -> ${app.to}`);
 				return { ok: true, via: account.email };
 			} catch (err) {
-				this.logger.warn(`send failed via ${account.email}: ${String(err).slice(0, 150)} — trying next`);
+				this.logger.warn(`send failed via ${account.email}: ${String(err).slice(0, 150)}`);
+				return { ok: false, error: `send-failed:${String(err).slice(0, 120)}` };
 			}
 		}
-		return { ok: false, error: 'all-mail-accounts-failed' };
+		return { ok: false, error: 'no-primary-mail-account' };
 	}
 }

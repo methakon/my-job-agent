@@ -17,6 +17,18 @@ export class ApplicationRepository {
 		return this.repo.find({ order: { createdAt: 'DESC' }, take: limit });
 	}
 
+	/** Recent applications joined with their lead's company name + URL (for
+	 *  linking employer replies to applications). */
+	findRecentWithLead(limit = 300): Promise<Array<Application & { company?: string; leadUrl?: string }>> {
+		return this.repo
+			.createQueryBuilder('a')
+			.leftJoin('job_leads', 'l', 'l.id = a.leadId')
+			.select(['a.id AS id', 'a.leadId AS leadId', 'a.source AS source', 'a.status AS status', 'l.company AS company', 'l.url AS leadUrl'])
+			.orderBy('a.createdAt', 'DESC')
+			.take(limit)
+			.getRawMany();
+	}
+
 	findOneById(id: string): Promise<Application | null> {
 		return this.repo.findOne({ where: { id } });
 	}
