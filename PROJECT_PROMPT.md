@@ -110,6 +110,10 @@ push `origin/dev` — never skip even on interrupt.
 11. **Live list updates while applying** (FR-21): per-item status transitions
     (preparing → submitting → submitted → failed → sent) visible live on the
     dashboard during /auto-apply/run; list stays consistent after run.
+12. **CV format by geo-location + employer preference** (FR-4 geo-format rule,
+    user rule 2026-08-27): format depends on job's geo location + preferred
+    type there (US-style / EU-Europass / India-style), ALWAYS ATS format,
+    language ALWAYS English.
 
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`

@@ -170,6 +170,18 @@ POST /auto-apply/run.
   renders an **ATS-friendly PDF** (single column, standard headings,
   matched skills first, relevant experience bullets promoted):
   `AtsCvBuilder` (pdfkit). Attached automatically to every application.
+- **Geo-format rule (added 2026-08-27, user rule): always choose the CV format
+  depending on the geographic location of the job and the format type
+  preferred there** — e.g. US-style resume (no photo, no DOB, summary line),
+  EU-style CV (Europass-compatible, often with photo/DOB optional per country:
+  Germany/Austria prefer photo, UK/IE lean US-style), India-style (photo +
+  DOB + marital status common). The generator picks the regional template
+  matching the employer's country/region (lead.geo or posting language/location).
+- **ATS format always**: whatever the regional style, output must stay
+  ATS-parseable — single column, standard section headings, no tables/images/
+  text boxes, machine-readable PDF text layer.
+- **Language always English** (user rule) — regional formats are about layout/
+  fields, never language; English text throughout.
 - Cover letters/email bodies written in **human style** — varied openers/
   closers, references actual job + matched skills, no corporate boilerplate
   (`HumanEmailComposer`).
