@@ -81,6 +81,7 @@ push `origin/dev` — never skip even on interrupt.
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
 ## TODO next session (in order)
+0. **Indus folder documents → profile verification** (user rule: "check the documents and sectionised them depending on the content type"; WAIT — user to switch model to a free one first, then process; revert model after). Folder sectionised + OCR done; full verified facts + remaining steps in docs/TODO.md (top of Pending — engineering).
 1. **Pre-apply queue is FULL (10 ready items, astro 35–95)** — user reviews at
    `/pre-apply-page` and approves; MuhurtaSendService sweep (10 min) batch-sends
    all approved inside the next shubh window (today: 06:56–13:16 IST, then
