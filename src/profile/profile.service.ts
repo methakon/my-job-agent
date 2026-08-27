@@ -96,4 +96,19 @@ export class ProfileService {
 				.map(([k, v]) => [k, String(v)]),
 		);
 	}
+
+	/** Set the last-uploaded CV path (LinkedIn easy-apply canonical CV).
+	 * Called after the user manually uploads a corrected PDF. */
+	async setLastUploadedCv(cvPath: string): Promise<void> {
+		const p = await this.profileRepo.findFirst();
+		if (!p) return;
+		p.lastUploadedCvPath = cvPath;
+		await this.profileRepo.save(p);
+	}
+
+	/** Get the last-uploaded CV path for LinkedIn easy-apply (may be null). */
+	async getLastUploadedCvPath(): Promise<string | null> {
+		const p = await this.profileRepo.findFirst();
+		return p?.lastUploadedCvPath ?? null;
+	}
 }

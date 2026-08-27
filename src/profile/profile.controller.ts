@@ -26,4 +26,14 @@ export class ProfileController {
 	upsert(@Body() dto: UpsertProfileDto): Promise<ProfileResponseDto | null> {
 		return this.profileService.upsert(dto).then(() => this.profileService.getResponse());
 	}
+
+	@Get('linkedin/cv')
+	getLinkedInCv() {
+		return this.profileService.getLastUploadedCvPath();
+	}
+
+	@Put('linkedin/cv')
+	setLinkedInCv(@Body() body: { cvPath: string }) {
+		return this.profileService.setLastUploadedCv(body.cvPath);
+	}
 }

@@ -51,9 +51,17 @@ export class CandidateProfile {
 	type: 'varchar', length: 180, nullable: true })
 	currentLocation!: string | null;
 
-	/** JSON array [{company, role, from, to, summary}] */
+	/** JSON array [{company, role, from, to, summary, tagged?}] — tagged=true means
+	 * this stint is < 4 months and must be SKIPPED when building tailored CVs for
+	 * sending/applying (user policy 2026-08-27). All stints are kept in the profile
+	 * document; only un-tagged entries appear on tailored CVs. */
 	@Column({ type: 'text', nullable: true })
 	workHistoryJson!: string | null;
+
+	/** Path to the last manually uploaded CV (LinkedIn easy-apply uses this only,
+	 * no custom tailoring). Null when no user upload has happened yet. */
+	@Column({ type: 'varchar', length: 512, nullable: true })
+	lastUploadedCvPath!: string | null;
 
 	/** JSON array [{school, degree, from, to, note?}] */
 	@Column({ type: 'text', nullable: true })

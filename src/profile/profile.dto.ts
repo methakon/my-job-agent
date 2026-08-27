@@ -15,7 +15,9 @@ export class ProfileResponseDto {
 	githubUrl!: string | null;
 	portfolioUrl!: string | null;
 	currentLocation!: string | null;
-	workHistory!: Array<{ company: string; role: string; from: string; to: string; summary?: string }>;
+	/** Last manually uploaded CV path — used by LinkedIn easy-apply only (no custom tailoring). */
+	lastUploadedCvPath!: string | null;
+	workHistory!: Array<{ company: string; role: string; from: string; to: string; summary?: string; tagged?: boolean }>;
 	education!: Array<{ school: string; degree: string; from: string; to: string; note?: string }>;
 	projects!: Array<{ name: string; client?: string; tech: string[]; from?: string; to?: string; summary?: string }>;
 	missingFields!: string[];
@@ -59,7 +61,7 @@ export class UpsertProfileDto {
 	currentLocation?: string;
 
 	@IsOptional() @IsArray()
-	workHistory?: Array<{ company: string; role: string; from: string; to: string; summary?: string }>;
+	workHistory?: Array<{ company: string; role: string; from: string; to: string; summary?: string; tagged?: boolean }>;
 
 	@IsOptional() @IsArray()
 	education?: Array<{ school: string; degree: string; from: string; to: string; note?: string }>;

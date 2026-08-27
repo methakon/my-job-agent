@@ -198,10 +198,18 @@ export class ApplyEngineService implements OnModuleInit {
 						(channel?.target ? ` -> ${channel.target}` : '') +
 						`; tailored CV ${cvPath ?? '(failed)'}; no real submission made`,
 				};
-			} else if (channel && stillUnanswered.length === 0) {
-				const direct: DirectChannel = channel;
-				result = await this.applyDirect(lead, profileData, direct, application);
-			} else if (stillUnanswered.length > 0) {
+			} else if (lead.source === 'linkedin') {
+						// User policy (2026-08-27): LinkedIn easy-apply uses the last uploaded CV
+						// only, no custom tailoring. Skip CV build entirely; use the stored path.
+						const lastCv = await this.profileService.getLastUploadedCvPath();
+						if (lastCv) {
+							application.cvPath = lastCv;
+						}
+						result = await this.adapterApplyFallback(lead, profileData, application.id);
+					} else if (channel && stillUnanswered.length === 0) {
+ 		const direct: DirectChannel = channel;
+ 		result = await this.applyDirect(lead, profileData, direct, application);
+ 	} else if (stillUnanswered.length > 0) {
 				result = { ok: false, status: 'needs_info', questions: stillUnanswered.map((q) => ({ question: q, answer: null })), missingInfo: stillUnanswered };
 			} else {
 				result = await adapter.apply(lead, profileData, resolved);

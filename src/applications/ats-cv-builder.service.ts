@@ -11,6 +11,8 @@ export interface CvWorkStint {
 	from: string;
 	to: string;
 	summary?: string;
+	/** User policy (2026-08-27): tagged=true means this stint is < 4 months and must be SKIPPED when building tailored CVs for sending/applying. */
+	tagged?: boolean;
 }
 
 export interface CvEducation {
@@ -101,15 +103,19 @@ export class AtsCvBuilder {
 		// Experience — STRICTLY descending by start (join) date, then end (leave)
 		// date. User rule 2026-08-27: chronological order only; never reorder by
 		// JD relevance (that produced the "random" arrangement users complained of).
+		// NEW POLICY (2026-08-27): skip tagged stints (< 4 months) — they stay in the
+		// profile section document but are NOT rendered on tailored CVs for sending/applying.
 		doc.font('Helvetica-Bold').fontSize(11).text('PROFESSIONAL EXPERIENCE');
 		const jdText = `${input.jobTitle} ${input.jobDescription ?? ''}`.toLowerCase();
-		const sorted = [...input.workHistory].sort((a, b) => {
-			const byFrom = b.from.localeCompare(a.from);
-			if (byFrom !== 0) return byFrom;
-			const aTo = a.to === 'present' ? '9999-99' : a.to;
-			const bTo = b.to === 'present' ? '9999-99' : b.to;
-			return bTo.localeCompare(aTo);
-		});
+		const sorted = [...input.workHistory]
+			.filter((s) => !s.tagged)
+			.sort((a, b) => {
+				const byFrom = b.from.localeCompare(a.from);
+				if (byFrom !== 0) return byFrom;
+				const aTo = a.to === 'present' ? '9999-99' : a.to;
+				const bTo = b.to === 'present' ? '9999-99' : b.to;
+				return bTo.localeCompare(aTo);
+			});
 		for (const stint of sorted) {
 			doc.font('Helvetica-Bold').fontSize(10).text(`${stint.role} — ${stint.company}`);
 			doc.font('Helvetica').fontSize(9).fillColor('#444444')

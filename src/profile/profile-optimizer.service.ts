@@ -8,6 +8,8 @@ export interface WorkStint {
 	from: string;
 	to: string;
 	summary?: string;
+	/** User policy (2026-08-27): tagged=true means this stint is < 4 months and must be SKIPPED when building tailored CVs for sending/applying. Kept in the profile section document. */
+	tagged?: boolean;
 }
 
 export interface EducationEntry {
@@ -39,13 +41,12 @@ export interface OptimizedProfile {
 	notes: string[];
 }
 
-const MIN_STINT_MONTHS = 4; // drop ONLY stints shorter than this (user rule 2026-08-27)
-// user rule 2026-08-27 (verbatim): "it can remove only the company which i have
-// worke duration of less than 3-4 month but last job should not be removed".
-// So: stints under 4 months may be hidden — EXCEPT the most recent stint (the
-// last job), which is NEVER removed regardless of duration; stints >= 12 months
-// are never removed either. Ordering is the CV builder's job (descending by
-// join date, then leave date).
+const MIN_STINT_MONTHS = 4; // tag stints shorter than this (user policy 2026-08-27)
+// user policy 2026-08-27 (verbatim): "keep all of them in profile section document tagged
+// for those who are less than 4 month but ignore them while creating tailored cv for sending
+// or appliying". Profile already keeps all 11 stints ✓. Optimizer now TAGS short stints
+// instead of dropping them; CV builder skips tagged entries. LinkedIn easy-apply uses last
+// uploaded CV only (no custom tailoring).
 
 /**
  * ProfileOptimizer — scores profile completeness and derives the
@@ -113,19 +114,16 @@ export class ProfileOptimizer {
 
 		for (const stint of merged) {
 			const months = this.monthsBetween(stint.from, stint.to);
-			// drop only stints under the threshold (and under 12 months); never the last job
+			// NEW POLICY (2026-08-27): never drop — tag stints under 4 months.
+			// The last job is still never tagged as short even if it's short, but
+			// that's an edge case (the most recent stint rarely qualifies).
 			if (months >= 0 && months < MIN_STINT_MONTHS && months < 12 && !isMostRecent(stint)) {
-				dropped.push(stint);
-				notes.push(`hidden ${stint.company} (${months} mo — under ${MIN_STINT_MONTHS} month threshold, not the last job)`);
+				const tagged: WorkStint = { ...stint, tagged: true };
+				kept.push(tagged);
+				notes.push(`tagged ${stint.company} (${months} mo — under ${MIN_STINT_MONTHS} month threshold, tagged for CV exclusion)`);
 			} else {
 				kept.push(stint);
 			}
-		}
-		// keep at least the most substantial role even if all were short
-		if (kept.length === 0 && dropped.length > 0) {
-			const longest = dropped.sort((a, b) => this.monthsBetween(b.from, b.to) - this.monthsBetween(a.from, a.to))[0];
-			kept.push(longest);
-			notes.push(`kept ${longest.company} as longest experience despite short duration`);
 		}
 
 		// Education history — same rules as experience (FR-23): ALL entries kept,
