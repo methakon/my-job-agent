@@ -49,41 +49,94 @@ export class BrowserFormService {
 			browser = await chromium.launch({
 				executablePath: CHROME_PATH,
 				headless: true,
-				args: ['--no-sandbox', '--disable-dev-shm-usage'],
+				// stealth flags: SmartRecruiters et al. run a device-verification
+				// interstitial that stalls default headless Chrome (2026-08-27).
+				args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
 			});
-			const ctx: BrowserContext = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+			const ctx: BrowserContext = await browser.newContext({
+				viewport: { width: 1280, height: 900 },
+				userAgent:
+					'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+			});
+			await ctx.addInitScript(() => {
+				Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+			});
 			const page: Page = await ctx.newPage();
 
 			await page.goto(plan.url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+			// let SPA boot + render the initial view
+			await page.waitForTimeout(2_000);
 			result.screenshots.push(await this.shot(page, 'loaded'));
 
-			// collect visible form fields (text/email/tel/url/textarea/select + file)
-			const fields = await page.$$eval(
-				'input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select',
-				(els) =>
-					els
-						.filter((el) => {
-							const style = window.getComputedStyle(el);
-							return style.display !== 'none' && style.visibility !== 'hidden' && (el as HTMLElement).offsetParent !== null;
-						})
-						.map((el) => ({
-							tag: el.tagName.toLowerCase(),
-							type: (el as HTMLInputElement).type || null,
-							name: (el as HTMLInputElement).name || null,
-							id: el.id || null,
-							placeholder: (el as HTMLInputElement).placeholder || null,
+			// ATS pages often hide the form behind a CTA ("I'm interested" / "Apply now").
+			// Click the first visible apply-ish button; SmartRecruiters navigates to a
+			// oneclick-ui URL and may pass a device-verification interstitial first.
+			const ctaClicked = await page
+				.locator(
+					'button:has-text("I\'m interested"), button:has-text("Apply now"), button:has-text("Apply for this job"), button:has-text("Apply"), a:has-text("Apply now"), a:has-text("Apply for this job"), a:has-text("I\'m interested")',
+				)
+				.first()
+				.click({ timeout: 5_000 })
+				.then(() => true)
+				.catch(() => false);
+			if (ctaClicked) {
+				this.logger.log(`browser form ${plan.url}: clicked apply CTA`);
+				// wait for the application view to mount (URL may change, verification may pass)
+				try {
+					await page.waitForURL(/oneclick-ui|apply|application/i, { timeout: 20_000 });
+				} catch {
+					/* not all ATS navigate */
+				}
+				await page
+					.locator('input:not([type=hidden]), textarea, select')
+					.first()
+					.waitFor({ state: 'visible', timeout: 20_000 })
+					.catch(() => this.logger.warn(`browser form ${plan.url}: no form fields appeared after CTA`));
+				result.screenshots.push(await this.shot(page, 'apply-clicked'));
+			}
+
+			// collect visible form fields (text/email/tel/url/textarea/select + file).
+			// locator() pierces shadow DOM (SmartRecruiters oneclick-ui renders its
+			// form in shadow roots — $$eval never sees them, 2026-08-27).
+			const fieldEls = page.locator('input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select');
+			const fieldCount = await fieldEls.count();
+			const fields: Array<{
+				index: number;
+				tag: string;
+				type: string | null;
+				name: string | null;
+				id: string | null;
+				placeholder: string | null;
+				label: string | null;
+				aria: string | null;
+				required: boolean;
+			}> = [];
+			for (let i = 0; i < fieldCount; i++) {
+				const el = fieldEls.nth(i);
+				const visible = await el.isVisible().catch(() => false);
+				if (!visible) continue;
+				fields.push(
+					await el
+						.evaluate((e) => ({
+							tag: e.tagName.toLowerCase(),
+							type: (e as HTMLInputElement).type || null,
+							name: (e as HTMLInputElement).name || null,
+							id: e.id || null,
+							placeholder: (e as HTMLInputElement).placeholder || null,
 							label:
-								el.id &&
-								document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
-									? (document.querySelector(`label[for="${CSS.escape(el.id)}"]`) as HTMLElement).innerText.trim()
+								e.id && document.querySelector(`label[for="${e.id}"]`)
+									? (document.querySelector(`label[for="${e.id}"]`) as HTMLElement).innerText.trim()
 									: null,
-							required: (el as HTMLInputElement).required || el.hasAttribute('aria-required'),
-						})),
-			);
+							aria: e.getAttribute('aria-label'),
+							required: (e as HTMLInputElement).required || e.hasAttribute('aria-required'),
+						}))
+						.then((info) => ({ index: i, ...info })),
+				);
+			}
 
 			const norm = (s: string | null) => (s ?? '').toLowerCase().replace(/[^a-z]/g, '');
 			const valueFor = (f: (typeof fields)[number]): string | null => {
-				const keys = [norm(f.label), norm(f.name), norm(f.id), norm(f.placeholder)].filter(Boolean);
+				const keys = [norm(f.label), norm(f.name), norm(f.id), norm(f.placeholder), norm(f.aria)].filter(Boolean);
 				for (const key of keys) {
 					for (const [vk, vv] of Object.entries(plan.values)) {
 						if (key.includes(norm(vk)) || norm(vk).includes(key)) return vv;
@@ -100,26 +153,26 @@ export class BrowserFormService {
 					if (f.required) result.unansweredQuestions.push(f.label ?? f.name ?? f.id ?? 'unknown required field');
 					continue;
 				}
-				const sel = f.id ? `#${CSS.escape(f.id)}` : f.name ? `[name="${f.name}"]` : null;
-				if (!sel) continue;
+				const el = fieldEls.nth(f.index);
 				try {
 					if (f.tag === 'select') {
-						await page.selectOption(sel, { label: val }).catch(async () => page.selectOption(sel, { value: val }));
+						await el.selectOption({ label: val }).catch(async () => el.selectOption({ value: val }));
 					} else {
-						await page.fill(sel, val);
+						await el.fill(val);
 					}
 					result.filledFields.push(f.label ?? f.name ?? f.id ?? 'field');
 					filledCount++;
 				} catch {
-					this.logger.warn(`could not fill field ${sel}`);
+					this.logger.warn(`could not fill field ${f.label ?? f.name ?? f.id ?? f.index}`);
 				}
 			}
 
-			// CV upload for any visible file input
+			// CV upload for any visible file input (locator pierces shadow DOM)
 			if (plan.cvPath && fs.existsSync(plan.cvPath)) {
-				const fileInputs = await page.$$('input[type=file]');
-				for (const input of fileInputs) {
-					await input.setInputFiles(plan.cvPath).catch((e) => this.logger.warn(`cv upload failed: ${e}`));
+				const fileInputs = page.locator('input[type=file]');
+				const n = await fileInputs.count();
+				for (let i = 0; i < n; i++) {
+					await fileInputs.nth(i).setInputFiles(plan.cvPath).catch((e) => this.logger.warn(`cv upload failed: ${e}`));
 				}
 			}
 			result.screenshots.push(await this.shot(page, 'filled'));

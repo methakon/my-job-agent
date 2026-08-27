@@ -295,10 +295,14 @@ export class ApplyEngineService implements OnModuleInit {
 		for (const [k, v] of Object.entries(p)) out[k] = v;
 		// common alias keys portals use
 		out['fullname'] = out['name'] ?? out['fullName'] ?? '';
+		out['firstname'] = out['firstName'] ?? out['firstname'] ?? '';
+		out['lastname'] = out['lastName'] ?? out['lastname'] ?? '';
 		out['email'] = out['email'] ?? '';
 		out['phone'] = out['phone'] ?? out['mobile'] ?? '';
 		out['location'] = out['location'] ?? out['city'] ?? '';
 		out['linkedin'] = out['linkedin'] ?? out['linkedinUrl'] ?? '';
+		out['website'] = out['website'] ?? out['portfolio'] ?? '';
+		out['message'] = out['message'] ?? out['coverLetter'] ?? '';
 		out['currentctc'] = out['currentCtc'] ?? '';
 		out['expectedctc'] = out['expectedCtc'] ?? '';
 		out['noticeperiod'] = out['noticePeriod'] ?? '';
@@ -440,7 +444,10 @@ export class ApplyEngineService implements OnModuleInit {
 		if (!lead) return { ok: false, status: 'failed', errorDetail: 'lead not found' };
 
 		const existingByLead = await this.appRepo.findByLead(lead.id);
-		if (existingByLead && existingByLead.status !== 'failed') {
+		// Only terminal success states block a resend. needs_info (form filled,
+		// awaiting human review) and failed must stay retryable in place — a
+		// needs_info row must never short-circuit the next sweep (2026-08-27).
+		if (existingByLead && ['submitted', 'sent', 'sandboxed'].includes(existingByLead.status)) {
 			return { ok: false, status: 'needs_info', missingInfo: [`already applied (${existingByLead.status})`], applicationId: existingByLead.id };
 		}
 		const setting = await this.settingsRepo.findBySource(item.source);
@@ -465,7 +472,7 @@ export class ApplyEngineService implements OnModuleInit {
 		// DEDUPE + row reuse: a failed row is RETRIED IN PLACE — retries must never
 		// spawn new application rows (user defect 2026-08-27: repeated sends).
 		const application =
-			existingByLead && existingByLead.status === 'failed'
+			existingByLead && ['failed', 'needs_info'].includes(existingByLead.status)
 				? existingByLead
 				: await this.appRepo.createPartial({
 						leadId: lead.id,

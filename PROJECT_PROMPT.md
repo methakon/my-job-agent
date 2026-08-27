@@ -81,44 +81,32 @@ push `origin/dev` — never skip even on interrupt.
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
 ## Progress (2026-08-27)
-- **Indus folder → profile verification DONE** (commits 1d2a8b5, 5422903, 5f85e8d): folder sectionised by content type; all docs OCR'd; profile now 11 verified stints + 4 education entries with EXACT dates from official letters (rendered "19 Aug 2013" style) + golden-CV job descriptions for the added stints; Experis end fixed to 21-07-2020; added 10th (WBBSE 1999) + 12th (WBCHSE 2002, 55% 2nd div); HK-dir junk line removed from CV builder; optimizer/builder handle day-level dates. Full detail in docs/TODO.md (marked [x]).
-- **Processed on the free model** (upstage/solar-pro4:free via Nous) per user's plan — revert model after.
+- **CNV Labs/iCloudEMS REAL application SENT** (job 4349990583, Node.js Developer): evidence-based email to contact@icloudems.com (found on careers page — fully rule-compliant, NO pattern-guessing) fired 22:38:28 UTC via muhurta sweep; DB status=submitted, isSandbox=0, tailored CV attached. Pre-apply item 9dfe9691-e521-4728-8079-f3c1e0375540.
+- **Evidence pipeline bug fixed (root cause)**: `baseDomain()` in hr-email-investigator was written for hostnames not emails — `contact@icloudems.com`.split('.') → baseDomain `contact@icloudems.com` ≠ pageHost, silently dropping EVERY evidence email. Patched email-aware + www-redirect retry + parenthesized-brand domain fallback. Verified live: investigator now returns {contact@icloudems.com, medium, careers-page:/career}. Committed `fix(apply): evidence-only email detection now actually works` (3b43e77) + pushed.
+- **DB unicode corruption REPAIRED + re-verified**: workHistoryJson role strings now store real "Senior Associate → Team Lead – Backend" (U+2192 arrow, U+2013 en dash). Write-path sanitization still open (TODO).
+- **Continental Industry pipeline (job 4456857847, Senior Software Engineer, Bengaluru, Node.js/TS/AWS, ContiTech)**: lead 5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c inserted; prepared; NO email evidence found (honest null — Continental publishes no HR emails); channel set to company ATS SmartRecruiters posting (external-link → company portal rule); item e16a55f4-3d9d-403c-af64-fa25a7c49380 approved for muhurta sweep.
+- **Browser form (FR-15) fixed for modern ATS** (3 fixes, in flight):
+  1. SmartRecruiters device-verification interstitial stalls default headless Chrome → stealth flags (AutomationControlled off, real UA, webdriver spoof) pass it in ~1s;
+  2. ATS forms hidden behind CTA ("I'm interested") → click first apply button + wait for oneclick-ui URL + wait for field visibility;
+  3. `$$eval` never sees shadow-DOM inputs (SmartRecruiters oneclick-ui renders form in shadow roots) → switched to playwright locators (pierce shadow DOM) with per-field nth() fill; CV upload locator too; CSS.escape crash removed; aria-label added to matcher; firstname/lastname/website/message aliases added.
+  4. needs_info rows no longer block re-send: dedupe only on terminal success (submitted/sent/sandboxed); failed+needs_info retried in place (no duplicate rows).
+- **Fixed ATS false positive**: process-learning ATS regex matched "lever" inside "Leverage" → negative lookahead `lever(?!age)`. Continental correctly re-detected as no-JD-ATS.
+- **Cutshort portal apply (Google login)**: paused — requires user to tick "Allow remote debugging" in chrome://inspect (harness forbids retry before confirmation); email already sent so nothing lost.
 
 ## TODO next session (in order)
-0. **Tag-<4-month + LinkedIn easy-apply policy** (user instruction verbatim 2026-08-27): "keep all of them in profile section document tagged for those who are less than 4 month but ignore them while creating tailored cv for sending or appliying . and for linkedin easy apply use the last uploaded cv only no need to custom tailor them". Profile already keeps all 11 stints ✓; add explicit TAG (tagged/shortStint flag in workHistory + DTO); AtsCvBuilder skips tagged; LinkedIn easy-apply sends last uploaded CV, no tailoring. Also ASK USER the DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology).
-1. **Pre-apply queue is FULL (10 ready items, astro 35–95)** — user reviews at
-   `/pre-apply-page` and approves; MuhurtaSendService sweep (10 min) batch-sends
-   all approved inside the next shubh window (today: 06:56–13:16 IST, then
-   14:56–05:16 IST next day). Sandbox currently OFF (real sends once approved).
-2. **Verify astro scoring tables with user** — tithi/nakshatra/weekday lists
-   + rahu/yamaganda/gulika segments are documented in REQUIREMENTS.md FR-16
-   and service header; user may tune (env: SHUBH_MIN_SCORE, MUHURTA_SWEEP_MINUTES).
-   Engine cross-checked vs published panchang 2026-08-27 ✓ (Shukla Chaturdashi,
-   Dhanishta, Thursday, rahu kaal ~13:59–15:36 — HT/bhaktiras/samvat/kundligpt agree).
-3. **A1 Group careers adapter (jobs.a1.com)**: WordPress; REST live; real
-   vacancy list renders client-side via block `./job-listing/assets/index.js`
-   — next step: read that block's JS for the data source/fetch params.
-4. **Activate LinkedIn snapshot** (user action): save profile HTML into
-   data/linkedin/profile.html → POST /linkedin/refresh. Then CV tuning is live.
-5. **finn.no login**: captcha verdict NO bypass — legitimate path = one-time
-   manual session-cookie capture (user hasn't chosen). Scrape side live.
-6. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
-7. Outlook app-password (optional backup sender) — pending from user.
-8. GitHub/portfolio URL for profile → completeness 100% — pending from user.
-9. **Company-redirect apply handling** (FR-19, **always-company rule**: no quick
-   apply → ALWAYS apply via company website, never skip/email-only): jobs whose
-   apply link redirects to the company's own page — detect, drive form (FR-15
-   rules), and if the page needs login/register, handle that too (legit
-   automation or flag manual-apply with staged data in pre-apply queue).
-10. **Quick-question user input** (FR-20): `/quick-question` takes free text
-    from user; answer from live state (leads, astro, muhurta, applications).
-11. **Live list updates while applying** (FR-21): per-item status transitions
-    (preparing → submitting → submitted → failed → sent) visible live on the
-    dashboard during /auto-apply/run; list stays consistent after run.
-12. **CV format by geo-location + employer preference** (FR-4 geo-format rule,
-    user rule 2026-08-27): format depends on job's geo location + preferred
-    type there (US-style / EU-Europass / India-style), ALWAYS ATS format,
-    language ALWAYS English.
+0. **Verify Continental send result** (item e16a55f4-3d9d-403c-af64-fa25a7c49380): muhurta sweep fires browser fill on SmartRecruiters oneclick-ui ~10 min after last boot (23:45:22 → ~23:55); expect needs_info (form filled for human review, AUTO_SUBMIT_BROWSER unset) — review screenshots in generated/browser/ + check DB status. Then decide: enable AUTO_SUBMIT_BROWSER=true for full auto-submit or keep human-review.
+1. **Cutshort portal apply via Google login** (user approval pending on Chrome remote-debugging): https://cutshort.io/job/Node-js-Developer-ICloudEMS-wwzWD11g — Google OAuth confirmed; user must tick "Allow remote debugging for this browser instance" in chrome://inspect + second Allow popup; Google account sign-in is a manual user step (no stored creds).
+2. **Write-path unicode sanitization** (stored data repaired; builder/writer still unsanitized): strip/replace non-ASCII control chars in CV builder + workHistoryJson write path.
+3. **Tag-<4-month + LinkedIn easy-apply policy** (user instruction verbatim 2026-08-27): tagged short-stint flag in workHistory + DTO; AtsCvBuilder skips tagged; LinkedIn easy-apply uses last uploaded CV only. Also ASK USER the DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology).
+4. **Josys Ashby wiring go/no-go** (posting 04703ddd-7128-4740-982a-bdac760aeddc): rule-compliant jobs.ashbyhq.com/josys verified — awaiting user decision (pattern-guessed email already disclosed, cannot unsend).
+5. **A1 Group careers adapter (jobs.a1.com)**: WordPress; REST live; vacancy list client-side via job-listing block — read block JS for data source/fetch params.
+6. **Activate LinkedIn snapshot** (user action): save profile HTML into data/linkedin/profile.html → POST /linkedin/refresh.
+7. **finn.no login**: captcha verdict NO bypass — one-time manual session-cookie capture (user hasn't chosen). Scrape side live.
+8. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
+9. **Company-redirect apply handling** (FR-19, always-company rule): jobs whose apply link redirects to company's own page — detect, drive form (FR-15), handle login/register (legit automation or flag manual-apply).
+10. **Quick-question user input** (FR-20): /quick-question free text from live state.
+11. **Live list updates while applying** (FR-21): per-item status transitions visible live during /auto-apply/run.
+12. **CV format by geo-location + employer preference** (FR-4): US/EU/India style, ALWAYS ATS, ALWAYS English.
 
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`

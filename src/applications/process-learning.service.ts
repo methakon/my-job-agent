@@ -29,7 +29,7 @@ const PROCESS_PATTERNS: Array<[RegExp, DetectedProcess['kind']]> = [
 	[/send (?:your )?(?:cv|resume|application|profile)\s*(?:to|at)\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i, 'email'],
 	[/(?:apply|applications?)\s*(?:via|by|through|to)\s*e-?mail\s*[:\-]?\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i, 'email'],
 	[/e-?mail\s*(:)?\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i, 'email'],
-	[/(greenhouse|lever|workable|ashby|smartrecruiters|teamtailor)/i, 'ats'],
+	[/(greenhouse|lever(?!age)|workable|ashby|smartrecruiters|teamtailor)/i, 'ats'],
 	[/apply\s+(?:online|here|now|through (?:our|the) (?:website|portal|career))/i, 'portal-form'],
 ];
 
