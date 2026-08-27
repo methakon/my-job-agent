@@ -195,6 +195,44 @@ POST /auto-apply/run.
   APP_SECRET key) in DB table `mail_accounts`**, never in code/env.
 - Daily cap 15 emails/account.
 
+### FR-19 Company-redirect application handling (added 2026-08-27, user request)
+When a job's apply link redirects to the company's own application page
+(not a portal adapter the agent can drive directly), handle it:
+1. Detect redirect apply URLs (http redirect chain, meta refresh, or apply-link
+   pointing to the company domain rather than a known portal).
+2. Visit the page and attempt submission via the company form when feasible
+   (FR-15 browser automation rules apply: fill from profile + answer bank,
+   upload tailored ATS PDF, STOP BEFORE FINAL SUBMIT unless
+   AUTO_SUBMIT_BROWSER=true, screenshot audit).
+3. If the page requires login/register: handle that scenario too — where
+   legitimate (public registration without banned automation), automate
+   registration/login once and reuse the session; otherwise flag the lead as
+   manual-apply with the URL, prefilled data staged, and surface it in the
+   pre-apply queue for the user's one-click follow-through.
+4. Track outcome in applications table (channel = company_redirect, note =
+   submitted_auto | needs_manual | needs_registration).
+
+### FR-20 Quick-question section with user input (added 2026-08-27, user request)
+The quick-question area must take free-text input from the user, not just
+show canned questions:
+1. `/quick-question` accepts a user-typed question (query param or POST body).
+2. The agent answers from live service state: lead details, astro score,
+   muhurta windows, application status, settings — plus the answer bank /
+   profile when the question is about the user's own data.
+3. Keeps a small history of recent Q&A (question_answers table reuse) so
+   repeated questions can be answered instantly from the last known answer.
+
+### FR-21 Live list update while applying (added 2026-08-27, user request)
+While an apply run is in progress through the portal, the leads/applications
+list must refresh in real time so it can be reused/monitored without manual
+reload:
+1. Per-item status transitions visible live: preparing → submitting →
+   submitted → failed (+ errorDetail) → sent (muhurta sweep).
+2. Dashboard/list polls or streams the run progress (SSE or short-poll of
+   /pre-apply or /applications during an active /auto-apply/run).
+3. After the run, the list stays consistent with the applications table
+   (no stale "ready" rows for items already submitted).
+
 ## 4. Non-functional requirements
 
 - NestJS + TypeORM + MySQL (database-per-service: `myjob_agent`, dedicated user).

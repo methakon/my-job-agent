@@ -80,6 +80,9 @@
 - [x] FR-12 Gmail SMTP live; IMAP OTP auto-read + recruiter reply polling
 
 ## Pending — engineering
+- [ ] **Company-redirect application handling**: when a job's apply link redirects to the company's own application page, handle it — detect redirect URLs, visit the page, and submit via the company form when feasible; if the page requires login/register, handle that scenario too (either automate registration/login where legitimate, or flag for manual apply with the URL + prefilled data staged). Added 2026-08-27 (user request).
+- [ ] **Quick-question section enhancement**: `/quick-question` (or equivalent) should take free-text input from the user — user asks a question (e.g. about a lead, scoring, muhurta, next steps) and gets an answer; not just canned/static. Added 2026-08-27 (user request).
+- [ ] **Live list update while applying through portal**: leads/applications list should refresh in real time as the apply run progresses through the portal (per-item status: preparing → submitting → submitted → failed + error), so the same list can be reused/monitored without manual refresh. Added 2026-08-27 (user request).
 - [ ] finn.no adapter (scrape English-jobs filter + OTP login flow with bapay.9@gmail.com) — scrape LIVE (English/IT filter + Norwegian-char drop in place); login blocked on captcha verdict (NO bypass → one-time manual session-cookie capture, user hasn't chosen)
 - [ ] A1 Group careers adapter (jobs.a1.com) — INVESTIGATED 2026-08-27: WordPress site; REST API live (`/wp-json/wp/v2/types` works, `job-template` post type exists); custom endpoint `/wp-json/a1-group/v1/content-listing` returns pages only (postType filter unsupported); real vacancy list renders client-side via block `./job-listing/assets/index.js` (needs bundle analysis for its fetch params); department taxonomy route 404s. Next: read job-listing block JS for actual data source.
 - [ ] LinkedIn easy-apply adapter (session cookie; toggle OFF by default)
