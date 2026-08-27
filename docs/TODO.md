@@ -4,6 +4,7 @@
 > Last updated: 2026-08-27
 
 ## Recently completed (2026-08-27 session — astro + pre-apply phase)
+- [x] **HR-channel hardening** (bug discovered during pre-apply review): w3.org accessibility-badge address was being picked as HR channel from naukri page footers (3 staged + 1 already-sent app affected). Fixed: noise list expanded, page-scan domain guard (foreign-domain emails dropped), domain resolution rewritten (DoH A-record checks + DDG result-link-only parsing + portal/badge domain blacklist). Held items with unresolvable channels now fall to manual-apply.
 - [x] **A1 Group careers adapter** (`a1group` source, jobs.a1.com): data API reverse-engineered from job-listing block bundle — `GET /wp-json/a1-group/v1/filter-jobs?country=<slug>` (6 countries, 193 jobs live; per_page capped at 6 → page param); German-language veto (w/m/d, :in, ä/ö/ü/ß, German role words) + IT-role filter like Norway adapter; Workday apply URL resolved per lead and embedded for channel detection; Workday added to DirectChannelDetector; registered in Scout + ApplyEngine. Apply = Workday ATS → staged in pre-apply queue (FR-19 company-site rule).
 - [x] finn.no adapter committed (SSR job scrape + Vend OTP login flow)
 - [x] FR-16 Astro module: MuhurtaService (panchanga via astronomy-engine, dynamic Lahiri aligned with MyLife shared ephemeris), shubh-window API — multiple windows/day, rahu kala/yamaganda/amavasya/ganda-mula vetoes verified

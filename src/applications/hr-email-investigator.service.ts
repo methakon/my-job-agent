@@ -18,7 +18,10 @@ export interface HrContact {
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
 const CAREER_PATHS = ['/careers', '/jobs', '/career', '/about', '/contact', '/company/careers', '/join-us'];
 const ROLE_PREFIXES = ['hr', 'careers', 'jobs', 'talent', 'recruiting', 'recruitment', 'hiring', 'apply'];
-const NOISE_RE = /(noreply|no-reply|donotreply|example\.(com|org)|sentry\.io|wixpress|googlemail.*noreply)/i;
+const NOISE_RE = /(noreply|no-reply|donotreply|example\.(com|org)|sentry\.io|wixpress|googlemail.*noreply|w3\.org|wcap|privacy|dataprotection|gdpr|webmaster|abuse|postmaster|feedback|unsubscribe)/i;
+
+/** Last-two-labels base domain (naukri.com, co.uk etc.) for cross-domain guards. */
+const baseDomain = (d: string): string => d.replace(/^www\./, '').toLowerCase().split('.').slice(-2).join('.');
 
 @Injectable()
 export class HrEmailInvestigator {
@@ -71,7 +74,9 @@ export class HrEmailInvestigator {
 		return null;
 	}
 
-	/** Fetch a URL and extract non-noise emails (job/career context preferred). */
+	/** Fetch a URL and extract non-noise emails (job/career context preferred).
+	 *  Domain guard: emails must share the page host's base domain — footer/badge
+	 *  addresses from unrelated domains (w3.org, github.io, portals) are dropped. */
 	private async curlAndScan(url: string, source: string): Promise<HrContact[]> {
 		try {
 			const res = await fetch(url, {
@@ -80,7 +85,8 @@ export class HrEmailInvestigator {
 			});
 			if (!res.ok) return [];
 			const html = await res.text();
-			return this.scanText(html, source);
+			const pageHost = new URL(url).hostname;
+			return this.scanText(html, source).filter((c) => baseDomain(c.email) === baseDomain(pageHost));
 		} catch {
 			return [];
 		}
@@ -109,36 +115,43 @@ export class HrEmailInvestigator {
 		return candidates[0] ? { ...candidates[0], confidence: minConfidence } : null;
 	}
 
-	/** Resolve company → website domain via DuckDuckGo instant-answer style search of lead data. */
+	/** Resolve company → website domain. */
 	private async findCompanyDomain(company: string): Promise<string | null> {
-		// heuristic 1: direct guesses
+		// heuristic 1: direct guesses, verified via DNS A record (DoH) — more
+		// reliable than HTTP HEAD (small sites often block HEAD or have TLS quirks)
 		const slug = company.toLowerCase().replace(/[^a-z0-9]+/g, '');
-		for (const dom of [`${slug}.com`, `${slug}.io`, `${slug}.co`, `${slug}.in`]) {
-			if (await this.domainResolves(dom)) return dom;
+		for (const dom of [`${slug}.com`, `${slug}.io`, `${slug}.co`, `${slug}.in`, `${slug}.tech`, `${slug}.net`]) {
+			if (await this.dnsResolves(dom)) return dom;
 		}
-		// heuristic 2: DuckDuckGo HTML search "company careers"
+		// heuristic 2: DuckDuckGo HTML search — parse ONLY real result links
 		try {
 			const res = await fetch(`https://duckduckgo.com/html/?q=${encodeURIComponent(company + ' careers site')}`, {
 				headers: { 'User-Agent': 'Mozilla/5.0 Chrome/121' },
 				signal: AbortSignal.timeout(10_000),
 			});
 			const html = await res.text();
-			const first = /href="https?:\/\/([^\/"]+)"/i.exec(html.split('result__url')[1] ?? '') ?? /https?:\/\/(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})/i.exec(html.replace(/duckduckgo\.com/g, ''));
-			if (first) {
-				let dom = (first[1] ?? first[0]).replace(/^www\./, '').split('/')[0];
-				if (!/duckduckgo|naukri|linkedin|indeed|remotive|remoteok/.test(dom) && dom.includes('.')) return dom;
+			const resultLinks = [...html.matchAll(/result__a"[^>]*href="https?:\/\/([^\/"#?]+)/gi)].map((m) => m[1].replace(/^www\./, ''));
+			for (const dom of resultLinks) {
+				if (this.isPortalDomain(dom) || !dom.includes('.')) continue;
+				return dom;
 			}
 		} catch { /* ignore */ }
 		return null;
 	}
 
-	private async domainResolves(domain: string): Promise<boolean> {
+	/** Domains that are never a company's own careers site. */
+	private isPortalDomain(domain: string): boolean {
+		return /(w3\.org|github\.io|gitlab\.io|wordpress\.com|wixsite|blogspot|naukri|linkedin|indeed|glassdoor|remotive|remoteok|stackoverflow|wikipedia|facebook|twitter|instagram|youtube|duckduckgo|cloudflare)/i.test(domain);
+	}
+
+	private async dnsResolves(domain: string): Promise<boolean> {
 		try {
-			const res = await fetch(`https://${domain}`, {
-				method: 'HEAD',
+			const res = await fetch(`https://cloudflare-dns.com/dns-query?name=${domain}&type=A`, {
+				headers: { accept: 'application/dns-json' },
 				signal: AbortSignal.timeout(6_000),
 			});
-			return res.status < 500;
+			const data = (await res.json()) as { Answer?: Array<{ type: number }> };
+			return Array.isArray(data.Answer) && data.Answer.some((a) => a.type === 1);
 		} catch {
 			return false;
 		}

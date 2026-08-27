@@ -75,7 +75,9 @@ export class DirectChannelDetector {
 	}
 
 	private isPortalNoise(email: string): boolean {
-		// portal no-reply / system addresses are not HR contacts
-		return /(noreply|no-reply|donotreply|careers@remoteok|remotive)/i.test(email);
+		// portal no-reply / system / badge / footer addresses are not HR contacts.
+		// w3.org badge addresses (team-wcap-contact@w3.org) appear in scraped page
+		// footers of aggregator postings (naukri etc.) — never an HR channel.
+		return /(noreply|no-reply|donotreply|careers@remoteok|remotive|w3\.org|wcap|privacy|dataprotection|gdpr|webmaster|abuse|postmaster|feedback|unsubscribe|admin@)/i.test(email);
 	}
 }
