@@ -7,6 +7,7 @@ import {
 	CreateTradeDto,
 	CloseTradeDto,
 	IngestSnapshotDto,
+	SetDecayCalibrationDto,
 } from './fnf-trading.dto';
 
 @ApiTags('fnf-trading')
@@ -100,5 +101,22 @@ export class FnfTradingController {
 	@Get('astro')
 	astro() {
 		return this.trading.astroMatch();
+	}
+
+	// ── Decay calibration (day-wise, self-rectifying) ───────────────────
+
+	@Get('decay')
+	listCalibrations(@Query('portfolioId') portfolioId?: string) {
+		return this.trading.listCalibrations(portfolioId);
+	}
+
+	@Post('decay/rectify')
+	rectifyDecay(@Query('portfolioId') portfolioId?: string) {
+		return this.trading.rectifyDecay(portfolioId);
+	}
+
+	@Patch('decay')
+	setCalibration(@Body() dto: SetDecayCalibrationDto, @Query('portfolioId') portfolioId?: string) {
+		return this.trading.setCalibration(dto, portfolioId);
 	}
 }

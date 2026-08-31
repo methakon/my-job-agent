@@ -1,6 +1,6 @@
 import { Controller, Get, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { FnfTradingService } from './fnf-trading.service';
+import { FnfTradingService, WEEKDAY_NAMES, DECAY_DEFAULTS } from './fnf-trading.service';
 
 const esc = (s: unknown): string =>
 	String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -25,13 +25,14 @@ export class FnfTradingPageController {
 
 	@Get()
 	async page(@Res() res: Response) {
-		const [portfolios, trades, market, signals, learning, astro] = await Promise.all([
+		const [portfolios, trades, market, signals, learning, astro, calibrations] = await Promise.all([
 			this.trading.listPortfolios(),
 			this.trading.listTrades(undefined, 200),
 			this.trading.marketTable(),
 			this.trading.generateSignals(),
 			this.trading.learningSummary(),
 			this.trading.astroMatch(),
+			this.trading.listCalibrations(),
 		]);
 
 		const portfolio = portfolios[0] ?? null;
@@ -104,6 +105,9 @@ export class FnfTradingPageController {
 					const actionCls = s.action === 'BUY' ? 'ok' : s.action === 'SELL' ? 'bad' : 'warn';
 					const fridayFlag = s.fridayBlocked ? badge('Friday block', 'warn') : badge('Friday ok', 'ok');
 					const astroFlag = s.astroMatch.shubh ? badge('🕉 shubh', 'ok') : badge('astro: no window', 'dim');
+					const decayFlag = s.decayedConfidence < DECAY_DEFAULTS.confidenceFloor
+						? badge('decayed → HOLD', 'warn')
+						: badge(`decay ${s.decay.ageHours.toFixed(1)}h ×${s.decay.rate.toFixed(3)}`, s.decay.timingFactor === 1 ? 'ok' : 'warn');
 					const scenarios = s.scenarios.map((sc) => `${esc(sc.name)} ${sc.probability}% → ${fmt(sc.target)}`).join(' · ');
 					return `<tr>
 						<td>${esc(s.instrument)}</td>
@@ -111,13 +115,27 @@ export class FnfTradingPageController {
 						<td>${fmt(s.price)}</td>
 						<td>${fmt(s.target)}</td>
 						<td>${fmt(s.stopLoss)}</td>
-						<td>${s.confidence}%</td>
+						<td>${s.confidence}% → <b>${s.decayedConfidence}%</b></td>
 						<td class="dim">${esc(s.algoSource)}</td>
-						<td>${astroFlag} ${fridayFlag}</td>
+						<td>${astroFlag} ${fridayFlag}<br>${decayFlag}</td>
 						<td class="dim small">${esc(s.reasons.join('; '))}<br>${esc(scenarios)}</td>
 					</tr>`;
 			  }).join('')
 			: `<tr><td colspan="9" class="dim">No signals — needs ≥5 snapshots per instrument.</td></tr>`;
+
+		// ── decay calibration table (day-wise, self-rectifying) ──
+		const todayWd = new Date().getDay();
+		const decayRows = calibrations.map((c) => {
+			const isToday = c.weekday === todayWd;
+			const hours = `${Number(c.windowStartHour).toFixed(2)} – ${Number(c.windowEndHour).toFixed(2)}`;
+			return `<tr class="${isToday ? 'today' : ''}">
+				<td>${esc(WEEKDAY_NAMES[c.weekday] ?? c.weekday)}${isToday ? ' <b class="ok">← today</b>' : ''}</td>
+				<td>${fmt(c.decayRate, 4)}/h</td>
+				<td>${hours}</td>
+				<td class="dim">${c.samples} trades</td>
+				<td class="dim">${c.lastRectifiedAt ? new Date(c.lastRectifiedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'never'}</td>
+			</tr>`;
+		}).join('');
 
 		// ── trade ledger ──
 		const tradeRows = trades.length
@@ -190,6 +208,7 @@ table.mini{max-width:480px}
 .badge.ok{background:rgba(63,185,111,.18);color:var(--ok)}
 .badge.warn{background:rgba(224,168,60,.18);color:var(--warn)}
 .badge.dim{background:rgba(154,160,170,.18);color:var(--dim)}
+tr.today td{background:rgba(91,140,255,.08)}
 .empty{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--dim)}
 .hint{color:var(--dim);font-size:12px;margin-top:8px}
 code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,60,.1);padding:1px 4px;border-radius:4px}
@@ -213,11 +232,20 @@ ${portfolioHtml}
 </div>
 
 <div class="card">
-  <div class="card-title">🤖 Algo panel — sma-mean-reversion-v1 (stub) · predictions · scenarios · astro match</div>
+  <div class="card-title">🤖 Algo panel — sma-mean-reversion-v1 · decay-adjusted predictions · scenarios · astro match</div>
   <table>
-    <tr><th>Instrument</th><th>Action</th><th>Price</th><th>Target</th><th>Stop-loss</th><th>Confidence</th><th>Algo</th><th>Flags</th><th>Reasons / scenarios</th></tr>
+    <tr><th>Instrument</th><th>Action</th><th>Price</th><th>Target</th><th>Stop-loss</th><th>Confidence (raw → decayed)</th><th>Algo</th><th>Flags</th><th>Reasons / scenarios</th></tr>
     ${signalRows}
   </table>
+</div>
+
+<div class="card">
+  <div class="card-title">⏳ Decay calibration — day-wise, self-rectifying (rate × exp(−rate·h) + timing window)</div>
+  <table class="mini">
+    <tr><th>Weekday</th><th>Decay rate (per hour)</th><th>Best entry window (IST)</th><th>Samples</th><th>Last rectified</th></tr>
+    ${decayRows}
+  </table>
+  <div class="hint">Every prediction is decay-adjusted: confidence × e^(−rate × data-age-hours) × timing factor (1.0 in window, 0.85 out). Below floor ${DECAY_DEFAULTS.confidenceFloor} → HOLD. After each closed trade, the weekday's rate + window are rectified from the outcome (winners ease decay, losers tighten it; window drifts toward winning entry hours). Manual override: <code>PATCH /trading/decay</code> · force now: <code>POST /trading/decay/rectify</code></div>
 </div>
 
 <div class="card">

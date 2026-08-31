@@ -32,6 +32,7 @@ import { MuhurtaWindow } from './astro/muhurta-window.entity';
 import { FnfPortfolio } from './trading/fnf-portfolio.entity';
 import { FnfTrade } from './trading/fnf-trade.entity';
 import { FnfMarketSnapshot } from './trading/fnf-market-snapshot.entity';
+import { FnfDecayCalibration } from './trading/fnf-decay-calibration.entity';
 import { FnfTradingService } from './trading/fnf-trading.service';
 import { FnfTradingController } from './trading/fnf-trading.controller';
 import { FnfTradingPageController } from './trading/fnf-trading-page.controller';
@@ -80,7 +81,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration]),
 		SideIncomeModule,
 	],
 	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController],

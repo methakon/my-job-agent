@@ -98,3 +98,17 @@ export class IngestSnapshotDto {
 	@IsOptional() @IsDateString()
 	ts?: string;
 }
+
+export class SetDecayCalibrationDto {
+	@IsOptional() @IsNumber()
+	weekday?: number;
+
+	@IsOptional() @IsNumber()
+	decayRate?: number;
+
+	@IsOptional() @IsNumber()
+	windowStartHour?: number;
+
+	@IsOptional() @IsNumber()
+	windowEndHour?: number;
+}

@@ -1,10 +1,11 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual } from 'typeorm';
+import { Repository, LessThanOrEqual, IsNull, DeepPartial } from 'typeorm';
 import { FnfPortfolio } from './fnf-portfolio.entity';
 import { FnfTrade } from './fnf-trade.entity';
 import { FnfMarketSnapshot } from './fnf-market-snapshot.entity';
-import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto } from './fnf-trading.dto';
+import { FnfDecayCalibration } from './fnf-decay-calibration.entity';
+import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto, SetDecayCalibrationDto } from './fnf-trading.dto';
 import { AstroMuhurtaService } from '../astro/astro-muhurta.service';
 
 /** Minimum score for a shubh muhurta window (same threshold as the engine). */
@@ -21,6 +22,20 @@ export interface CostBreakdown {
 	total: number;
 }
 
+export interface SignalDecay {
+	/** Hourly exponential decay coefficient applied to this signal. */
+	rate: number;
+	/** Age of the underlying market data in hours (now − snapshot ts). */
+	ageHours: number;
+	/** 1.0 inside the weekday timing window, <1 outside. */
+	timingFactor: number;
+	/** Weekday (0=Sun…6=Sat) whose calibration was used. */
+	weekday: number;
+	windowStartHour: number;
+	windowEndHour: number;
+	lastRectifiedAt: Date | null;
+}
+
 export interface AlgoSignal {
 	instrument: string;
 	algoSource: string;
@@ -28,7 +43,11 @@ export interface AlgoSignal {
 	price: number;
 	target: number;
 	stopLoss: number;
-	confidence: number; // 0..100
+	/** Raw model confidence before decay, 0..100. */
+	confidence: number;
+	/** Decay-adjusted confidence actually used for the decision, 0..100. */
+	decayedConfidence: number;
+	decay: SignalDecay;
 	scenarios: { name: string; probability: number; target: number }[];
 	astroMatch: { shubh: boolean; score: number; label: string };
 	fridayBlocked: boolean;
@@ -46,6 +65,23 @@ const COST_RATES = {
 	stampBuyPct: 0.00015, // 0.015% on buy side
 };
 
+export const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** Signal-decay engine defaults (rectified day-wise from real outcomes). */
+export const DECAY_DEFAULTS = {
+	rate: 0.04, // hourly exponential coefficient
+	minRate: 0.005,
+	maxRate: 0.3,
+	learningRate: 0.15, // per-trade rectification step (fraction of rate)
+	windowStart: 9.5, // 09:30 IST
+	windowEnd: 15.25, // 15:15 IST
+	windowStep: 0.25, // hours the window edges drift per rectification
+	minWindowStart: 9, // never earlier than market open (09:15)
+	maxWindowEnd: 15.5, // never later than market close (15:30)
+	timingPenalty: 0.85, // confidence multiplier outside the window
+	confidenceFloor: 35, // decayed confidence below this → HOLD
+} as const;
+
 @Injectable()
 export class FnfTradingService {
 	private readonly logger = new Logger(FnfTradingService.name);
@@ -54,8 +90,11 @@ export class FnfTradingService {
 		@InjectRepository(FnfPortfolio) private readonly portfolios: Repository<FnfPortfolio>,
 		@InjectRepository(FnfTrade) private readonly trades: Repository<FnfTrade>,
 		@InjectRepository(FnfMarketSnapshot) private readonly snapshots: Repository<FnfMarketSnapshot>,
+		@InjectRepository(FnfDecayCalibration) private readonly calibrations: Repository<FnfDecayCalibration>,
 		private readonly muhurta: AstroMuhurtaService,
-	) {}
+	) {
+		void this.ensureCalibrations().catch((e) => this.logger.warn(`calibration seed failed: ${e.message}`));
+	}
 
 	// ── Portfolio ────────────────────────────────────────────────────────
 
@@ -142,7 +181,8 @@ export class FnfTradingService {
 		return trade;
 	}
 
-	/** Close a position: compute gross/net P&L + cost, update portfolio. */
+	/** Close a position: compute gross/net P&L + cost, update portfolio,
+	 *  then rectify the decay calibration day-wise from this outcome. */
 	async closeTrade(id: string, dto: CloseTradeDto): Promise<FnfTrade> {
 		const trade = await this.trades.findOne({ where: { id }, relations: { portfolio: true } });
 		if (!trade) throw new NotFoundException(`trade ${id} not found`);
@@ -176,6 +216,10 @@ export class FnfTradingService {
 			totalCost: Number(portfolio.totalCost) + cost,
 		});
 		this.logger.log(`trade closed ${id}: gross ${grossPnl.toFixed(2)} cost ${cost.toFixed(2)} net ${netPnl.toFixed(2)}`);
+
+		// Day-wise decay rectification from this outcome (fire-and-forget).
+		void this.rectifyDecay(portfolio.id).catch((e) => this.logger.warn(`decay rectify failed: ${e.message}`));
+
 		return saved;
 	}
 
@@ -275,15 +319,146 @@ export class FnfTradingService {
 		return { notional, brokerage, stt, exchangeTxn, gst, sebi, stamp, total };
 	}
 
-	// ── Algo signals (stubs — real prediction engines plug in here) ─────
+	// ── Decay engine (day-wise, self-rectifying) ─────────────────────────
+
+	/** Seed global calibration rows for all 7 weekdays if absent. */
+	async ensureCalibrations(portfolioId?: string): Promise<void> {
+		const existing = await this.calibrations.find({ where: { portfolioId: portfolioId ?? IsNull() } });
+		const have = new Set(existing.map((c) => c.weekday));
+		const rows: DeepPartial<FnfDecayCalibration>[] = [];
+		for (let wd = 0; wd <= 6; wd++) {
+			if (have.has(wd)) continue;
+			rows.push(this.calibrations.create({
+				portfolioId: portfolioId ?? null,
+				weekday: wd,
+				decayRate: DECAY_DEFAULTS.rate,
+				windowStartHour: DECAY_DEFAULTS.windowStart,
+				windowEndHour: DECAY_DEFAULTS.windowEnd,
+				samples: 0,
+				lastRectifiedAt: undefined,
+			}));
+		}
+		if (rows.length) await this.calibrations.save(rows);
+	}
+
+	/** Active calibration for a weekday: portfolio override → global default. */
+	async getCalibration(weekday: number, portfolioId?: string): Promise<FnfDecayCalibration> {
+		if (portfolioId) {
+			const p = await this.calibrations.findOne({ where: { portfolioId, weekday } });
+			if (p) return p;
+		}
+		const g = await this.calibrations.findOne({ where: { portfolioId: IsNull(), weekday } });
+		if (g) return g;
+		await this.ensureCalibrations(portfolioId);
+		return (await this.calibrations.findOne({ where: { portfolioId: portfolioId ?? IsNull(), weekday } }))!;
+	}
+
+	async listCalibrations(portfolioId?: string): Promise<FnfDecayCalibration[]> {
+		await this.ensureCalibrations(portfolioId);
+		return this.calibrations.find({ where: { portfolioId: portfolioId ?? IsNull() }, order: { weekday: 'ASC' } });
+	}
+
+	/** Manual override of one weekday's decay value + timing window. */
+	async setCalibration(dto: SetDecayCalibrationDto, portfolioId?: string): Promise<FnfDecayCalibration> {
+		const weekday = dto.weekday ?? new Date().getDay();
+		const row = await this.getCalibration(weekday, portfolioId);
+		Object.assign(row, {
+			decayRate: dto.decayRate ?? row.decayRate,
+			windowStartHour: dto.windowStartHour ?? row.windowStartHour,
+			windowEndHour: dto.windowEndHour ?? row.windowEndHour,
+		});
+		return this.calibrations.save(row);
+	}
+
+	/** Apply exponential decay + timing penalty to a raw confidence.
+	 *  Always used: predictions never bypass decay. */
+	decayConfidence(
+		confidence: number,
+		cal: FnfDecayCalibration,
+		snapshotTs: Date,
+		now: Date = new Date(),
+	): { decayed: number; rate: number; ageHours: number; timingFactor: number } {
+		const rate = Number(cal.decayRate);
+		const ageHours = Math.max(0, (now.getTime() - snapshotTs.getTime()) / 3_600_000);
+		const hourOfDay = now.getHours() + now.getMinutes() / 60;
+		const inWindow = hourOfDay >= Number(cal.windowStartHour) && hourOfDay <= Number(cal.windowEndHour);
+		const timingFactor = inWindow ? 1 : DECAY_DEFAULTS.timingPenalty;
+		const decayed = confidence * Math.exp(-rate * ageHours) * timingFactor;
+		return { decayed: Math.max(0, Math.min(100, decayed)), rate, ageHours, timingFactor };
+	}
+
+	/** Day-wise rectification of decay value + timing windows from closed
+	 *  trade outcomes. Winners → decay too harsh? ease it; losers → decay
+	 *  too slow? tighten it. Window edges drift toward winning entry hours. */
+	async rectifyDecay(portfolioId?: string): Promise<FnfDecayCalibration[]> {
+		await this.ensureCalibrations(portfolioId);
+		const closed = await this.trades.find({ where: { status: 'CLOSED' }, order: { closedAt: 'ASC' } });
+		const updated: FnfDecayCalibration[] = [];
+
+		for (let wd = 0; wd <= 6; wd++) {
+			const cal = await this.getCalibration(wd, portfolioId);
+			const wdTrades = closed.filter((t) => t.orderedAt && t.orderedAt.getDay() === wd);
+			if (!wdTrades.length) continue;
+
+			// Only consume trades not yet absorbed into this calibration.
+			const fresh = wdTrades.slice(Number(cal.samples));
+			if (!fresh.length) continue;
+
+			let wins = 0;
+			let losses = 0;
+			const winEntryHours: number[] = [];
+			for (const t of fresh) {
+				const won = Number(t.netPnl) > 0;
+				if (won) { wins++; winEntryHours.push(t.orderedAt.getHours() + t.orderedAt.getMinutes() / 60); }
+				else losses++;
+			}
+			if (!wins && !losses) continue;
+
+			// Rectify decay rate: winners ease it, losers tighten it.
+			const lr = DECAY_DEFAULTS.learningRate;
+			let rate = Number(cal.decayRate);
+			for (let i = 0; i < fresh.length; i++) {
+				if (Number(fresh[i].netPnl) > 0) rate *= 1 - lr;
+				else rate *= 1 + lr;
+			}
+			rate = Math.max(DECAY_DEFAULTS.minRate, Math.min(DECAY_DEFAULTS.maxRate, rate));
+
+			// Rectify timing window toward winning entry hours.
+			let start = Number(cal.windowStartHour);
+			let end = Number(cal.windowEndHour);
+			if (winEntryHours.length) {
+				const meanWinHour = winEntryHours.reduce((a, b) => a + b, 0) / winEntryHours.length;
+				if (meanWinHour < start) start = Math.max(DECAY_DEFAULTS.minWindowStart, start - DECAY_DEFAULTS.windowStep);
+				else if (meanWinHour > end) end = Math.min(DECAY_DEFAULTS.maxWindowEnd, end + DECAY_DEFAULTS.windowStep);
+			}
+			if (start >= end) { start = DECAY_DEFAULTS.minWindowStart; end = DECAY_DEFAULTS.maxWindowEnd; }
+
+			cal.decayRate = rate;
+			cal.windowStartHour = start;
+			cal.windowEndHour = end;
+			cal.samples = Number(cal.samples) + fresh.length;
+			cal.lastRectifiedAt = new Date();
+			updated.push(await this.calibrations.save(cal));
+			this.logger.log(`decay rectified ${WEEKDAY_NAMES[wd]}: rate ${rate.toFixed(4)} window ${start.toFixed(2)}–${end.toFixed(2)} (${wins}W/${losses}L)`);
+		}
+		return updated;
+	}
+
+	// ── Algo signals (decay-aware) ───────────────────────────────────────
 
 	/** Generate BUY/SELL/HOLD signals per instrument from the latest snapshots.
-	 *  Stub logic: SMA-20 mean-reversion + momentum; scenario tree; astro
-	 *  match from the live muhurta engine; Friday block honored. */
+	 *  SMA-20 mean-reversion + momentum; scenario tree; astro match from the
+	 *  live muhurta engine; Friday block honored. Every prediction is
+	 *  decay-adjusted (exponential rate + weekday timing window) — stale data
+	 *  or off-window time degrades confidence, and below the floor → HOLD. */
 	async generateSignals(portfolioId?: string): Promise<AlgoSignal[]> {
 		const portfolio = portfolioId ? await this.getPortfolio(portfolioId) : (await this.listPortfolios())[0] ?? null;
 		const isFriday = new Date().getDay() === 5;
 		const fridayBlocked = isFriday && !(portfolio?.fridayTradingEnabled);
+
+		// Day-wise decay calibration for today (rectified from past outcomes).
+		const todayWd = new Date().getDay();
+		const cal = await this.getCalibration(todayWd, portfolio?.id);
 
 		const instruments = await this.snapshots
 			.createQueryBuilder('s')
@@ -320,7 +495,21 @@ export class FnfTradingService {
 			if (astroMatch.shubh) reasons.push(`shubh muhurta ${astroMatch.label}`);
 			else reasons.push('no shubh muhurta window in next 24h');
 
+			// Raw model confidence (pre-decay).
 			const confidence = Math.min(85, 40 + Math.round(Math.abs(last - sma) / sma * 1000) + (astroMatch.shubh ? 15 : 0));
+
+			// ★ Decay: always predict considering decay (rate + day-wise timing).
+			const latestTs = rows[0].ts;
+			const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(confidence, cal, latestTs);
+
+			// Below the floor the signal has decayed past usable edge → HOLD.
+			if (decayed < DECAY_DEFAULTS.confidenceFloor) {
+				action = 'HOLD';
+				reasons.push(`signal decayed below floor (age ${ageHours.toFixed(1)}h × rate ${rate.toFixed(3)} → conf ${decayed.toFixed(0)})`);
+			} else {
+				reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
+			}
+
 			const target = last * (action === 'BUY' ? 1.02 : action === 'SELL' ? 0.98 : 1);
 			const stopLoss = action === 'BUY' ? last * 0.99 : action === 'SELL' ? last * 1.01 : last;
 
@@ -332,6 +521,16 @@ export class FnfTradingService {
 				target,
 				stopLoss,
 				confidence,
+				decayedConfidence: Math.round(decayed),
+				decay: {
+					rate,
+					ageHours,
+					timingFactor,
+					weekday: todayWd,
+					windowStartHour: Number(cal.windowStartHour),
+					windowEndHour: Number(cal.windowEndHour),
+					lastRectifiedAt: cal.lastRectifiedAt,
+				},
 				scenarios: [
 					{ name: 'bull', probability: action === 'BUY' ? 55 : 30, target: last * 1.02 },
 					{ name: 'base', probability: 25, target: last },
