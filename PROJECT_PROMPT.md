@@ -80,33 +80,30 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
-## Progress (2026-08-31)
-- **Visa-sponsored-jobs guide written (235 lines, 2026-08-31)** to `VISA_SPONSORED_JOBS_GUIDE.md`: Part A step-by-step walkthrough (UK Skilled Worker lead, Germany EU Blue Card, USA H-1B strategy), Part B latest opportunity list (97 engine leads + live external sponsored openings + 8 H1B US leads), Part C tracked progress map (Phase 1–4), Part D engine live status. Guide NOT yet rendered as an in-app page — that is the next item.
-- **BiCSoM Senior Node.js Developer (lead `346e6524-...`) REAL APPLICATION SENT** via Fluent Forms adapter — application `788df9cf` submitted successfully; engine patched (CV set, AUTO_SUBMIT_BROWSER=true, regex fixed, stale rows cleared). No browser popup needed — engine is API-driven.
-- **Browser automation blocked on Chrome remote-debugging** — user profile has no `remote-debugging-port` flag; isolated-browser `cua_browser_prepare` timed out waiting for user approval; `focus_app(Chrome)` same timeout; `list_windows(Chrome)` returned 0 windows. Remotive job page Cloudflare-blocked via curl. Chrome-drive attempts gated behind user approval — no retry without explicit go-ahead. "immurshiv ui" thread closed by user ("OK IGNORE THEM").
-- **Applications**: 36 total — 31 submitted, 4 failed (all Remotive/Lemon.io), 1 needs_info (LinkedIn Continental Industry, Bengaluru — NOT visa-sponsored)
-- **Job leads**: 97 total (Naukri 67, RemoteOK 14, Remotive 5, LinkedIn 4, Norway 4, A1Group 2, BiCSoM 1) + 8 H1B US leads (Stripe, Anthropic, Klaviyo, Lyft, Coinbase, Adyen, Databricks, Airbnb)
-- **Scout**: Remotive + RemoteOK + Norway + Naukri + a1group + norway + workable + micro1 + foundever + finn + BiCSoM (11 adapters)
+## Progress (2026-09-01)
+- **Visa-sponsored-jobs guide: complete** — `VISA_SPONSORED_JOBS_GUIDE.md` (235 lines): Part A step-by-step (UK Skilled Worker lead, Germany EU Blue Card, USA H-1B), Part B opportunity list (97 engine leads + 8 H1B US leads + live external sponsored openings), Part C progress map (Phase 1–4), Part D engine status
+- **`/visa-guide` in-app page: live** — `GET /visa-guide` renders the full guide as styled HTML from `VISA_SPONSORED_JOBS_GUIDE.md` via a minimal built-in markdown renderer; live masthead stats from MySQL (31 submitted / 4 failed / 1 needs_info / 0 sandboxed / 115 leads); badge row; 61 table rows; footer links back to dashboard/applications/swagger — committed `66cc07d`, pushed to origin/dev
+- **BiCSoM Senior Node.js Developer (lead `346e6524-...`) REAL APPLICATION SENT** via Fluent Forms adapter — application `788df9cf` submitted successfully; engine patched (CV set, AUTO_SUBMIT_BROWSER=true, regex fixed, stale rows cleared). API-driven — no browser popup needed
+- **Browser automation still blocked** — Chrome profile has no `remote-debugging-port` flag; `cua_browser_prepare` timed out waiting for user approval; `focus_app(Chrome)` same timeout; `list_windows(Chrome)` returned 0 windows. Remotive job page Cloudflare-blocked via curl. Chrome-drive gated behind user approval — no retry without explicit go-ahead. "immurshiv ui" thread closed by user ("OK IGNORE THEM")
+- **Applications**: 36 total — 31 submitted, 4 failed (all Remotive/Lemon.io), 1 needs_info (LinkedIn Continental, Bengaluru — NOT visa-sponsored)
+- **Job leads**: 115 live in DB (Naukri, RemoteOK, Remotive, LinkedIn, Norway, A1Group, BiCSoM) + 8 H1B US leads (Stripe, Anthropic, Klaviyo, Lyft, Coinbase, Adyen, Databricks, Airbnb)
+- **FNF trading schema v1: committed** — 3 entities in `src/trading/`: `FnfPortfolio` (capital/ceiling/deployed/netPnl/totalCost/autoTradeEnabled), `FnfTrade` (full record incl. decisionParams JSON with all prediction params + astro match + Friday flag + algoSource, entry/exit, gross/net P&L, cost, brokerOrderId, status), `FnfMarketSnapshot` (price/volume/OHLC per instrument, indexed on instrument+ts). No module/service/controller/page yet — next slice
 - **Apply engine**: pm2-managed (ecosystem.config.js), systemd wrapper `pm2-swarna-sekhar-dhar.service` active+enabled, port 3010, sandbox OFF, AUTO_SUBMIT_BROWSER=true
 - **CV**: Swarna_Sekhar_Dhar_Mywhy_Senior_Backend_Engineer.pdf set as default
-- **Visa guide**: written to disk (235 lines) but NOT yet rendered as app page — pending (this session's top task)
 - **Chrome browser automation**: blocked — remote debugging not enabled on user profile; no isolated-browser approval granted; no retry without user
-- **Gotchas added**: Chrome remote-debugging not enabled on user profile → browser automation blocked; cua_browser_prepare requires user approval (timeout); Remotive Cloudflare-blocked via curl.
 
 ## TODO next session (in order)
-0. **Create `/visa-guide` in-app page + render the visa guide + progress map** (top priority — user asked): build a controller that serves the guide HTML, re-read counts from DB for the todo map (31 submitted / 4 failed / 1 needs_info / 97 leads / 8 H1B US leads), expose on a new route. Then commit + push per goodbye process.
-1. **Walk through visa guide with user** (done this session — summary delivered: UK Skilled Worker lead, Germany Blue Card parallel, USA H-1B lottery+cap-exempt strategy, 97 engine leads, 8 H1B US leads, 31 submitted, 4 failed).
-2. **Lemon.io / Remotive Senior React Full-stack (lead `06524d9b-…`)** — apply FAILED x3 (Cloudflare + ATS endpoint). Fix: browser to real Remotive job page (Cloudflare challenge needs real browser), find real apply link, submit. Gate: Chrome remote-debugging + cua_browser_prepare user approval.
-3. **H1B US leads (8 total: Stripe, Anthropic, Klaviyo, Lyft, Coinbase, Adyen, Databricks, Airbnb)** — browser-apply to each company career page. Gate: same Chrome approval.
-4. **LinkedIn needs_info (Continental Industry, Bengaluru — NOT visa-sponsored)** — 5 unanswered fields; fill via browser. Blocked on Chrome. Lower priority — not visa-sponsored.
-5. Activate LinkedIn snapshot (user action): save profile HTML to `data/linkedin/profile.html` → POST /linkedin/refresh.
+0. **FNF trading — build module, service, controller, `/fnf-trading` page** (top priority — user asked 2026-09-01): wire `FnfPortfolio`/`FnfTrade`/`FnfMarketSnapshot` into TypeORM, build `FnfTradingService` (portfolio CRUD, trade ledger, market snapshot ingestion, cost calculator, algo signal stubs, self-learning summary, Friday block + astro-match indicator), build `FnfTradingController` with REST endpoints, build `/fnf-trading` dashboard page (portfolio card, market table for Nifty 50/Sensex + equities with value-change %, algo panel with parameters + predictions + scenarios + astro match, trade ledger, cost breakdown, Friday toggle, broker config slots for Zerodha Kite/Angel One, auto-trade on/off). Then commit + push per goodbye process.
+1. **Lemon.io / Remotive Senior React Full-stack (lead `06524d9b-…`)** — apply FAILED x3 (Cloudflare + ATS endpoint). Fix: browser to real Remotive job page or company Greenhouse/Lever page (Cloudflare challenge needs real browser), find real apply link, submit. Gate: Chrome remote-debugging + cua_browser_prepare user approval.
+2. **H1B US leads (8 total: Stripe, Anthropic, Klaviyo, Lyft, Coinbase, Adyen, Databricks, Airbnb)** — browser-apply to each company career page. Gate: same Chrome approval.
+3. **LinkedIn needs_info (Continental Industry, Bengaluru — NOT visa-sponsored)** — 5 unanswered fields; fill via browser. Blocked on Chrome. Lower priority.
+4. Activate LinkedIn snapshot (user action): save profile HTML to `data/linkedin/profile.html` → POST /linkedin/refresh.
+5. **FNF trading — real broker API wiring** (after page): plug in Zerodha Kite Connect / Angel One API with stored credentials (encrypted), live price feed for Nifty 50/Sensex/equities, order placement within money limit, paper-trade first.
 6. Write-path unicode sanitization (stored data repaired; builder/writer still unsanitized): strip/replace non-ASCII control chars in CV builder + workHistoryJson write path.
 7. Tag-<4-month stint + LinkedIn easy-apply policy: tagged short-stint flag in workHistory + DTO; AtsCvBuilder skips tagged; LinkedIn easy-apply uses last uploaded CV. ASK USER DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology; unresolved).
 8. A1 Group careers adapter (jobs.a1.com): WordPress; REST live; vacancy list client-side via job-listing block — read block JS for data source/fetch params.
 9. finn.no login: captcha verdict NO bypass — one-time manual session-cookie capture (user hasn't chosen). Scrape side live.
 10. Company-redirect apply handling (FR-19, always-company rule): jobs whose apply link redirects to company's own page — detect, drive form (FR-15), handle login/register (legit automation or flag manual-apply).
-11. Interview practice + conversation history features (2026-08-31 user session): continue conversation from prior context; walk user through knowledge summaries; surface relevant prior-session facts inline. Track conversation as first-class artifact.
-12. CV format by geo-location + employer preference (FR-4): US/EU/India style, ALWAYS ATS, ALWAYS English.
 
 ## Goodbye process (user-mandated)
 Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --rebase` → `push origin/dev`. Never skip even on interrupt. Working directory: `/home/swarna-sekhar-dhar/projects/my-job-agent`; branch: `dev`.
@@ -117,3 +114,5 @@ Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --
 - Naukri search needs BOTH nkparam header AND login cookies (appid 109/systemid Naukri)
 - pkill kills our own shell sometimes — use targeted patterns or ss -tln to check port
 - Chrome remote-debugging not enabled on user profile → browser automation blocked; cua_browser_prepare requires user approval (timeout); Remotive Cloudflare-blocked via curl
+- FNF trading entities use `decisionParams` as `text` JSON so the page can render the full decision context (price target, stop-loss, confidence, scenario list, astro match, Friday flag) without schema churn per algorithm
+- Visa guide page renders the raw markdown file live — edits to `VISA_SPONSORED_JOBS_GUIDE.md` show up on refresh; no rebuild needed
