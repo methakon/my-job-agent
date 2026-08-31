@@ -80,36 +80,40 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
-## Progress (2026-08-27)
-- **CNV Labs/iCloudEMS REAL application SENT** (job 4349990583, Node.js Developer): evidence-based email to contact@icloudems.com (found on careers page — fully rule-compliant, NO pattern-guessing) fired 22:38:28 UTC via muhurta sweep; DB status=submitted, isSandbox=0, tailored CV attached. Pre-apply item 9dfe9691-e521-4728-8079-f3c1e0375540.
-- **Evidence pipeline bug fixed (root cause)**: `baseDomain()` in hr-email-investigator was written for hostnames not emails — `contact@icloudems.com`.split('.') → baseDomain `contact@icloudems.com` ≠ pageHost, silently dropping EVERY evidence email. Patched email-aware + www-redirect retry + parenthesized-brand domain fallback. Verified live: investigator now returns {contact@icloudems.com, medium, careers-page:/career}. Committed `fix(apply): evidence-only email detection now actually works` (3b43e77) + pushed.
-- **DB unicode corruption REPAIRED + re-verified**: workHistoryJson role strings now store real "Senior Associate → Team Lead – Backend" (U+2192 arrow, U+2013 en dash). Write-path sanitization still open (TODO).
-- **Continental Industry pipeline (job 4456857847, Senior Software Engineer, Bengaluru, Node.js/TS/AWS, ContiTech)**: lead 5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c inserted; prepared; NO email evidence found (honest null — Continental publishes no HR emails); channel set to company ATS SmartRecruiters posting (external-link → company portal rule); item e16a55f4-3d9d-403c-af64-fa25a7c49380 approved for muhurta sweep.
-- **Browser form (FR-15) fixed for modern ATS** (3 fixes, in flight):
-  1. SmartRecruiters device-verification interstitial stalls default headless Chrome → stealth flags (AutomationControlled off, real UA, webdriver spoof) pass it in ~1s;
-  2. ATS forms hidden behind CTA ("I'm interested") → click first apply button + wait for oneclick-ui URL + wait for field visibility;
-  3. `$$eval` never sees shadow-DOM inputs (SmartRecruiters oneclick-ui renders form in shadow roots) → switched to playwright locators (pierce shadow DOM) with per-field nth() fill; CV upload locator too; CSS.escape crash removed; aria-label added to matcher; firstname/lastname/website/message aliases added.
-  4. needs_info rows no longer block re-send: dedupe only on terminal success (submitted/sent/sandboxed); failed+needs_info retried in place (no duplicate rows).
-- **Fixed ATS false positive**: process-learning ATS regex matched "lever" inside "Leverage" → negative lookahead `lever(?!age)`. Continental correctly re-detected as no-JD-ATS.
-- **Cutshort portal apply (Google login)**: paused — requires user to tick "Allow remote debugging" in chrome://inspect (harness forbids retry before confirmation); email already sent so nothing lost.
+## Progress (2026-08-31)
+- **Visa-sponsored-jobs guide written (235 lines, 2026-08-31)** to `VISA_SPONSORED_JOBS_GUIDE.md`: Part A step-by-step walkthrough (UK Skilled Worker lead, Germany EU Blue Card, USA H-1B strategy), Part B latest opportunity list (97 engine leads + live external sponsored openings + 8 H1B US leads), Part C tracked progress map (Phase 1–4), Part D engine live status. Guide NOT yet rendered as an in-app page — that is the next item.
+- **BiCSoM Senior Node.js Developer (lead `346e6524-...`) REAL APPLICATION SENT** via Fluent Forms adapter — application `788df9cf` submitted successfully; engine patched (CV set, AUTO_SUBMIT_BROWSER=true, regex fixed, stale rows cleared). No browser popup needed — engine is API-driven.
+- **Browser automation blocked on Chrome remote-debugging** — user profile has no `remote-debugging-port` flag; isolated-browser `cua_browser_prepare` timed out waiting for user approval; `focus_app(Chrome)` same timeout; `list_windows(Chrome)` returned 0 windows. Remotive job page Cloudflare-blocked via curl. Chrome-drive attempts gated behind user approval — no retry without explicit go-ahead. "immurshiv ui" thread closed by user ("OK IGNORE THEM").
+- **Applications**: 36 total — 31 submitted, 4 failed (all Remotive/Lemon.io), 1 needs_info (LinkedIn Continental Industry, Bengaluru — NOT visa-sponsored)
+- **Job leads**: 97 total (Naukri 67, RemoteOK 14, Remotive 5, LinkedIn 4, Norway 4, A1Group 2, BiCSoM 1) + 8 H1B US leads (Stripe, Anthropic, Klaviyo, Lyft, Coinbase, Adyen, Databricks, Airbnb)
+- **Scout**: Remotive + RemoteOK + Norway + Naukri + a1group + norway + workable + micro1 + foundever + finn + BiCSoM (11 adapters)
+- **Apply engine**: pm2-managed (ecosystem.config.js), systemd wrapper `pm2-swarna-sekhar-dhar.service` active+enabled, port 3010, sandbox OFF, AUTO_SUBMIT_BROWSER=true
+- **CV**: Swarna_Sekhar_Dhar_Mywhy_Senior_Backend_Engineer.pdf set as default
+- **Visa guide**: written to disk (235 lines) but NOT yet rendered as app page — pending (this session's top task)
+- **Chrome browser automation**: blocked — remote debugging not enabled on user profile; no isolated-browser approval granted; no retry without user
+- **Gotchas added**: Chrome remote-debugging not enabled on user profile → browser automation blocked; cua_browser_prepare requires user approval (timeout); Remotive Cloudflare-blocked via curl.
 
 ## TODO next session (in order)
-0. **Verify Continental send result** (item e16a55f4-3d9d-403c-af64-fa25a7c49380): muhurta sweep fires browser fill on SmartRecruiters oneclick-ui ~10 min after last boot (23:45:22 → ~23:55); expect needs_info (form filled for human review, AUTO_SUBMIT_BROWSER unset) — review screenshots in generated/browser/ + check DB status. Then decide: enable AUTO_SUBMIT_BROWSER=true for full auto-submit or keep human-review.
-1. **Cutshort portal apply via Google login** (user approval pending on Chrome remote-debugging): https://cutshort.io/job/Node-js-Developer-ICloudEMS-wwzWD11g — Google OAuth confirmed; user must tick "Allow remote debugging for this browser instance" in chrome://inspect + second Allow popup; Google account sign-in is a manual user step (no stored creds).
-2. **Write-path unicode sanitization** (stored data repaired; builder/writer still unsanitized): strip/replace non-ASCII control chars in CV builder + workHistoryJson write path.
-3. **Tag-<4-month + LinkedIn easy-apply policy** (user instruction verbatim 2026-08-27): tagged short-stint flag in workHistory + DTO; AtsCvBuilder skips tagged; LinkedIn easy-apply uses last uploaded CV only. Also ASK USER the DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology).
-4. **Josys Ashby wiring go/no-go** (posting 04703ddd-7128-4740-982a-bdac760aeddc): rule-compliant jobs.ashbyhq.com/josys verified — awaiting user decision (pattern-guessed email already disclosed, cannot unsend).
-5. **A1 Group careers adapter (jobs.a1.com)**: WordPress; REST live; vacancy list client-side via job-listing block — read block JS for data source/fetch params.
-6. **Activate LinkedIn snapshot** (user action): save profile HTML into data/linkedin/profile.html → POST /linkedin/refresh.
-7. **finn.no login**: captcha verdict NO bypass — one-time manual session-cookie capture (user hasn't chosen). Scrape side live.
-8. LinkedIn easy-apply via li_at cookie (toggle OFF by default).
-9. **Company-redirect apply handling** (FR-19, always-company rule): jobs whose apply link redirects to company's own page — detect, drive form (FR-15), handle login/register (legit automation or flag manual-apply).
-10. **Quick-question user input** (FR-20): /quick-question free text from live state.
-11. **Live list updates while applying** (FR-21): per-item status transitions visible live during /auto-apply/run.
-12. **CV format by geo-location + employer preference** (FR-4): US/EU/India style, ALWAYS ATS, ALWAYS English.
+0. **Create `/visa-guide` in-app page + render the visa guide + progress map** (top priority — user asked): build a controller that serves the guide HTML, re-read counts from DB for the todo map (31 submitted / 4 failed / 1 needs_info / 97 leads / 8 H1B US leads), expose on a new route. Then commit + push per goodbye process.
+1. **Walk through visa guide with user** (done this session — summary delivered: UK Skilled Worker lead, Germany Blue Card parallel, USA H-1B lottery+cap-exempt strategy, 97 engine leads, 8 H1B US leads, 31 submitted, 4 failed).
+2. **Lemon.io / Remotive Senior React Full-stack (lead `06524d9b-…`)** — apply FAILED x3 (Cloudflare + ATS endpoint). Fix: browser to real Remotive job page (Cloudflare challenge needs real browser), find real apply link, submit. Gate: Chrome remote-debugging + cua_browser_prepare user approval.
+3. **H1B US leads (8 total: Stripe, Anthropic, Klaviyo, Lyft, Coinbase, Adyen, Databricks, Airbnb)** — browser-apply to each company career page. Gate: same Chrome approval.
+4. **LinkedIn needs_info (Continental Industry, Bengaluru — NOT visa-sponsored)** — 5 unanswered fields; fill via browser. Blocked on Chrome. Lower priority — not visa-sponsored.
+5. Activate LinkedIn snapshot (user action): save profile HTML to `data/linkedin/profile.html` → POST /linkedin/refresh.
+6. Write-path unicode sanitization (stored data repaired; builder/writer still unsanitized): strip/replace non-ASCII control chars in CV builder + workHistoryJson write path.
+7. Tag-<4-month stint + LinkedIn easy-apply policy: tagged short-stint flag in workHistory + DTO; AtsCvBuilder skips tagged; LinkedIn easy-apply uses last uploaded CV. ASK USER DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology; unresolved).
+8. A1 Group careers adapter (jobs.a1.com): WordPress; REST live; vacancy list client-side via job-listing block — read block JS for data source/fetch params.
+9. finn.no login: captcha verdict NO bypass — one-time manual session-cookie capture (user hasn't chosen). Scrape side live.
+10. Company-redirect apply handling (FR-19, always-company rule): jobs whose apply link redirects to company's own page — detect, drive form (FR-15), handle login/register (legit automation or flag manual-apply).
+11. Interview practice + conversation history features (2026-08-31 user session): continue conversation from prior context; walk user through knowledge summaries; surface relevant prior-session facts inline. Track conversation as first-class artifact.
+12. CV format by geo-location + employer preference (FR-4): US/EU/India style, ALWAYS ATS, ALWAYS English.
+
+## Goodbye process (user-mandated)
+Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --rebase` → `push origin/dev`. Never skip even on interrupt. Working directory: `/home/swarna-sekhar-dhar/projects/my-job-agent`; branch: `dev`.
 
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`
 - TypeORM can't infer types from `string | null` unions — always set explicit column type
 - Naukri search needs BOTH nkparam header AND login cookies (appid 109/systemid Naukri)
 - pkill kills our own shell sometimes — use targeted patterns or ss -tln to check port
+- Chrome remote-debugging not enabled on user profile → browser automation blocked; cua_browser_prepare requires user approval (timeout); Remotive Cloudflare-blocked via curl
