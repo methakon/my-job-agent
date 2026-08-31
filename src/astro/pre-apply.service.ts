@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ApplyEngineService } from '../applications/apply-engine.service';
 import { PreApplyItem } from './pre-apply-item.entity';
 import { PreApplyItemRepository } from './pre-apply-item.repository';
+import { LeadRepository } from '../leads/lead.repository';
 import { AstroLeadScoringService } from './astro-lead-scoring.service';
 import { AstroMuhurtaService } from './astro-muhurta.service';
 
@@ -27,6 +28,7 @@ export class PreApplyService {
 		private readonly engine: ApplyEngineService,
 		private readonly astroScoring: AstroLeadScoringService,
 		private readonly muhurta: AstroMuhurtaService,
+		private readonly leadRepo: LeadRepository,
 	) {}
 
 	/** Prepare an application for a lead — builds everything, sends nothing. */
@@ -41,14 +43,19 @@ export class PreApplyService {
 			return { error: prep.errorDetail ?? prep.status };
 		}
 
-		const astro = this.astroScoring.score(prep.lead.title, prep.lead.company, prep.lead.description);
+		const storedLead = await this.leadRepo.findOneById(leadId);
+		const astro = this.astroScoring.score(
+			prep.lead.title,
+			prep.lead.company,
+			prep.lead.description,
+		);
 		const window = await this.muhurta.nextWindow(new Date());
 
 		const item = await this.items.create({
 			leadId,
 			source: prep.lead.source,
 			status: 'ready',
-			matchScore: Number((prep.lead as unknown as { matchScore?: number }).matchScore ?? 0),
+			matchScore: Number(storedLead?.matchScore ?? 0),
 			astroScore: astro.score,
 			astroJson: JSON.stringify({
 				reasons: astro.reasons,

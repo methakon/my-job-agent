@@ -1,0 +1,14 @@
+{
+  "kind": "lead_evidence",
+  "source": "heuristic",
+  "collected_at": "2026-08-29T17:49:37.569200+00:00",
+  "lead_uuid": "5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c",
+  "data": {
+    "lead_uuid": "5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c",
+    "title": "Senior Software Engineer",
+    "company": "Continental Industry",
+    "geography": "Bengaluru, Karnataka, India",
+    "externalId": "4456857847",
+    "evidence": "HR email detection from LinkedIn job description:\n- No direct HR/recruiting email found in posting text.\n- No Greenhouse/Lever/Ashby/Workable application link found in posting.\n- LinkedIn company page (linkedin.com/company/continental-industry) has no visible careers tab from scraped text.\n- Recommended HR search: channel='linkedin' entityType='company' entityId='2744136' name='Continental Industry' inside my-job-agent (GET /channels/investigate).\n- If no HR email surfaces: fallback to LinkedIn easy-apply (last-uploaded CV only per user rules) or Naukri apply."
+  }
+}

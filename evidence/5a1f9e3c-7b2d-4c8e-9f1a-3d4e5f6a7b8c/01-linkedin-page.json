@@ -1,0 +1,16 @@
+{
+  "kind": "lead_evidence",
+  "source": "web",
+  "collected_at": "2026-08-29T17:49:37.569200+00:00",
+  "lead_uuid": "5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c",
+  "data": {
+    "job_id": "4456857847",
+    "posting_url": "https://www.linkedin.com/jobs/view/4456857847/",
+    "title": "Senior Software Engineer",
+    "company": "Continental Industry",
+    "location": "Bengaluru, Karnataka, India",
+    "description": "Company Description: ContiTech is a major global industry specialist that develops and manufactures high-tech products, systems, and components made from rubber, plastic, metal, and fabric. At ContiTech, we are building a world-class Business Hub in Bangalore that supports global business functions and enables excellence across finance, technology, and corporate services.\n\nJob Description: Leverage AI-powered development tools (GitHub Copilot, Cursor, Claude, etc.) to improve engineering productivity, code quality, documentation, and testing. Evaluate AI-generated code for correctness, security, maintainability, and performance before production deployment. Participate in AI-driven code reviews, architecture discussions, and continuous improvement initiatives. Stay updated with emerging AI technologies and recommend innovative solutions to improve products and engineering practices. Design, develop, and maintain scalable, secure, and reliable backend systems and APIs using modern technologies and engineering best practices. Own one or more product modules and work closely with the Technical Lead to deliver high-quality solutions. Identify, prioritize, and execute tasks throughout the Software Development Life Cycle (SDLC). Write clean, efficient, maintainable, and testable code following coding standards and architectural guidelines. Design and optimize backend systems for performance, scalability, reliability, and cost efficiency. Implement robust security practices to protect sensitive data and ensure compliance with enterprise security standards. Troubleshoot, debug, and resolve production issues while ensuring high system availability. Collaborate with DevOps and Infrastructure teams to deploy, monitor, and optimize backend services.\n\nTechnical Skills: Experience of AI-powered development to improve engineering productivity, code quality, and testing. Strong experience in Node.js as the primary backend technology. Experience in TypeScript. Strong experience with AWS Cloud services. Experience with relational databases (PostgreSQL, MySQL) and NoSQL databases (DynamoDB). Experience building microservices and RESTful APIs. Experience with testing frameworks (Jest, Mocha, or similar). Experience with version control (Git) and CI/CD pipelines.\n\nAdditional Skills: Experience with Python. Experience with containerization (Docker) and orchestration (Kubernetes). Experience with observability tools (Datadog, Grafana, OpenTelemetry). Experience with agile development methodologies.",
+    "scrape_status": "ok",
+    "scrape_date": "2026-08-29"
+  }
+}

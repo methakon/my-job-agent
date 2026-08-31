@@ -1,0 +1,10 @@
+{
+  "kind": "lead_evidence",
+  "source": "web_search",
+  "collected_at": "2026-08-29T17:49:37.569200+00:00",
+  "lead_uuid": "5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c",
+  "data": {
+    "query": "ContiTech Bengaluru hiring",
+    "evidence": "Search 'ContiTech' (2026-08-29) returned no self-hosted careers page and no clear 'ContiTech' interview/process pages. Continental AG (the parent) is a well-known German automotive/tire group; ContiTech (Continental Addingham Ltd in the UK) is one of its industrial rubber/composite divisions. The Bengaluru role sits under 'Continental Industry' LinkedIn entity (same as the company field on the lead). Verdict: employer is real and verifiable as a division of Continental AG; no separate ContiTech job board page was found — LinkedIn is the primary channel."
+  }
+}

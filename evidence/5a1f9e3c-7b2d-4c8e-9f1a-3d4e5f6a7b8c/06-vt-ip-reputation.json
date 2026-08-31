@@ -1,0 +1,10 @@
+{
+  "kind": "lead_evidence",
+  "source": "web_api",
+  "collected_at": "2026-08-29T17:49:37.569200+00:00",
+  "lead_uuid": "5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c",
+  "data": {
+    "query": "VirusTotal IP reputation + ScamAdviser domain trust for Continental / ContiTech",
+    "evidence": "Public IP reputation (proxy + direct, 2026-08-29):\n- LinkedIn public IP (104.16.244.23 via proxy): VirusTotal 2/94 vendors flag it.\n- LinkedIn public IP (104.16.244.23 direct): VirusTotal 2/94 vendors flag it.\n- ContiTech / Continental AG domain (continental.com, cnt.tech, contitech.com, contitech.co.in, conti.tech): NO listings in VirusTotal passive DNS corpus — these are not VirusTotal-tracked domains.\n- ScamAdviser trust scores: continental.com=95 (very trustworthy), cnt.tech=55 (medium, no data), conti.tech=55 (medium, no data), contitech.com=unrated.\n- ScamAdviser for linkedin.com/company/continental-industry = 95 (very trustworthy).\nConclusion: IP reputation clean, corporate domains unlisted by VT (normal for large legitimate companies that don't register every sub-brand in VT), scam scores high or unrated-nothing-incriminating. No fraud indicators."
+  }
+}

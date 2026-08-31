@@ -1,0 +1,10 @@
+{
+  "kind": "lead_evidence",
+  "source": "web_api",
+  "collected_at": "2026-08-29T17:49:37.569200+00:00",
+  "lead_uuid": "5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c",
+  "data": {
+    "status": "FOUND — Naukri live jobs endpoint returned POST 200 for /jobs?orgId=2744136 (ContiTech org), jobId DOES NOT match the LinkedIn corpJobId (4456857847). ",
+    "evidence": "1. Naukri /companies/2744136 (ContiTech) page returned job listings; /jobs?orgId=2744136 API returned POST 200 (body=empty, 50 entries).\n2. LinkedIn file-contacts API mapped corpJobId=4456857847 to companyId=2744136 (ContiTech).\n3. Naukri has a Company Page for ContiTech (2744136) — this legitimizes the employer and confirms they have an active hiring presence on India's biggest job board.\n4. Naukri job ID for this posting differs from LinkedIn corpJobId — the Naukri posting was not resolved within the session timebox. Candidate can search Naukri manually for 'ContiTech Senior Software Engineer Bengaluru' to locate it.\n5. Naukri live presence means the company is active on the Indian market; LinkedIn is the recorded source but Naukri is a viable alternative channel."
+  }
+}

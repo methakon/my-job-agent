@@ -17,6 +17,10 @@ import { NaukriAdapter } from '../scout/naukri.adapter';
 import { MonsterAdapter } from '../scout/monster.adapter';
 import { FinnAdapter } from '../scout/finn.adapter';
 import { A1GroupAdapter } from '../scout/a1-group.adapter';
+import { WorkableAdapter } from '../scout/workable.adapter';
+import { Micro1JobsAdapter } from '../scout/micro1.adapter';
+import { FoundeverAdapter } from '../scout/foundever.adapter';
+import { BicsomAdapter } from '../scout/bicsom.adapter';
 import { HrEmailInvestigator } from './hr-email-investigator.service';
 import { BrowserFormService } from './browser-form.service';
 import { LearningWeightsService } from './learning-weights.service';
@@ -65,6 +69,10 @@ export class ApplyEngineService implements OnModuleInit {
 			new MonsterAdapter(this.portalCreds),
 			new FinnAdapter(this.portalCreds, this.inbox),
 			new A1GroupAdapter(),
+			new WorkableAdapter(),
+			new Micro1JobsAdapter(),
+			new FoundeverAdapter(),
+			new BicsomAdapter(),
 		]) {
 			this.register(a);
 		}
@@ -401,6 +409,13 @@ export class ApplyEngineService implements OnModuleInit {
 			if (!channel || channel.kind !== 'email') {
 				const hr = await this.investigator.investigate(lead.company, lead.url, lead.description);
 				if (hr) channel = { kind: 'email', target: hr.email, detectedBy: `${hr.source}:${hr.confidence}` };
+			}
+			// No email evidence? Use the company's OWN application form — fetch
+			// the careers page and fill its form via the browser agent, NEVER
+			// email a generic support/info mailbox (user rule 2026-08-28).
+			if (!channel || channel.kind !== 'ats') {
+				const formUrl = await this.investigator.findApplyFormUrl(lead.company, lead.url);
+				if (formUrl) channel = { kind: 'ats', target: formUrl, detectedBy: 'careers-page-form' };
 			}
 
 			const coverLetter = this.generateCoverLetter(profileData, lead);

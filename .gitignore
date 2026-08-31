@@ -6,3 +6,4 @@ generated/
 logs/
 agent.pid
 uploads/
+__pycache__/

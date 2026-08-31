@@ -1,0 +1,10 @@
+{
+  "kind": "lead_evidence",
+  "source": "heuristic",
+  "collected_at": "2026-08-29T17:49:37.569200+00:00",
+  "lead_uuid": "5a1f9e3c-7b2d-4c8e-9f1a-3d4e5f6a7b8c",
+  "data": {
+    "match": "true",
+    "details": "Strong Node.js + TypeScript (primary backend) ✓\nAWS Cloud services ✓\nPostgreSQL + MySQL + DynamoDB ✓\nMicroservices + RESTful APIs ✓\nJest/Mocha testing ✓\nGit + CI/CD ✓\nPython, Docker/K8s, Datadog/Grafana/OpenTelemetry, Agile ✓\nSenior SDE role = matches target profile (Senior Developer / Backend) ✓"
+  }
+}

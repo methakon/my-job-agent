@@ -1,0 +1,20 @@
+module.exports = {
+  apps: [{
+    name: 'my-job-agent',
+    script: 'dist/main.js',
+    cwd: '/home/swarna-sekhar-dhar/projects/my-job-agent',
+    instances: 1,
+    exec_mode: 'fork',
+    node_args: '--enable-source-maps',
+    merge_logs: true,
+    out_file: '/home/swarna-sekhar-dhar/.pm2/logs/my-job-agent-out.log',
+    error_file: '/home/swarna-sekhar-dhar/.pm2/logs/my-job-agent-err.log',
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    max_restarts: 10,
+    min_uptime: '5s',
+    kill_timeout: 30000,
+    env: {
+      NODE_ENV: 'production',
+    },
+  }],
+};
