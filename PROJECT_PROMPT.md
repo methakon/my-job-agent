@@ -81,6 +81,7 @@ push `origin/dev` — never skip even on interrupt.
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
 ## Progress (2026-09-01)
+- **FNF trading module v1: LIVE** — `src/trading/` now has module wiring in AppModule: `FnfTradingService` (portfolio CRUD, trade ledger with Indian discount-broker cost model, market snapshot ingestion + value-change %, SMA mean-reversion signal stubs with scenario tree + astro match + Friday block, self-learning summary per algoSource), `FnfTradingController` (REST: `/trading/portfolios|trades|market|signals|cost|astro|summary`), `FnfTradingPageController` (`/fnf-trading` dashboard: portfolio card, Nifty 50/Sensex market table, algo panel, trade ledger, cost breakdown, Friday toggle, broker config slots for Zerodha Kite/Angel One, auto-trade on/off, astro muhurta panel). `fnf_portfolios`/`fnf_trades`/`fnf_market_snapshots` tables created in MySQL (prod has synchronize off). Dashboard card added. E2E verified: open→close trade (gross 299.40, cost 32.72, net 266.68), learning summary, market change%, signals with astro match. Entities extended with `fridayTradingEnabled` + `brokerConfig` (text JSON) columns.
 - **Visa-sponsored-jobs guide: complete** — `VISA_SPONSORED_JOBS_GUIDE.md` (235 lines): Part A step-by-step (UK Skilled Worker lead, Germany EU Blue Card, USA H-1B), Part B opportunity list (97 engine leads + 8 H1B US leads + live external sponsored openings), Part C progress map (Phase 1–4), Part D engine status
 - **`/visa-guide` in-app page: live** — `GET /visa-guide` renders the full guide as styled HTML from `VISA_SPONSORED_JOBS_GUIDE.md` via a minimal built-in markdown renderer; live masthead stats from MySQL (31 submitted / 4 failed / 1 needs_info / 0 sandboxed / 115 leads); badge row; 61 table rows; footer links back to dashboard/applications/swagger — committed `66cc07d`, pushed to origin/dev
 - **BiCSoM Senior Node.js Developer (lead `346e6524-...`) REAL APPLICATION SENT** via Fluent Forms adapter — application `788df9cf` submitted successfully; engine patched (CV set, AUTO_SUBMIT_BROWSER=true, regex fixed, stale rows cleared). API-driven — no browser popup needed
@@ -93,17 +94,16 @@ push `origin/dev` — never skip even on interrupt.
 - **Chrome browser automation**: blocked — remote debugging not enabled on user profile; no isolated-browser approval granted; no retry without user
 
 ## TODO next session (in order)
-0. **FNF trading — build module, service, controller, `/fnf-trading` page** (top priority — user asked 2026-09-01): wire `FnfPortfolio`/`FnfTrade`/`FnfMarketSnapshot` into TypeORM, build `FnfTradingService` (portfolio CRUD, trade ledger, market snapshot ingestion, cost calculator, algo signal stubs, self-learning summary, Friday block + astro-match indicator), build `FnfTradingController` with REST endpoints, build `/fnf-trading` dashboard page (portfolio card, market table for Nifty 50/Sensex + equities with value-change %, algo panel with parameters + predictions + scenarios + astro match, trade ledger, cost breakdown, Friday toggle, broker config slots for Zerodha Kite/Angel One, auto-trade on/off). Then commit + push per goodbye process.
+0. **FNF trading — real broker API wiring** (module v1 is live): plug in Zerodha Kite Connect / Angel One API with stored credentials (encrypted in `fnf_portfolios.brokerConfig`), live price feed for Nifty 50/Sensex/equities feeding `fnf_market_snapshots`, order placement within money limit, paper-trade first.
 1. **Lemon.io / Remotive Senior React Full-stack (lead `06524d9b-…`)** — apply FAILED x3 (Cloudflare + ATS endpoint). Fix: browser to real Remotive job page or company Greenhouse/Lever page (Cloudflare challenge needs real browser), find real apply link, submit. Gate: Chrome remote-debugging + cua_browser_prepare user approval.
 2. **H1B US leads (8 total: Stripe, Anthropic, Klaviyo, Lyft, Coinbase, Adyen, Databricks, Airbnb)** — browser-apply to each company career page. Gate: same Chrome approval.
 3. **LinkedIn needs_info (Continental Industry, Bengaluru — NOT visa-sponsored)** — 5 unanswered fields; fill via browser. Blocked on Chrome. Lower priority.
 4. Activate LinkedIn snapshot (user action): save profile HTML to `data/linkedin/profile.html` → POST /linkedin/refresh.
-5. **FNF trading — real broker API wiring** (after page): plug in Zerodha Kite Connect / Angel One API with stored credentials (encrypted), live price feed for Nifty 50/Sensex/equities, order placement within money limit, paper-trade first.
+5. Tag-<4-month stint + LinkedIn easy-apply policy: tagged short-stint flag in workHistory + DTO; AtsCvBuilder skips tagged; LinkedIn easy-apply uses last uploaded CV. ASK USER DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology; unresolved).
 6. Write-path unicode sanitization (stored data repaired; builder/writer still unsanitized): strip/replace non-ASCII control chars in CV builder + workHistoryJson write path.
-7. Tag-<4-month stint + LinkedIn easy-apply policy: tagged short-stint flag in workHistory + DTO; AtsCvBuilder skips tagged; LinkedIn easy-apply uses last uploaded CV. ASK USER DOB question (PAN + 10th cert: 09/12/1982 vs chart/memory: 09/12/1981 — affects astrology; unresolved).
-8. A1 Group careers adapter (jobs.a1.com): WordPress; REST live; vacancy list client-side via job-listing block — read block JS for data source/fetch params.
-9. finn.no login: captcha verdict NO bypass — one-time manual session-cookie capture (user hasn't chosen). Scrape side live.
-10. Company-redirect apply handling (FR-19, always-company rule): jobs whose apply link redirects to company's own page — detect, drive form (FR-15), handle login/register (legit automation or flag manual-apply).
+7. A1 Group careers adapter (jobs.a1.com): WordPress; REST live; vacancy list client-side via job-listing block — read block JS for data source/fetch params.
+8. finn.no login: captcha verdict NO bypass — one-time manual session-cookie capture (user hasn't chosen). Scrape side live.
+9. Company-redirect apply handling (FR-19, always-company rule): jobs whose apply link redirects to company's own page — detect, drive form (FR-15), handle login/register (legit automation or flag manual-apply).
 
 ## Goodbye process (user-mandated)
 Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --rebase` → `push origin/dev`. Never skip even on interrupt. Working directory: `/home/swarna-sekhar-dhar/projects/my-job-agent`; branch: `dev`.
@@ -115,4 +115,6 @@ Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --
 - pkill kills our own shell sometimes — use targeted patterns or ss -tln to check port
 - Chrome remote-debugging not enabled on user profile → browser automation blocked; cua_browser_prepare requires user approval (timeout); Remotive Cloudflare-blocked via curl
 - FNF trading entities use `decisionParams` as `text` JSON so the page can render the full decision context (price target, stop-loss, confidence, scenario list, astro match, Friday flag) without schema churn per algorithm
+- TypeORM `create()` with `nullable` columns: pass `undefined` not `null` (TS strict: `DeepPartial` doesn't accept `null`); `const out = []` infers `never[]` — type the array literal
+- Prod runs `synchronize=false` (NODE_ENV=production) — new entity tables must be created via SQL in MySQL before boot
 - Visa guide page renders the raw markdown file live — edits to `VISA_SPONSORED_JOBS_GUIDE.md` show up on refresh; no rebuild needed

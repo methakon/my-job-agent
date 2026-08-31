@@ -29,6 +29,12 @@ import { PreApplyService } from './astro/pre-apply.service';
 import { MuhurtaSendService } from './astro/muhurta-send.service';
 import { AstroController } from './astro/astro.controller';
 import { MuhurtaWindow } from './astro/muhurta-window.entity';
+import { FnfPortfolio } from './trading/fnf-portfolio.entity';
+import { FnfTrade } from './trading/fnf-trade.entity';
+import { FnfMarketSnapshot } from './trading/fnf-market-snapshot.entity';
+import { FnfTradingService } from './trading/fnf-trading.service';
+import { FnfTradingController } from './trading/fnf-trading.controller';
+import { FnfTradingPageController } from './trading/fnf-trading-page.controller';
 import { InterviewPrepController } from './interview/interview-prep.controller';
 import { InterviewPracticePageController } from './interview/interview-practice-page.controller';
 import { MailController } from './applications/mail.controller';
@@ -74,10 +80,10 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -110,6 +116,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		PreApplyItemRepository,
 		PreApplyService,
 		MuhurtaSendService,
+		FnfTradingService,
 	],
 })
 export class AppModule {}

@@ -34,6 +34,15 @@ export class FnfPortfolio {
   @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
   ceiling: number;
 
+  /** Allow opening new positions on Friday (default: blocked). */
+  @Column({ type: 'boolean', default: false })
+  fridayTradingEnabled: boolean;
+
+  /** Broker connection slots: {"zerodha": {...}, "angelOne": {...}}.
+   *  Credentials encrypted when real broker wiring lands (TODO item 5). */
+  @Column({ type: 'text', nullable: true })
+  brokerConfig: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

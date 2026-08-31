@@ -81,6 +81,11 @@
 		<details><summary>Open full side-income page</summary><p><a style="color:var(--accent)" href="/side-income-dashboard/dashboard">→ /side-income-dashboard/dashboard</a></p></details>
 	</section>
 
+	<section class="card" style="border-color:rgba(63,185,111,.45)">
+		<h2>📊 FNF Trading <span class="meta">Friday Nifty Futures algo desk · astro-matched</span> <a style="color:var(--accent);font-size:12px" href="/fnf-trading">open trading page →</a></h2>
+		<div id="fnfTrading">loading…</div>
+	</section>
+
 	<section class="card">
 		<h2>📧 Mail Accounts <span class="meta">sender &amp; tracker</span></h2>
 		<div id="mailAccounts">loading…</div>
@@ -211,6 +216,26 @@ function markSide(id, btn) {
 		.then(loadSideIncome);
 }
 
+async function loadFnfTrading() {
+	const el = document.getElementById('fnfTrading');
+	try {
+		const d = await api('/trading/summary');
+		const p = (d.portfolios || [])[0];
+		const open = (d.trades || []).filter(t => t.status === 'OPEN').length;
+		const win = d.learning ? `${d.learning.winRate}% win (${d.learning.winners}/${d.learning.total})` : 'no closed trades';
+		const net = d.learning ? Number(d.learning.netPnl || 0) : 0;
+		el.innerHTML = p
+			? `<div class="lead"><div><b>₹ ${Number(p.capital || 0).toLocaleString('en-IN')} capital</b> <span class="meta">${esc(p.label)} · deployed ₹ ${Number(p.deployed || 0).toLocaleString('en-IN')} · headroom ₹ ${(Number(p.ceiling || p.capital) - Number(p.deployed || 0)).toLocaleString('en-IN')}</span></div>` +
+			  `<span class="badge ${p.autoTradeEnabled ? 'ok' : ''}">${p.autoTradeEnabled ? 'AUTO ON' : 'auto off'}</span></div>` +
+			  `<div class="lead"><div><b class="${net >= 0 ? 'ok' : 'bad'}">net P&amp;L ₹ ${Number(net).toLocaleString('en-IN')}</b> <span class="meta">${win} · ${open} open position${open === 1 ? '' : 's'}</span></div>` +
+			  `<a style="color:var(--accent);font-size:12px" href="/fnf-trading">open desk →</a></div>`
+			: `<div class="lead"><div><b>No portfolio yet</b> <span class="meta">create via POST /trading/portfolios</span></div>` +
+			  `<a style="color:var(--accent);font-size:12px" href="/fnf-trading">open desk →</a></div>`;
+	} catch (e) {
+		el.innerHTML = '<span class="meta">trading API unavailable</span>';
+	}
+}
+
 async function loadMailAccounts() {
 	const accs = await api('/mail/accounts');
 	document.getElementById('mailAccounts').innerHTML = (accs || []).map(a =>
@@ -251,7 +276,7 @@ async function loadPreApply() {
 	} catch { /* astro APIs unavailable — dashboard still works */ }
 }
 
-loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox(); loadMailAccounts(); loadInterviewPrep(); loadPreApply();
+loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox(); loadMailAccounts(); loadInterviewPrep(); loadPreApply(); loadFnfTrading();
 </script>
 </body>
 </html>

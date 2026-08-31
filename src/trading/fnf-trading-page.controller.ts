@@ -1,0 +1,254 @@
+import { Controller, Get, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { FnfTradingService } from './fnf-trading.service';
+
+const esc = (s: unknown): string =>
+	String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
+const fmt = (n: unknown, digits = 2): string => {
+	const v = Number(n ?? 0);
+	return isNaN(v) ? '—' : v.toLocaleString('en-IN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+};
+
+const pct = (n: unknown): string => {
+	const v = Number(n ?? 0);
+	if (isNaN(v) || v === null) return '—';
+	const s = v >= 0 ? '+' : '';
+	return `${s}${v.toFixed(2)}%`;
+};
+
+const badge = (label: string, cls: string): string => `<span class="badge ${cls}">${esc(label)}</span>`;
+
+@Controller('fnf-trading')
+export class FnfTradingPageController {
+	constructor(private readonly trading: FnfTradingService) {}
+
+	@Get()
+	async page(@Res() res: Response) {
+		const [portfolios, trades, market, signals, learning, astro] = await Promise.all([
+			this.trading.listPortfolios(),
+			this.trading.listTrades(undefined, 200),
+			this.trading.marketTable(),
+			this.trading.generateSignals(),
+			this.trading.learningSummary(),
+			this.trading.astroMatch(),
+		]);
+
+		const portfolio = portfolios[0] ?? null;
+		const isFriday = new Date().getDay() === 5;
+
+		// ── portfolio card ──
+		let portfolioHtml = `<div class="empty">No portfolio yet — create one via <code>POST /trading/portfolios</code>.</div>`;
+		if (portfolio) {
+			const headroom = (Number(portfolio.ceiling) || Number(portfolio.capital)) - Number(portfolio.deployed);
+			const capPct = Number(portfolio.capital) ? Math.round((Number(portfolio.deployed) / Number(portfolio.ceiling || portfolio.capital)) * 100) : 0;
+			const netPnlCls = Number(portfolio.netPnl) >= 0 ? 'ok' : 'bad';
+			const fridayCls = portfolio.fridayTradingEnabled ? 'ok' : 'warn';
+			const autoCls = portfolio.autoTradeEnabled ? 'ok' : 'dim';
+			portfolioHtml = `
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">💰 Portfolio — ${esc(portfolio.label)}</div>
+    <div class="kv">
+      <div><span>Capital</span><b>₹ ${fmt(portfolio.capital, 0)}</b></div>
+      <div><span>Ceiling</span><b>₹ ${fmt(portfolio.ceiling, 0)}</b></div>
+      <div><span>Deployed</span><b>₹ ${fmt(portfolio.deployed, 0)} <small class="${capPct > 90 ? 'bad' : 'dim'}">${capPct}%</small></b></div>
+      <div><span>Headroom</span><b>₹ ${fmt(headroom, 0)}</b></div>
+      <div><span>Net P&amp;L (lifetime)</span><b class="${netPnlCls}">₹ ${fmt(portfolio.netPnl)}</b></div>
+      <div><span>Total cost paid</span><b>₹ ${fmt(portfolio.totalCost)}</b></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">⚙️ Controls</div>
+    <div class="kv">
+      <div><span>Auto-trade</span><b class="${autoCls}">${portfolio.autoTradeEnabled ? 'ON' : 'OFF'}</b></div>
+      <div><span>Friday block</span><b class="${fridayCls}">${portfolio.fridayTradingEnabled ? 'enabled (Friday trades allowed)' : 'active — no new positions on Friday'}</b></div>
+      <div><span>Today</span><b>${isFriday ? 'Friday — ' + (portfolio.fridayTradingEnabled ? 'trades allowed' : 'blocked by default') : 'not Friday'}</b></div>
+      <div><span>Astro muhurta</span><b class="${astro.shubh ? 'ok' : 'warn'}">${astro.shubh ? '🕉 shubh' : 'not shubh'} <small>${esc(astro.label)}</small></b></div>
+    </div>
+  </div>
+</div>
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">🏦 Broker config</div>
+    <div class="kv">
+      <div><span>Zerodha Kite</span><b class="dim">not connected</b></div>
+      <div><span>Angel One</span><b class="dim">not connected</b></div>
+    </div>
+    <div class="hint">Real broker wiring is TODO item 5 — credentials stored encrypted, paper-trade first.</div>
+  </div>
+  <div class="card">
+    <div class="card-title">📈 Learning (closed trades)</div>
+    <div class="kv">
+      <div><span>Total closed</span><b>${learning.total}</b></div>
+      <div><span>Win rate</span><b>${learning.winRate}% (${learning.winners} wins)</b></div>
+      <div><span>Net P&amp;L</span><b class="${learning.netPnl >= 0 ? 'ok' : 'bad'}">₹ ${fmt(learning.netPnl)}</b></div>
+    </div>
+    ${Object.entries(learning.byAlgo).length ? `<table class="mini"><tr><th>algo</th><th>n</th><th>win%</th><th>net P&amp;L</th></tr>` +
+      Object.entries(learning.byAlgo).map(([a, b]) => `<tr><td>${esc(a)}</td><td>${b.count}</td><td>${b.winRate}%</td><td class="${b.netPnl >= 0 ? 'ok' : 'bad'}">₹ ${fmt(b.netPnl)}</td></tr>`).join('') + `</table>` : '<div class="hint">No closed trades yet.</div>'}
+  </div>
+</div>`;
+		}
+
+		// ── market table ──
+		const marketRows = market.length
+			? market.map((m) => {
+					const cls = m.changePct === null ? 'dim' : m.changePct >= 0 ? 'ok' : 'bad';
+					return `<tr><td>${esc(m.instrument)}</td><td><b>${fmt(m.price, 2)}</b></td><td class="${cls}">${pct(m.changePct)}</td><td class="dim">${fmt(m.volume, 0)}</td><td class="dim">${new Date(m.ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</td></tr>`;
+			  }).join('')
+			: `<tr><td colspan="5" class="dim">No snapshots yet — ingest via <code>POST /trading/market/ingest</code>.</td></tr>`;
+
+		// ── signals panel ──
+		const signalRows = signals.length
+			? signals.map((s) => {
+					const actionCls = s.action === 'BUY' ? 'ok' : s.action === 'SELL' ? 'bad' : 'warn';
+					const fridayFlag = s.fridayBlocked ? badge('Friday block', 'warn') : badge('Friday ok', 'ok');
+					const astroFlag = s.astroMatch.shubh ? badge('🕉 shubh', 'ok') : badge('astro: no window', 'dim');
+					const scenarios = s.scenarios.map((sc) => `${esc(sc.name)} ${sc.probability}% → ${fmt(sc.target)}`).join(' · ');
+					return `<tr>
+						<td>${esc(s.instrument)}</td>
+						<td class="${actionCls}"><b>${s.action}</b></td>
+						<td>${fmt(s.price)}</td>
+						<td>${fmt(s.target)}</td>
+						<td>${fmt(s.stopLoss)}</td>
+						<td>${s.confidence}%</td>
+						<td class="dim">${esc(s.algoSource)}</td>
+						<td>${astroFlag} ${fridayFlag}</td>
+						<td class="dim small">${esc(s.reasons.join('; '))}<br>${esc(scenarios)}</td>
+					</tr>`;
+			  }).join('')
+			: `<tr><td colspan="9" class="dim">No signals — needs ≥5 snapshots per instrument.</td></tr>`;
+
+		// ── trade ledger ──
+		const tradeRows = trades.length
+			? trades.map((t) => {
+					const sideCls = t.side === 'BUY' ? 'ok' : 'bad';
+					const statusCls = t.status === 'CLOSED' ? 'dim' : t.status === 'OPEN' ? 'ok' : 'warn';
+					let decision = '';
+					if (t.decisionParams) {
+						try {
+							const d = JSON.parse(t.decisionParams);
+							decision = `<div class="small dim">${esc(JSON.stringify(d)).slice(0, 220)}</div>`;
+						} catch {
+							decision = `<div class="small dim">${esc(t.decisionParams).slice(0, 220)}</div>`;
+						}
+					}
+					const pnl = t.status === 'CLOSED' ? `<span class="${Number(t.netPnl) >= 0 ? 'ok' : 'bad'}">${fmt(t.netPnl)}</span>` : '—';
+					return `<tr>
+						<td class="dim">${new Date(t.orderedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
+						<td>${esc(t.instrument)}</td>
+						<td class="${sideCls}">${t.side}</td>
+						<td>${t.quantity}</td>
+						<td>${fmt(t.entryPrice)}</td>
+						<td>${t.status === 'CLOSED' ? fmt(t.exitPrice) : '—'}</td>
+						<td class="dim">${t.cost ? fmt(t.cost) : '—'}</td>
+						<td>${pnl}</td>
+						<td class="${statusCls}">${t.status}</td>
+						<td class="dim small">${esc(t.algoSource ?? 'manual')}${t.brokerOrderId ? ` · ${esc(t.brokerOrderId)}` : ''}${decision}</td>
+					</tr>`;
+			  }).join('')
+			: `<tr><td colspan="10" class="dim">No trades yet.</td></tr>`;
+
+		// ── cost breakdown demo ──
+		const sampleNotional = 100_000;
+		const costDemo = this.trading.calculateCost(sampleNotional, 'BUY');
+		const costRows = [
+			['Notional', costDemo.notional],
+			['Brokerage (0.03% / ₹20 min)', costDemo.brokerage],
+			['STT (buy leg)', costDemo.stt],
+			['Exchange txn (0.00275%)', costDemo.exchangeTxn],
+			['GST 18%', costDemo.gst],
+			['SEBI fee', costDemo.sebi],
+			['Stamp duty (0.015%)', costDemo.stamp],
+			['Total', costDemo.total],
+		].map(([k, v]) => `<tr><td>${esc(String(k))}</td><td>₹ ${fmt(v as number)}</td></tr>`).join('');
+
+		res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>my-job-agent — FNF Trading</title>
+<style>
+:root{--bg:#0f1115;--card:#1a1d24;--line:#2a2e38;--fg:#e8eaed;--dim:#9aa0aa;--ok:#3fb96f;--warn:#e0a83c;--bad:#e05c5c;--accent:#5b8cff}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,sans-serif;padding:24px;max-width:1200px;margin:auto}
+a{color:var(--accent)}
+h1{font-size:24px;margin:0}
+.masthead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.meta{color:var(--dim);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.card-title{font-size:14px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px}
+.kv>div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed var(--line);padding:4px 0}
+.kv span{color:var(--dim)}
+table{border-collapse:collapse;width:100%;margin:6px 0 10px;font-size:13px}
+td,th{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--card);color:var(--dim);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em}
+table.mini{max-width:480px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--dim)}
+.small{font-size:12px}
+.badge{font-size:11px;padding:2px 10px;border-radius:99px;background:var(--line);color:var(--dim);display:inline-block;margin-right:4px}
+.badge.ok{background:rgba(63,185,111,.18);color:var(--ok)}
+.badge.warn{background:rgba(224,168,60,.18);color:var(--warn)}
+.badge.dim{background:rgba(154,160,170,.18);color:var(--dim)}
+.empty{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--dim)}
+.hint{color:var(--dim);font-size:12px;margin-top:8px}
+code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,60,.1);padding:1px 4px;border-radius:4px}
+.footer{margin-top:24px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+</style></head><body>
+<div class="masthead">
+  <div>
+    <h1>📊 FNF Trading</h1>
+    <div class="meta">Friday Nifty Futures algo desk · capital-envelope trading · astro-matched muhurta · self-learning ledger</div>
+  </div>
+  <div class="meta">API: <code>GET /trading/...</code> · Swagger <a href="/docs">/docs</a></div>
+</div>
+${portfolioHtml}
+
+<div class="card">
+  <div class="card-title">📉 Market (latest snapshot per instrument)</div>
+  <table>
+    <tr><th>Instrument</th><th>Price</th><th>Change</th><th>Volume</th><th>As of</th></tr>
+    ${marketRows}
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-title">🤖 Algo panel — sma-mean-reversion-v1 (stub) · predictions · scenarios · astro match</div>
+  <table>
+    <tr><th>Instrument</th><th>Action</th><th>Price</th><th>Target</th><th>Stop-loss</th><th>Confidence</th><th>Algo</th><th>Flags</th><th>Reasons / scenarios</th></tr>
+    ${signalRows}
+  </table>
+</div>
+
+<div class="card">
+  <div class="card-title">📒 Trade ledger</div>
+  <table>
+    <tr><th>Opened</th><th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Cost</th><th>Net P&amp;L</th><th>Status</th><th>Algo / decision context</th></tr>
+    ${tradeRows}
+  </table>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-title">🧾 Cost breakdown (Indian discount broker model, ₹${fmt(sampleNotional, 0)} buy example)</div>
+    <table class="mini">${costRows}</table>
+    <div class="hint">Brokerage 0.03% (₹20 min), STT 0.025% sell, NSE txn 0.00275%, GST 18%, SEBI ₹10/cr, stamp 0.015% buy. Cost auto-applied on close.</div>
+  </div>
+  <div class="card">
+    <div class="card-title">🕉 Astro match</div>
+    <div class="kv">
+      <div><span>Shubh muhurta</span><b class="${astro.shubh ? 'ok' : 'warn'}">${astro.shubh ? 'yes' : 'no'}</b></div>
+      <div><span>Score</span><b>${astro.score}/100</b></div>
+      <div><span>Next window</span><b class="dim">${esc(astro.label)}</b></div>
+    </div>
+    <div class="hint">Signals + trades carry the astro match flag; auto-sends batch inside shubh windows (same engine as job applications).</div>
+  </div>
+</div>
+
+<div class="footer">
+  <a href="/">← dashboard</a> · <a href="/applications-page">applications</a> · <a href="/visa-guide">visa guide</a> · <a href="/docs">swagger</a><br>
+  FNF trading module v1 — schema <code>fnf_portfolios</code> / <code>fnf_trades</code> / <code>fnf_market_snapshots</code>. Real broker wiring (Zerodha Kite / Angel One) is next.
+</div>
+</body></html>`);
+	}
+}
