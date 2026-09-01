@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { FnfTradingService } from './fnf-trading.service';
+import { parseYahooChartResponse, parseYahooSymbolConfig, YahooSymbolConfig } from './yahoo-finance-parser';
 
 // The FYERS package currently ships JavaScript without TypeScript declarations.
 // Keep the SDK boundary typed as unknown/any and validate every inbound field.
@@ -19,7 +20,7 @@ type FyersSocket = {
 };
 
 type FeedStatus = {
-  provider: 'fyers' | 'disabled';
+  provider: 'fyers' | 'yahoo' | 'disabled';
   enabled: boolean;
   connected: boolean;
   subscribedSymbols: string[];
@@ -52,7 +53,7 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' ? value as Record<string, unknown> : null;
 
 /**
- * Real-time F&O market-data input. FYERS is data-only here: this service owns
+ * Real-time/near-real-time F&O market-data input. FYERS and Yahoo are data-only here: this service owns
  * one market-data socket and only calls FnfTradingService.ingestSnapshots().
  * No broker order socket or order-placement method is reachable from it.
  */
@@ -60,9 +61,14 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
 export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FnoMarketDataService.name);
   private socket: FyersSocket | null = null;
+  private yahooPollTimer: ReturnType<typeof setInterval> | null = null;
+  private yahooPollInFlight = false;
   private readonly lastPersistedAt = new Map<string, number>();
   private readonly statusValue: FeedStatus;
   private readonly persistEveryMs: number;
+  private readonly yahooSymbols: YahooSymbolConfig[];
+  private readonly yahooPollMs: number;
+  private readonly yahooTimeoutMs: number;
 
   constructor(private readonly trading: FnfTradingService) {
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
@@ -73,11 +79,18 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     const provider = (process.env.FNO_MARKET_DATA_PROVIDER ?? 'fyers').toLowerCase();
     const enabled = /^(1|true|yes)$/i.test(process.env.FNO_MARKET_DATA_ENABLED ?? 'false');
     this.persistEveryMs = Math.max(250, Number(process.env.FNO_MARKET_DATA_PERSIST_MS ?? 1000));
+    this.yahooSymbols = parseYahooSymbolConfig(
+      process.env.YAHOO_FINANCE_SYMBOLS ?? '^NSEI=NSE:NIFTY50-INDEX,^NSEBANK=NSE:NIFTYBANK-INDEX,^BSESN=NSE:SENSEX-INDEX',
+    );
+    this.yahooPollMs = Math.max(5_000, Number(process.env.YAHOO_FINANCE_POLL_MS ?? 15_000));
+    this.yahooTimeoutMs = Math.max(2_000, Number(process.env.YAHOO_FINANCE_TIMEOUT_MS ?? 10_000));
+    const supportedProvider = provider === 'fyers' || provider === 'yahoo';
+    const subscribedSymbols = provider === 'yahoo' ? this.yahooSymbols.map(({ symbol }) => symbol) : symbols;
     this.statusValue = {
-      provider: provider === 'fyers' ? 'fyers' : 'disabled',
-      enabled: enabled && provider === 'fyers',
+      provider: provider === 'fyers' ? 'fyers' : provider === 'yahoo' ? 'yahoo' : 'disabled',
+      enabled: enabled && supportedProvider && subscribedSymbols.length > 0,
       connected: false,
-      subscribedSymbols: symbols,
+      subscribedSymbols,
       ticksReceived: 0,
       lastTickAt: null,
       lastError: null,
@@ -87,8 +100,18 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     if (!this.statusValue.enabled) {
-      this.statusValue.lastMessage = 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure FYERS credentials';
+      this.statusValue.lastMessage = this.statusValue.provider === 'yahoo'
+        ? 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure YAHOO_FINANCE_SYMBOLS'
+        : 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure FYERS credentials';
       this.logger.log(this.statusValue.lastMessage);
+      return;
+    }
+
+    if (this.statusValue.provider === 'yahoo') {
+      this.statusValue.lastMessage = `polling Yahoo Finance chart API every ${this.yahooPollMs}ms (paper-only)`;
+      this.logger.log(this.statusValue.lastMessage);
+      void this.pollYahoo();
+      this.yahooPollTimer = setInterval(() => void this.pollYahoo(), this.yahooPollMs);
       return;
     }
 
@@ -118,6 +141,8 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
+    if (this.yahooPollTimer) clearInterval(this.yahooPollTimer);
+    this.yahooPollTimer = null;
     this.socket?.close?.();
     this.socket = null;
     this.statusValue.connected = false;
@@ -151,9 +176,12 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   private onMessage(message: unknown): void {
-    const parsed = this.parseMessage(message);
-    if (!parsed.length) return;
-    for (const tick of parsed) {
+    this.recordTicks(this.parseMessage(message));
+  }
+
+  private recordTicks(ticks: Tick[]): void {
+    if (!ticks.length) return;
+    for (const tick of ticks) {
       this.statusValue.ticksReceived += 1;
       this.statusValue.lastTickAt = tick.ts;
       const now = Date.now();
@@ -164,6 +192,58 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
         this.statusValue.lastError = `snapshot persistence failed: ${this.safeMessage(error)}`;
         this.logger.warn(this.statusValue.lastError);
       });
+    }
+  }
+
+  private async pollYahoo(): Promise<void> {
+    if (this.yahooPollInFlight) return;
+    this.yahooPollInFlight = true;
+    try {
+      const results = await Promise.allSettled(this.yahooSymbols.map((config) => this.fetchYahooTick(config)));
+      const ticks: Tick[] = [];
+      const errors: string[] = [];
+      for (const result of results) {
+        if (result.status === 'fulfilled') ticks.push(result.value);
+        else errors.push(this.safeMessage(result.reason));
+      }
+      this.recordTicks(ticks);
+      this.statusValue.connected = ticks.length > 0;
+      this.statusValue.lastError = errors.length ? errors.join('; ').slice(0, 240) : null;
+      this.statusValue.lastMessage = `Yahoo Finance poll: ${ticks.length}/${this.yahooSymbols.length} symbol(s) returned data`;
+      if (errors.length) this.logger.warn(`${this.statusValue.lastMessage}; ${this.statusValue.lastError}`);
+      else this.logger.log(this.statusValue.lastMessage);
+    } catch (error) {
+      this.statusValue.connected = false;
+      this.statusValue.lastError = this.safeMessage(error);
+      this.statusValue.lastMessage = 'Yahoo Finance poll failed';
+      this.logger.warn(`${this.statusValue.lastMessage}: ${this.statusValue.lastError}`);
+    } finally {
+      this.yahooPollInFlight = false;
+    }
+  }
+
+  private async fetchYahooTick(config: YahooSymbolConfig): Promise<Tick> {
+    const baseUrl = (process.env.YAHOO_FINANCE_CHART_URL ?? 'https://query1.finance.yahoo.com/v8/finance/chart').replace(/\/$/, '');
+    const range = process.env.YAHOO_FINANCE_RANGE ?? '1d';
+    const interval = process.env.YAHOO_FINANCE_INTERVAL ?? '1m';
+    const url = `${baseUrl}/${encodeURIComponent(config.symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}&includePrePost=false`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.yahooTimeoutMs);
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'my-job-agent-paper-feed/1.0',
+        },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Yahoo Finance HTTP ${response.status} for ${config.symbol}`);
+      const payload: unknown = await response.json();
+      const tick = parseYahooChartResponse(payload, config.instrument);
+      if (!tick) throw new Error(`Yahoo Finance returned no usable quote for ${config.symbol}`);
+      return tick;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

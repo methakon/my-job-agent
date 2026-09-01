@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
+    "test:trading": "npm run build && node scripts/yahoo-finance-parser.test.js",
     "start": "nest start",
     "start:dev": "nest start --watch"
   },
