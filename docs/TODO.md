@@ -3,6 +3,9 @@
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
 > Last updated: 2026-09-01
 
+## Recently completed (2026-09-01 session — market-data inspection)
+- [x] **Market-data inspector page** at `/market-data` with instrument, time, price, volume, OHLC-availability, latest-only, row-limit, and auto-refresh filters. It reads `GET /trading/market/snapshots`, shows current feed status, and clearly separates real/near-real-time input from paper-only execution. Filter smoke tests live in `scripts/market-data-filter.test.js`.
+
 ## Recently completed (2026-08-27 session — LinkedIn apply + evidence-only rule)
 - [x] **LinkedIn leads unblocked** (bug fixed): `applyToLead` and `prepareApplication` hard-failed every `source='linkedin'` lead with "no adapter for source linkedin" (line 127 adapter gate ran before the sandbox branch; the LinkedIn easy-apply branch at line 201 was unreachable dead code). Fixed: LinkedIn leads pass the adapter gate (easy-apply automation still off — ban risk), sandbox branch runs, and detected direct channels (company ATS / evidence email) are used with the last-uploaded-CV rule. Also fixed `channelKind` crash (`adapter.source` on undefined) + optional-chaining on adapter probeQuestions.
 - [x] **Build break fixed**: `profile.service.ts` `getResponse` omitted `lastUploadedCvPath` that the DTO requires — tsc failed; added to response.

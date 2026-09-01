@@ -39,6 +39,9 @@ import { FnfTradingPageController } from './trading/fnf-trading-page.controller'
 import { OptionTradingPageController } from './trading/option-trading-page.controller';
 import { FnoMarketDataService } from './trading/fno-market-data.service';
 import { FnoMarketDataController } from './trading/fno-market-data.controller';
+import { MarketDataInspectionController } from './trading/market-data-inspection.controller';
+import { MarketDataPageController } from './trading/market-data-page.controller';
+import { MarketDataInspectionService } from './trading/market-data-inspection.service';
 import { InterviewPrepController } from './interview/interview-prep.controller';
 import { InterviewPracticePageController } from './interview/interview-practice-page.controller';
 import { MailController } from './applications/mail.controller';
@@ -87,7 +90,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -122,6 +125,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		MuhurtaSendService,
 		FnfTradingService,
 		FnoMarketDataService,
+		MarketDataInspectionService,
 	],
 })
 export class AppModule {}
