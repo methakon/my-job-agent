@@ -3,6 +3,11 @@
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
 > Last updated: 2026-09-01
 
+## Recently completed (2026-09-01 session — Google OAuth wiring + tunnel restore)
+- [x] **Google OAuth login wired** — `.env` has real `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL=https://berhampore.in/auth/google/callback`, `GOOGLE_ALLOWED_EMAILS` (bapay.9@gmail.com + swarna.s.jobs@gmail.com). `src/auth/` = Passport Google strategy + auth.guard localhost bypass. Node 26 passport import fixed (`import passport from 'passport'`). App healthy on 3010 after `pm2 restart --update-env`; verified ConfigModule loads .env at runtime.
+- [x] **Cloudflare tunnel restored** — cloudflared had died; berhampore.in was returning 530 (origin unreachable; local app was healthy on 3010). Restarted `cloudflared tunnel run ce9458f2-...` → both berhampore.in and dev.berhampore.in answer again (404 on / = normal). Not reboot-surviving yet.
+- 🚫 **Blocked on user — Google Cloud Console**: register the single Authorized redirect URI `https://berhampore.in/auth/google/callback`, set consent screen to External with test users `bapay.9@gmail.com` + `swarna.s.jobs@gmail.com`. Then E2E test at `https://berhampore.in/auth/google`.
+
 ## Recently completed (2026-09-01 session — CeeVi document packet)
 - [x] **Printable CeeVi document packet prepared** — combined locally available identity, education, birth-proof, joining, and employment documents into `/home/swarna-sekhar-dhar/Downloads/Swarna_Sekhar_Dhar_CeeVi_Actual_Document_Packet.pdf` (41 pages). Missing requirements are identified in the packet; no submission was made.
 

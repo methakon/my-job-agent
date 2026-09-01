@@ -152,7 +152,22 @@ class FakeRepo {
     return (doc) => {
       for (const [k, v] of Object.entries(where)) {
         const dv = doc?.[k];
-        if (v instanceof Date) {
+        if (v && typeof v === 'object' && '_type' in v && '_value' in v) {
+          const operand = (v as { _type: string; _value: unknown })._value;
+          if (v._type === 'isNull') {
+            if (operand === true ? dv !== null && dv !== undefined : dv === null || dv === undefined) return false;
+          } else if (v._type === 'lessThanOrEqual') {
+            if (dv == null || operand == null || dv > operand) return false;
+          } else if (v._type === 'lessThan') {
+            if (dv == null || operand == null || dv >= operand) return false;
+          } else if (v._type === 'moreThanOrEqual') {
+            if (dv == null || operand == null || dv < operand) return false;
+          } else if (v._type === 'moreThan') {
+            if (dv == null || operand == null || dv <= operand) return false;
+          } else if (dv !== operand) {
+            return false;
+          }
+        } else if (v instanceof Date) {
           if (!(dv instanceof Date) || dv.getTime() !== v.getTime()) return false;
         } else if (v && typeof v === 'object' && !Array.isArray(v)) {
           if (!this.makePredicate(v as AnyWhere)(dv || {})) return false;

@@ -1,282 +1,162 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>my-job-agent — Dashboard</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>my-job-agent — login</title>
 <style>
-	:root { --bg:#0f1115; --card:#1a1d24; --line:#2a2e38; --fg:#e8eaed; --dim:#9aa0aa; --ok:#3fb96f; --warn:#e0a83c; --bad:#e05c5c; --accent:#5b8cff; }
-	* { box-sizing:border-box; margin:0; }
-	body { background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, sans-serif; padding:24px; max-width:1200px; margin:auto; }
-	h1 { font-size:22px; margin-bottom:4px; } .sub { color:var(--dim); margin-bottom:20px; }
-	.grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
-	card, .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
-	.card h2 { font-size:14px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; }
-	button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:13px; }
-	button.ghost { background:transparent; border:1px solid var(--line); color:var(--dim); }
-	.score { font-size:26px; font-weight:700; }
-	.lead, .app { padding:8px 0; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:8px; align-items:center; }
-	.lead:last-child, .app:last-child { border-bottom:0; }
-	.meta { color:var(--dim); font-size:12.5px; }
-	.badge { font-size:11px; padding:2px 8px; border-radius:99px; background:var(--line); }
-	.badge.ok{background:rgba(63,185,111,.18);color:var(--ok)} .badge.warn{background:rgba(224,168,60,.18);color:var(--warn)} .badge.bad{background:rgba(224,92,92,.18);color:var(--bad)}
-	.miss li { color:var(--warn); font-size:13px; }
-	.actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
-	details { margin-top:6px; } summary { cursor:pointer; color:var(--accent); font-size:13px; }
-	input { width:100%; background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 10px; margin:3px 0; }
-	label { font-size:12px; color:var(--dim); }
+  :root{
+    --bg:#0b0d12; --panel:#13161e; --border:#272d3a; --text:#e6e9ef;
+    --muted:#8b93a6; --accent:#5b8cff; --accent2:#4aa8ff; --danger:#ff5c6c;
+    --ok:#4ade80; --shadow:0 6px 24px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px;
+  }
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    box-shadow:var(--shadow); width:100%; max-width:460px; padding:32px;
+  }
+  h1{font-size:22px; margin:0 0 6px; font-weight:600}
+  .sub{color:var(--muted); font-size:14px; margin:0 0 22px; line-height:1.5}
+  .google-btn{
+    display:flex; align-items:center; justify-content:center; gap:12px;
+    width:100%; padding:14px 18px; margin:8px 0 16px;
+    background:#fff; color:#1f2330; border:none; border-radius:10px;
+    font-size:15px; font-weight:600; cursor:pointer; text-decoration:none;
+    transition:transform .06s ease, box-shadow .15s ease, background .15s;
+    box-shadow:0 1px 3px rgba(0,0,0,.25);
+  }
+  .google-btn:hover{box-shadow:0 4px 14px rgba(89,140,255,.35); transform:translateY(-1px)}
+  .google-btn:active{transform:translateY(0)}
+  .google-btn .g-brand{width:22px; height:22px}
+  .accounts{
+    margin-top:18px; padding-top:18px; border-top:1px dashed var(--border);
+    font-size:13px; color:var(--muted); line-height:1.6;
+  }
+  .accounts strong{color:var(--text); font-weight:600}
+  .status{margin-top:18px; font-size:13px; color:var(--muted)}
+  .status .dot{display:inline-block; width:9px; height:9px; border-radius:50%;
+    background:#6b7280; margin-right:7px; vertical-align:middle}
+  .status .dot.ok{background:var(--ok)}
+  .status .dot.err{background:var(--danger)}
+  footer{margin-top:24px; font-size:12px; color:var(--muted); text-align:center; max-width:460px; line-height:1.5}
+  .error{color:var(--danger); font-size:13px; margin-top:10px}
+  .links{display:flex; gap:14px; margin-top:18px; font-size:13px}
+  .links a{color:var(--accent); text-decoration:none}
+  .links a:hover{text-decoration:underline}
 </style>
 </head>
 <body>
-<h1>my-job-agent</h1>
-<div class="sub">Autonomous job agent for Swarna Sekhar Dhar — <a style="color:var(--accent)" href="/docs">API docs</a> · <a style="color:var(--accent)" href="/applications-page">application history</a></div>
-<div class="card" style="margin-bottom:16px;display:flex;gap:10px;align-items:center">
-	<b>Sandbox mode:</b> <span id="sandboxState" class="badge">…</span>
-	<button class="ghost" id="sandboxBtn" onclick="toggleSandbox()">toggle</button>
-	<span class="meta">ON = full pipeline runs but nothing is actually sent (is_sandbox=1). OFF = real submissions.</span>
-</div>
+  <div class="card" role="main">
+    <h1>my-job-agent</h1>
+    <p class="sub">Sign in with the Google account that is authorised for this dashboard.</p>
 
-<div class="grid">
-	<section class="card" id="profileCard">
-		<h2>Profile <span class="score" id="score">—</span></h2>
-		<div id="profileSummary" class="meta">loading…</div>
-		<details id="missingWrap"><summary>Missing info</summary><ul class="miss" id="missing"></ul></details>
-		<details><summary>Edit / fill profile</summary>
-			<form id="pform">
-				<label>Name</label><input name="name"><label>Email</label><input name="email"><label>Phone</label><input name="phone"><label>Notice period (immediate/30…)</label><input name="noticePeriod"><label>Salary expectation</label><input name="salaryExpectation"><label>GitHub URL</label><input name="githubUrl"><label>Portfolio URL</label><input name="portfolioUrl"><label>Location</label><input name="currentLocation">
-				<div class="actions"><button type="submit">Save</button></div>
-			</form>
-		</details>
-	</section>
+    <a class="google-btn" href="/auth/google" id="googleLogin">
+      <svg class="g-brand" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32c-.36.26-.78.43-1.27.5V13.78a1.06 1.06 0 1 1-2.12 0v-.65a5.93 5.93 0 0 1-1.27-.5 10.53 10.53 0 0 1-3.09-3.32 5.92 5.92 0 0 1-3.28-3.28c0-3.26 2.92-4.13 5.5-4.13h5.44c2.2 0 4.1 1.72 4.9 3.28 1.12-1.18 2.68-2.9 3.62-3.28z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.6-4.71a8.32 8.32 0 0 0-10.16 0l-3.6 4.71C6.54 22.02 9.03 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.3 11.95a7.2 7.2 0 0 1 12.05-3.55l1.95 2.55a1 1 0 1 1-1.6 1.35l-1.95-2.55A7.2 7.2 0 0 1 5.3 11.95z"/>
+        <path fill="#EA4335" d="M12 4.95a7.2 7.2 0 0 1 6.75 2.55l1.95-2.55a1 1 0 1 1 1.6 1.35l-1.95 2.55A7.2 7.2 0 0 1 12 4.95z"/>
+      </svg>
+      Sign in with Google
+    </a>
 
-	<section class="card">
-		<h2>Job Leads <span><button class="ghost" onclick="scout()">Scout now</button></span></h2>
-		<div id="leads">loading…</div>
-	</section>
+    <div class="accounts" id="accountsBlock">
+      <strong>Only these two accounts can log in:</strong>
+      <ul id="allowedEmails" style="margin:6px 0 0; padding-left:18px"></ul>
+    </div>
 
-	<section class="card">
-		<h2>Applications &amp; Tracking <a id="appsLink" style="display:none;color:var(--accent);font-size:12px" href="/applications-page">full history →</a></h2>
-		<div id="apps">loading…</div>
-	</section>
+    <div class="status" id="status">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">Checking configuration…</span>
+    </div>
+    <div class="error" id="error" style="display:none"></div>
 
-	<section class="card" style="border-color:rgba(180,140,255,.45)">
-		<h2>🕉️ Pre-Apply Queue <span class="meta">review before anything is sent · astro muhurta-gated</span> <a style="color:var(--accent);font-size:12px" href="/pre-apply-page">open review page →</a></h2>
-		<div id="preapply">loading…</div>
-		<div class="meta" id="muhurta" style="margin-top:8px">shubh muhurta: …</div>
-	</section>
+    <div class="links">
+      <a href="/auth/logout" id="logoutLink" style="display:none">Sign out</a>
+    </div>
+  </div>
 
-	<section class="card">
-		<h2>Portal Settings <span class="meta">kill switch in .env</span></h2>
-		<div id="settings">loading…</div>
-	</section>
-
-	<section class="card">
-		<h2>🧠 Learning Stats <span class="meta" id="bestChannel"></span></h2>
-		<div id="learning">loading…</div>
-	</section>
-
-	<section class="card">
-		<h2>💰 Side Income <span class="meta">Berhampore opportunities</span></h2>
-		<div id="sideIncome">loading…</div>
-		<details><summary>Open full side-income page</summary><p><a style="color:var(--accent)" href="/side-income-dashboard/dashboard">→ /side-income-dashboard/dashboard</a></p></details>
-	</section>
-
-	<section class="card" style="border-color:rgba(63,185,111,.45)">
-		<h2>📊 FNF Trading <span class="meta">Friday Nifty Futures algo desk · astro-matched</span> <a style="color:var(--accent);font-size:12px" href="/fnf-trading">open trading page →</a> <a style="color:#8d78ff;font-size:12px" href="/option-trading">F&amp;O options →</a> <a style="color:#6f8cff;font-size:12px" href="/market-data">inspect market data →</a></h2>
-		<div id="fnfTrading">loading…</div>
-	</section>
-
-	<section class="card">
-		<h2>📧 Mail Accounts <span class="meta">sender &amp; tracker</span></h2>
-		<div id="mailAccounts">loading…</div>
-		<details><summary>Add mail account</summary>
-			<form id="mform">
-				<label>Email</label><input name="email" placeholder="bapay.9@gmail.com">
-				<label>App Password / Pass plain</label><input name="passwordPlain" type="password">
-				<label>Provider (gmail / outlook)</label><input name="provider" value="gmail">
-				<div class="actions"><button type="submit">Connect Account</button></div>
-			</form>
-		</details>
-	</section>
-
-	<section class="card">
-		<h2>🎯 Interview Practice <a style="color:var(--accent);font-size:12px" href="/interview-practice-page">full bank →</a></h2>
-		<div id="interviewPrep">loading…</div>
-	</section>
-</div>
+  <footer>
+    my-job-agent · local dev bypasses login; public access requires Google sign-in.
+  </footer>
 
 <script>
-const api = (p, opt) => fetch(p, opt).then(r => r.json());
-const esc = s => String(s ?? '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+(function(){
+  const LOGOUT_URL = '/auth/logout';
+  const ALLOWED_EMAILS_URL = '/auth/allowed-emails';
 
-async function loadProfile() {
-	const [p, o] = await Promise.all([api('/profile'), api('/profile/optimized')]);
-	if (!p) return;
-	document.getElementById('score').textContent = o.completenessScore + '%';
-	document.getElementById('score').style.color = o.completenessScore >= 80 ? 'var(--ok)' : o.completenessScore >= 55 ? 'var(--warn)' : 'var(--bad)';
-	document.getElementById('profileSummary').innerHTML =
-		`${esc(p.headline||'')}<br>${esc(p.email||'')} · ${esc(p.currentLocation||'')}<br>` +
-		`Skills: ${esc((p.skills||[]).join(', '))}<br>Roles shown on CV: ${o.workHistory.length}` +
-		(o.droppedStints.length ? ` <span class="badge warn">${o.droppedStints.length} short stint(s) hidden</span>` : '');
-	document.getElementById('missing').innerHTML = p.missingFields.map(f => `<li>${esc(f)}</li>`).join('');
-	for (const el of document.getElementById('pform').elements)
-		if (el.name && p[el.name]) el.value = Array.isArray(p[el.name]) ? p[el.name].join(', ') : p[el.name];
-}
+  const $ = (id)=> document.getElementById(id);
+  const allowedList = $('allowedEmails');
+  const statusBlock = $('status');
+  const statusDot = $('statusDot');
+  const statusText = $('statusText');
+  const errorBox = $('error');
+  const logoutLink = $('logoutLink');
 
-document.getElementById('pform').addEventListener('submit', async e => {
-	e.preventDefault();
-	const body = {};
-	for (const el of e.target.elements) if (el.name && el.value) {
-		body[el.name] = el.name === 'skills' ? el.value.split(',').map(s => s.trim()) : el.value;
-	}
-	await api('/profile', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-	loadProfile();
-});
+  function setStatus(kind, text){
+    statusDot.className = 'dot' + (kind ? ' ' + kind : '');
+    statusText.textContent = text;
+  }
+  function showError(msg){
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+  }
+  function clearError(){
+    errorBox.textContent = '';
+    errorBox.style.display = 'none';
+  }
 
-async function loadLeads() {
-	const leads = await api('/leads');
-	document.getElementById('leads').innerHTML = leads.slice(0, 15).map(l =>
-		`<div class="lead"><div><b>${esc(l.title)}</b> <span class="meta">@ ${esc(l.company)}</span>` +
-		`<div class="meta">${esc(l.source)} · match ${Math.round(l.matchScore)}%</div></div>` +
-		`<span class="badge">auto</span></div>`
-	).join('') || '<span class="meta">no leads yet</span>';
-	document.getElementById('appsLink').style.display = 'inline';
-}
+  function loadAllowedEmails(){
+    return fetch(ALLOWED_EMAILS_URL, { credentials:'include' })
+      .then(r=> r.json())
+      .then(emails=>{
+        allowedList.innerHTML = '';
+        emails.forEach(e=>{
+          const li = document.createElement('li');
+          li.textContent = e;
+          allowedList.appendChild(li);
+        });
+      })
+      .catch(()=>{
+        allowedList.innerHTML =
+          '<li style="color:var(--muted)">(allowed-emails endpoint unreachable)</li>';
+      });
+  }
 
-function scout() { api('/leads/scout', { method:'POST' }).then(loadLeads); }
+  function checkAuth(){
+    fetch('/auth/me', { credentials:'include' })
+      .then(r=>{
+        if(r.status === 401 || r.status === 403){
+          logoutLink.style.display = 'none';
+          setStatus('', 'Sign in below to access the dashboard.');
+        } else {
+          return r.json().then(data=>{
+            if(data && data.user){
+              logoutLink.style.display = 'inline-block';
+              const name = data.user.name || data.user.email || 'user';
+              setStatus('ok', 'Signed in as ' + name);
+            } else {
+              logoutLink.style.display = 'none';
+              setStatus('', 'Sign in below to access the dashboard.');
+            }
+          });
+        }
+      })
+      .catch(()=>{
+        logoutLink.style.display = 'none';
+        setStatus('', 'Unable to reach the server. Make sure my-job-agent is running.');
+      });
+  }
 
-async function apply(id, btn) {
-	btn.textContent = '…';
-	const res = await api(`/applications/apply/${id}`, { method:'POST' });
-	btn.textContent = res.status === 'submitted' ? '✓ sent' : res.status;
-	if (res.missingInfo) btn.title = res.missingInfo.join('; ');
-	loadApps();
-}
-
-async function loadApps() {
-	const apps = await api('/applications');
-	document.getElementById('apps').innerHTML = apps.map(a => {
-		const cls = a.status === 'submitted' ? 'ok' : a.status === 'needs_info' ? 'warn' : a.status === 'failed' ? 'bad' : '';
-		const sand = a.isSandbox ? ' 🧪' : '';
-		return `<div class="app"><div>${esc(a.source)}${sand} · ${esc(a.coverLetter?.slice(0, 60))}…
-			${a.missingInfoJson && a.missingInfoJson !== 'null' ? `<details><summary>needs info</summary><ul class="miss">${JSON.parse(a.missingInfoJson).map(m=>`<li>${esc(m)}</li>`).join('')}</ul></details>` : ''}
-			</div><span class="badge ${cls}">${esc(a.status)}</span></div>`;
-	}).join('') || '<span class="meta">nothing yet</span>';
-}
-
-async function loadSandbox() {
-	const s = await api('/sandbox');
-	const el = document.getElementById('sandboxState');
-	el.textContent = s.sandbox ? '🧪 ON (dry-run)' : '🔴 OFF (real)';
-	el.style.color = s.sandbox ? 'var(--warn)' : 'var(--ok)';
-}
-
-function toggleSandbox() {
-	api('/sandbox/toggle', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enabled: document.getElementById('sandboxState').textContent.includes('OFF') }) })
-		.then(loadSandbox);
-}
-
-async function loadSettings() {
-	const rows = await api('/settings');
-	document.getElementById('settings').innerHTML = rows.map(s =>
-		`<div class="lead"><div><b>${esc(s.source)}</b> <span class="meta">cap ${s.maxPerDay}/day</span></div>` +
-		`<button class="${s.autoApplyEnabled ? '' : 'ghost'}" onclick="toggleSrc('${esc(s.source)}', ${!s.autoApplyEnabled})">${s.autoApplyEnabled ? 'auto ON' : 'auto OFF'}</button></div>`
-	).join('');
-}
-
-function toggleSrc(source, enabled) {
-	api(`/settings/${source}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ autoApplyEnabled: enabled }) }).then(loadSettings);
-}
-
-async function loadLearning() {
-	const s = await api('/learning/stats');
-	document.getElementById('bestChannel').textContent = s.bestSendHour !== null ? `best send hour: ${s.bestSendHour}:00` : '';
-	const ch = Object.entries(s.channelSuccess || {}).map(([k, v]) =>
-		`<div class="lead"><div><b>${esc(k)}</b> <span class="meta">${v.sent} sent</span></div><span class="badge ${v.rate >= 20 ? 'ok' : v.rate > 0 ? 'warn' : ''}">${v.rate}% replies</span></div>`).join('');
-	const po = Object.entries(s.portalSuccess || {}).map(([k, v]) =>
-		`<div class="lead"><div><b>${esc(k)}</b> <span class="meta">${v.sent} sent</span></div><span class="badge">${v.rate}%</span></div>`).join('');
-	const kw = (s.topKeywords || []).map(k => `<span class="badge ok">${esc(k.keyword)} ×${k.replies}</span>`).join(' ');
-	document.getElementById('learning').innerHTML =
-		`<div class="meta">total applications: ${s.totalApplications}</div>` + ch +
-		(po ? `<details><summary>per-portal success</summary>${po}</details>` : '') +
-		(kw ? `<div style="margin-top:6px">${kw}</div>` : '');
-}
-
-async function loadSideIncome() {
-	const ops = await api('/side-income');
-	document.getElementById('sideIncome').innerHTML = ops.map(o => {
-		const cls = o.status === 'applied' || o.status === 'in_progress' ? 'ok' : o.status === 'rejected' ? 'bad' : '';
-		return `<div class="lead"><div><b>${o.fitScore}% ${esc(o.provider)}</b> <span class="meta">${esc(o.investmentRange || '')}</span></div>` +
-			`<button class="${cls ? 'ghost' : ''}" onclick="markSide('${o.id}', this)">${esc(o.status)}</button></div>`;
-	}).join('');
-}
-
-function markSide(id, btn) {
-	api(`/side-income/${id}/status`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status: 'applied' }) })
-		.then(loadSideIncome);
-}
-
-async function loadFnfTrading() {
-	const el = document.getElementById('fnfTrading');
-	try {
-		const d = await api('/trading/summary');
-		const p = (d.portfolios || [])[0];
-		const open = (d.trades || []).filter(t => t.status === 'OPEN').length;
-		const win = d.learning ? `${d.learning.winRate}% win (${d.learning.winners}/${d.learning.total})` : 'no closed trades';
-		const net = d.learning ? Number(d.learning.netPnl || 0) : 0;
-		el.innerHTML = p
-			? `<div class="lead"><div><b>₹ ${Number(p.capital || 0).toLocaleString('en-IN')} capital</b> <span class="meta">${esc(p.label)} · deployed ₹ ${Number(p.deployed || 0).toLocaleString('en-IN')} · headroom ₹ ${(Number(p.ceiling || p.capital) - Number(p.deployed || 0)).toLocaleString('en-IN')}</span></div>` +
-			  `<span class="badge ${p.autoTradeEnabled ? 'ok' : ''}">${p.autoTradeEnabled ? 'AUTO ON' : 'auto off'}</span></div>` +
-			  `<div class="lead"><div><b class="${net >= 0 ? 'ok' : 'bad'}">net P&amp;L ₹ ${Number(net).toLocaleString('en-IN')}</b> <span class="meta">${win} · ${open} open position${open === 1 ? '' : 's'}</span></div>` +
-			  `<a style="color:var(--accent);font-size:12px" href="/fnf-trading">open desk →</a></div>`
-			: `<div class="lead"><div><b>No portfolio yet</b> <span class="meta">create via POST /trading/portfolios</span></div>` +
-			  `<a style="color:var(--accent);font-size:12px" href="/fnf-trading">open desk →</a></div>`;
-	} catch (e) {
-		el.innerHTML = '<span class="meta">trading API unavailable</span>';
-	}
-}
-
-async function loadMailAccounts() {
-	const accs = await api('/mail/accounts');
-	document.getElementById('mailAccounts').innerHTML = (accs || []).map(a =>
-		`<div class="lead"><div><b>${esc(a.email)}</b> <span class="meta">${esc(a.provider || 'smtp')}</span></div>` +
-		`<span class="badge ${a.isPrimary ? 'ok' : ''}">${a.isPrimary ? 'Primary' : 'Backup'}</span></div>`
-	).join('') || '<span class="meta">no accounts added yet</span>';
-}
-
-document.getElementById('mform').addEventListener('submit', async e => {
-	e.preventDefault();
-	const body = {};
-	for (const el of e.target.elements) if (el.name && el.value) body[el.name] = el.value;
-	await api('/mail/accounts', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-	loadMailAccounts();
-});
-
-async function loadInterviewPrep() {
-	const qs = await api('/interview-prep');
-	const top = (qs || []).slice(0, 4);
-	document.getElementById('interviewPrep').innerHTML = top.map(q =>
-		`<div class="lead"><div><b>[${esc(q.topic)}]</b> ${esc(q.question.slice(0, 60))}…</div></div>`
-	).join('') || '<span class="meta">no interview questions</span>';
-}
-
-async function loadPreApply() {
-	try {
-		const [items, win] = await Promise.all([api('/pre-apply/pending'), api('/astro/muhurta/latest')]);
-		document.getElementById('preapply').innerHTML = (items || []).slice(0, 8).map(i => {
-			const astro = i.astroJson ? JSON.parse(i.astroJson) : null;
-			const cls = i.status === 'approved' ? 'ok' : i.status === 'hold' ? 'warn' : '';
-			return `<div class="app"><div><b>${esc(i.source)}</b> · ${Math.round(i.astroScore)}/100 astro <span class="badge ${cls}">${esc(i.status)}</span></div>
-				<span class="meta">${astro?.muhurta?.label ?? ''}</span></div>`;
-		}).join('') || '<span class="meta">queue empty — approved items send at shubh muhurta</span>';
-		const w = (win || [])[0];
-		document.getElementById('muhurta').innerHTML = w
-			? `next shubh muhurta: ${new Date(w.startsAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})} → ${new Date(w.endsAt).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})} IST · ${esc(w.weekday)} tithi ${w.tithi} ${esc(w.nakshatra)}`
-			: 'no shubh window computed yet — run a scout/prepare to compute';
-	} catch { /* astro APIs unavailable — dashboard still works */ }
-}
-
-loadProfile(); loadLeads(); loadApps(); loadSettings(); loadLearning(); loadSideIncome(); loadSandbox(); loadMailAccounts(); loadInterviewPrep(); loadPreApply(); loadFnfTrading();
+  loadAllowedEmails().then(checkAuth);
+})();
 </script>
 </body>
 </html>
