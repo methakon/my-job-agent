@@ -41,6 +41,9 @@ async function bootstrap() {
   app.use('/assets', express.static(path.join(publicDir, 'assets')));
   app.use(express.static(publicDir));
 
+  // Redirect root / to /dashboard (public/dashboard.html is the landing page)
+  app.use('/', (_req: any, res: any) => res.sendFile(path.join(publicDir, 'dashboard.html')));
+
   await app.listen(3010);
   console.log(`my-job-agent listening on port 3010`);
 }
