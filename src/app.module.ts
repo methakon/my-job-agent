@@ -42,6 +42,10 @@ import { FnoMarketDataController } from './trading/fno-market-data.controller';
 import { MarketDataInspectionController } from './trading/market-data-inspection.controller';
 import { MarketDataPageController } from './trading/market-data-page.controller';
 import { MarketDataInspectionService } from './trading/market-data-inspection.service';
+import { FnfOptionContract } from './trading/fnf-option-contract.entity';
+import { FnfOptionQuote } from './trading/fnf-option-quote.entity';
+import { FnfOptionChainService } from './trading/fnf-option-chain.service';
+import { FnfOptionChainController } from './trading/fnf-option-chain.controller';
 import { InterviewPrepController } from './interview/interview-prep.controller';
 import { InterviewPracticePageController } from './interview/interview-practice-page.controller';
 import { MailController } from './applications/mail.controller';
@@ -87,10 +91,10 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote]),
 		SideIncomeModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController],
 	providers: [
 		ProfileService,
 		ProfileRepository,
@@ -125,6 +129,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		MuhurtaSendService,
 		FnfTradingService,
 		FnoMarketDataService,
+		FnfOptionChainService,
 		MarketDataInspectionService,
 	],
 })

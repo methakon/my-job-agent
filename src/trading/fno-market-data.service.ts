@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { FnfTradingService } from './fnf-trading.service';
 import { parseYahooChartResponse, parseYahooSymbolConfig, YahooSymbolConfig } from './yahoo-finance-parser';
+import { FnfOptionChainService } from './fnf-option-chain.service';
+import { OptionContract } from './option-chain-parser';
 
 // The FYERS package currently ships JavaScript without TypeScript declarations.
 // Keep the SDK boundary typed as unknown/any and validate every inbound field.
@@ -38,6 +40,14 @@ type Tick = {
   high?: number;
   low?: number;
   close?: number;
+  bid?: number;
+  ask?: number;
+  openInterest?: number;
+  impliedVolatility?: number;
+  delta?: number;
+  gamma?: number;
+  theta?: number;
+  vega?: number;
   ts: string;
 };
 
@@ -69,8 +79,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private readonly yahooSymbols: YahooSymbolConfig[];
   private readonly yahooPollMs: number;
   private readonly yahooTimeoutMs: number;
+  private readonly optionContracts: Map<string, OptionContract>;
 
-  constructor(private readonly trading: FnfTradingService) {
+  constructor(private readonly trading: FnfTradingService, private readonly optionChain: FnfOptionChainService) {
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
       .split(',')
       .map((s) => s.trim())
@@ -84,6 +95,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     );
     this.yahooPollMs = Math.max(5_000, Number(process.env.YAHOO_FINANCE_POLL_MS ?? 15_000));
     this.yahooTimeoutMs = Math.max(2_000, Number(process.env.YAHOO_FINANCE_TIMEOUT_MS ?? 10_000));
+    this.optionContracts = new Map(this.optionChain.configuredContracts().map((contract) => [contract.symbol, contract]));
     const supportedProvider = provider === 'fyers' || provider === 'yahoo';
     const subscribedSymbols = provider === 'yahoo' ? this.yahooSymbols.map(({ symbol }) => symbol) : symbols;
     this.statusValue = {
@@ -176,14 +188,35 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   private onMessage(message: unknown): void {
-    this.recordTicks(this.parseMessage(message));
+    this.recordTicks(this.parseMessage(message), 'fyers');
   }
 
-  private recordTicks(ticks: Tick[]): void {
+  private recordTicks(ticks: Tick[], provider: string): void {
     if (!ticks.length) return;
     for (const tick of ticks) {
       this.statusValue.ticksReceived += 1;
       this.statusValue.lastTickAt = tick.ts;
+      const optionContract = this.optionContracts.get(tick.instrument);
+      if (optionContract) {
+        void this.optionChain.ingestQuote({
+          contractSymbol: optionContract.symbol,
+          ltp: tick.price,
+          bid: tick.bid,
+          ask: tick.ask,
+          volume: tick.volume,
+          openInterest: tick.openInterest,
+          impliedVolatility: tick.impliedVolatility,
+          delta: tick.delta,
+          gamma: tick.gamma,
+          theta: tick.theta,
+          vega: tick.vega,
+          ts: tick.ts,
+          provider,
+        }).catch((error: unknown) => {
+          this.statusValue.lastError = `option quote persistence failed: ${this.safeMessage(error)}`;
+          this.logger.warn(this.statusValue.lastError);
+        });
+      }
       const now = Date.now();
       const last = this.lastPersistedAt.get(tick.instrument) ?? 0;
       if (now - last < this.persistEveryMs) continue;
@@ -206,7 +239,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
         if (result.status === 'fulfilled') ticks.push(result.value);
         else errors.push(this.safeMessage(result.reason));
       }
-      this.recordTicks(ticks);
+      this.recordTicks(ticks, 'yahoo');
       this.statusValue.connected = ticks.length > 0;
       this.statusValue.lastError = errors.length ? errors.join('; ').slice(0, 240) : null;
       this.statusValue.lastMessage = `Yahoo Finance poll: ${ticks.length}/${this.yahooSymbols.length} symbol(s) returned data`;
@@ -288,6 +321,14 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
         high: asFinite(record.high_price, record.high, nested?.high_price),
         low: asFinite(record.low_price, record.low, nested?.low_price),
         close: asFinite(record.prev_close_price, record.close, nested?.prev_close_price),
+        bid: asFinite(record.bid, record.bid_price, nested?.bid, nested?.bid_price),
+        ask: asFinite(record.ask, record.ask_price, nested?.ask, nested?.ask_price),
+        openInterest: asFinite(record.oi, record.open_interest, nested?.oi, nested?.open_interest),
+        impliedVolatility: asFinite(record.iv, record.implied_volatility, nested?.iv, nested?.implied_volatility),
+        delta: asFinite(record.delta, nested?.delta),
+        gamma: asFinite(record.gamma, nested?.gamma),
+        theta: asFinite(record.theta, nested?.theta),
+        vega: asFinite(record.vega, nested?.vega),
         ts: ts.toISOString(),
       }];
     });
