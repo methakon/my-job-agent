@@ -19,6 +19,7 @@
     "astronomy-engine": "^2.1.19",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "fyers-api-v3": "^2.1.0",
     "imapflow": "^1.7.6",
     "mailparser": "^3.9.16",
     "mysql2": "^3.11.0",
