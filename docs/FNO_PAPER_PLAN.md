@@ -37,6 +37,18 @@ No CE/PE premium, option P&L, strike, or lot size may be inferred from an index 
 
 A session ends immediately at its loss stop, after one open position is unresolved at the configured cutoff, or whenever the quote/feed becomes stale. Unavailable option data means observation only—not a synthetic paper fill.
 
+## Historical underlying import
+
+A retry-safe importer is available at `scripts/fetch-yahoo-history.js`:
+
+```bash
+node scripts/fetch-yahoo-history.js
+```
+
+It fetches Yahoo chart data with `range=5y` and `interval=1d` by default for the configured NIFTY 50, BANK NIFTY, and SENSEX mappings, then stores daily OHLCV rows in `fnf_market_snapshots` through the existing paper-trading ingestion route. Set `YAHOO_HISTORY_RANGE` or `YAHOO_HISTORY_INTERVAL` in the environment to change the request. Imports are de-duplicated by instrument plus market timestamp, so rerunning the importer is safe.
+
+This is historical underlying/index data only. It must not be used to create option premiums, CE/PE P&L, Greeks, strikes, lot sizes, or synthetic option fills. Historical option-chain data remains blocked until a validated broker/derivatives source is available.
+
 ## Interim Yahoo operating rule
 
 Polls may repeat the current 1-minute candle. The feed now accepts only a newer Yahoo candle timestamp per instrument for snapshot persistence and status tick counting. Yahoo remains unsuitable as the sole source for unrestricted NSE option-chain selection, Greeks, or reliable option premiums; those capabilities remain blocked until a validated broker/derivatives feed is available.

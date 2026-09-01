@@ -145,11 +145,10 @@ export class FnfTradingService {
 
 	/** Open a position. Enforces: portfolio exists, capital headroom, and the
 	 *  Friday block (no new positions on Friday unless explicitly enabled). */
-	async openTrade(dto: CreateTradeDto): Promise<FnfTrade> {
+	async openTrade(dto: CreateTradeDto, asOf: Date = new Date()): Promise<FnfTrade> {
 		const portfolio = await this.getPortfolio(dto.portfolioId);
 		const notional = dto.quantity * dto.entryPrice;
-
-		const isFriday = new Date().getDay() === 5;
+		const isFriday = asOf.getDay() === 5;
 		if (isFriday && !portfolio.fridayTradingEnabled) {
 			throw new BadRequestException(
 				'Friday block active: no new positions on Friday unless fridayTradingEnabled. Enable the Friday toggle to override.',
@@ -183,7 +182,7 @@ export class FnfTradingService {
 
 	/** Close a position: compute gross/net P&L + cost, update portfolio,
 	 *  then rectify the decay calibration day-wise from this outcome. */
-	async closeTrade(id: string, dto: CloseTradeDto): Promise<FnfTrade> {
+	async closeTrade(id: string, dto: CloseTradeDto, asOf: Date = new Date()): Promise<FnfTrade> {
 		const trade = await this.trades.findOne({ where: { id }, relations: { portfolio: true } });
 		if (!trade) throw new NotFoundException(`trade ${id} not found`);
 		if (trade.status !== 'OPEN') throw new BadRequestException(`trade ${id} already ${trade.status}`);
@@ -206,7 +205,7 @@ export class FnfTradingService {
 		trade.cost = cost;
 		trade.netPnl = netPnl;
 		trade.status = 'CLOSED';
-		trade.closedAt = new Date();
+		trade.closedAt = asOf;
 		const saved = await this.trades.save(trade);
 
 		const portfolio = trade.portfolio;
@@ -258,8 +257,35 @@ export class FnfTradingService {
 	// ── Market snapshots ─────────────────────────────────────────────────
 
 	async ingestSnapshots(dtos: IngestSnapshotDto[]): Promise<number> {
-		const rows = dtos.map((d) =>
-			this.snapshots.create({
+		if (!dtos.length) return 0;
+
+		// Historical imports may be retried. De-duplicate both within the request
+		// and against the persisted instrument/timestamp range before saving.
+		const normalized = dtos.map((d) => ({
+			...d,
+			ts: d.ts ? new Date(d.ts) : new Date(),
+		}));
+		type NormalizedSnapshot = Omit<IngestSnapshotDto, 'ts'> & { ts: Date };
+		const unique = new Map<string, NormalizedSnapshot>();
+		for (const d of normalized) {
+			if (Number.isNaN(d.ts.getTime())) continue;
+			unique.set(`${d.instrument}|${d.ts.toISOString()}`, d);
+		}
+		if (!unique.size) return 0;
+
+		const candidates = [...unique.values()];
+		const instruments = [...new Set(candidates.map((d) => d.instrument))];
+		const minTs = new Date(Math.min(...candidates.map((d) => d.ts.getTime())));
+		const maxTs = new Date(Math.max(...candidates.map((d) => d.ts.getTime())));
+		const existing = await this.snapshots
+			.createQueryBuilder('s')
+			.where('s.instrument IN (:...instruments)', { instruments })
+			.andWhere('s.ts BETWEEN :minTs AND :maxTs', { minTs, maxTs })
+			.getMany();
+		const existingKeys = new Set(existing.map((s) => `${s.instrument}|${new Date(s.ts).toISOString()}`));
+		const rows = candidates
+			.filter((d) => !existingKeys.has(`${d.instrument}|${d.ts.toISOString()}`))
+			.map((d) => this.snapshots.create({
 				instrument: d.instrument,
 				price: d.price,
 				volume: d.volume ?? 0,
@@ -267,9 +293,9 @@ export class FnfTradingService {
 				high: d.high ?? undefined,
 				low: d.low ?? undefined,
 				close: d.close ?? undefined,
-				ts: d.ts ? new Date(d.ts) : new Date(),
-			}),
-		);
+				ts: d.ts,
+			}));
+		if (!rows.length) return 0;
 		const saved = await this.snapshots.save(rows);
 		return saved.length;
 	}
@@ -451,31 +477,31 @@ export class FnfTradingService {
 	 *  live muhurta engine; Friday block honored. Every prediction is
 	 *  decay-adjusted (exponential rate + weekday timing window) — stale data
 	 *  or off-window time degrades confidence, and below the floor → HOLD. */
-	async generateSignals(portfolioId?: string): Promise<AlgoSignal[]> {
+	async generateSignals(portfolioId?: string, asOf: Date = new Date()): Promise<AlgoSignal[]> {
 		const portfolio = portfolioId ? await this.getPortfolio(portfolioId) : (await this.listPortfolios())[0] ?? null;
-		const isFriday = new Date().getDay() === 5;
+		const isFriday = asOf.getDay() === 5;
 		const fridayBlocked = isFriday && !(portfolio?.fridayTradingEnabled);
 
-		// Day-wise decay calibration for today (rectified from past outcomes).
-		const todayWd = new Date().getDay();
+		// Day-wise decay calibration for the evaluation timestamp.
+		const todayWd = asOf.getDay();
 		const cal = await this.getCalibration(todayWd, portfolio?.id);
 
 		const instruments = await this.snapshots
 			.createQueryBuilder('s')
 			.select('DISTINCT s.instrument', 'instrument')
 			.getRawMany<{ instrument: string }>();
-		const window = await this.muhurta.nextWindow(new Date(), 24);
+		const window = await this.muhurta.nextWindow(asOf, 24);
 		const shubh = (window?.score ?? 0) >= SHUBH_SCORE_MIN;
 		const astroMatch = {
 			shubh,
 			score: window?.score ?? 0,
-			label: window ? this.muhurta.describeNext(new Date()) : 'no muhurta window found in next 24h',
+			label: window ? this.muhurta.describeNext(asOf) : 'no muhurta window found in next 24h',
 		};
 
 		const signals: AlgoSignal[] = [];
 		for (const { instrument } of instruments) {
 			const rows = await this.snapshots.find({
-				where: { instrument },
+				where: { instrument, ts: LessThanOrEqual(asOf) },
 				order: { ts: 'DESC' },
 				take: 30,
 			});
@@ -500,7 +526,7 @@ export class FnfTradingService {
 
 			// ★ Decay: always predict considering decay (rate + day-wise timing).
 			const latestTs = rows[0].ts;
-			const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(confidence, cal, latestTs);
+			const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(confidence, cal, latestTs, asOf);
 
 			// Below the floor the signal has decayed past usable edge → HOLD.
 			if (decayed < DECAY_DEFAULTS.confidenceFloor) {
