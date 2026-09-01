@@ -3,6 +3,9 @@
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
 > Last updated: 2026-09-01
 
+## Recently completed (2026-09-01 session — CeeVi document packet)
+- [x] **Printable CeeVi document packet prepared** — combined locally available identity, education, birth-proof, joining, and employment documents into `/home/swarna-sekhar-dhar/Downloads/Swarna_Sekhar_Dhar_CeeVi_Actual_Document_Packet.pdf` (41 pages). Missing requirements are identified in the packet; no submission was made.
+
 ## Recently completed (2026-09-01 session — market-data inspection)
 - [x] **Market-data inspector page** at `/market-data` with instrument, time, price, volume, OHLC-availability, latest-only, row-limit, and auto-refresh filters. It reads `GET /trading/market/snapshots`, shows current feed status, and clearly separates real/near-real-time input from paper-only execution. Filter smoke tests live in `scripts/market-data-filter.test.js`.
 
