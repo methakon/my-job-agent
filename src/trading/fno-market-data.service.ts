@@ -3,6 +3,7 @@ import { FnfTradingService } from './fnf-trading.service';
 import { parseYahooChartResponse, parseYahooSymbolConfig, YahooSymbolConfig } from './yahoo-finance-parser';
 import { FnfOptionChainService } from './fnf-option-chain.service';
 import { OptionContract } from './option-chain-parser';
+import { shouldAcceptTick } from './market-feed-guard';
 
 // The FYERS package currently ships JavaScript without TypeScript declarations.
 // Keep the SDK boundary typed as unknown/any and validate every inbound field.
@@ -74,6 +75,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private yahooPollTimer: ReturnType<typeof setInterval> | null = null;
   private yahooPollInFlight = false;
   private readonly lastPersistedAt = new Map<string, number>();
+  private readonly lastYahooTickAt = new Map<string, string>();
   private readonly statusValue: FeedStatus;
   private readonly persistEveryMs: number;
   private readonly yahooSymbols: YahooSymbolConfig[];
@@ -194,6 +196,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private recordTicks(ticks: Tick[], provider: string): void {
     if (!ticks.length) return;
     for (const tick of ticks) {
+      const lastYahooTs = this.lastYahooTickAt.get(tick.instrument);
+      if (!shouldAcceptTick(provider, tick.ts, lastYahooTs)) continue;
+      if (provider === 'yahoo') this.lastYahooTickAt.set(tick.instrument, tick.ts);
       this.statusValue.ticksReceived += 1;
       this.statusValue.lastTickAt = tick.ts;
       const optionContract = this.optionContracts.get(tick.instrument);
