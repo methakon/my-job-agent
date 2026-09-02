@@ -4,12 +4,39 @@ import * as express from 'express';
 import session from 'express-session';
 import * as path from 'path';
 import passport from 'passport';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: true });
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'https:'],
+          connectSrc: ["'self'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+    }),
+  );
+  app.use(
+    rateLimit({
+      windowMs: 60_000,
+      max: 100,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: 'Too many requests, please try again later.',
+    }),
+  );
 
   app.use(
     session({

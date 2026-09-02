@@ -23,8 +23,10 @@
     "astronomy-engine": "^2.1.19",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "express-rate-limit": "^8.7.0",
     "express-session": "^1.19.0",
     "fyers-api-v3": "^2.1.0",
+    "helmet": "^8.3.0",
     "imapflow": "^1.7.6",
     "mailparser": "^3.9.16",
     "mysql2": "^3.11.0",
@@ -45,6 +47,7 @@
     "@types/node": "^22.4.0",
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
+    "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
   }
 }

@@ -446,7 +446,7 @@ function buildPnlStatement(
   startDeployed: number,
 ): PnlStatement {
   const endPortfolio = service.getPortfolio(portfolio.id) as any;
-  const calibrationsBefore = service.listCalibrations(portfolio.id) as any[];
+  const calibrationsBefore = await service.listCalibrations(portfolio.id);
   const calibrationsAfter = service.listCalibrations(portfolio.id) as any[];
 
   const byInstrument: Record<string, any> = {};
@@ -679,7 +679,7 @@ async function runSandboxTrading() {
   const startDeployed = Number(portfolio.deployed);
 
   // Pre-run decay snapshot.
-  const calibrationsBefore = service.listCalibrations(portfolio.id) as any[];
+  const calibrationsBefore = await service.listCalibrations(portfolio.id);
   console.log(`  initial decay (today=${new Date(now).getDay()}):`);
   for (const c of calibrationsBefore) {
     console.log(`    ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][c.weekday]}: rate ${Number(c.decayRate).toFixed(4)}/h window ${Number(c.windowStartHour).toFixed(2)}–${Number(c.windowEndHour).toFixed(2)} (${c.samples} samples)`);
@@ -693,7 +693,7 @@ async function runSandboxTrading() {
   // price tick; if the pullback never arrives, they're skipped rather than
   // chased (the user's rule: check how far price can go low, wait, only buy
   // if the setup is reasonable).
-  const pendingPullbackOrders: {
+  let pendingPullbackOrders: {
     signal: AlgoSignal;
     analysis: ReturnType<typeof pullbackAnalysisForBuy>;
     entered: boolean;
@@ -775,10 +775,10 @@ async function runSandboxTrading() {
       // ----- Re-evaluate pending pullback orders against latest prices -----
       for (const po of pendingPullbackOrders) {
         if (po.entered) continue;
-        const currentPrice = (() => {
-          const rows = (service['snapshots']['find']({ where: { instrument: po.signal.instrument } }) as any[])
-            .sort((a: any, b: any) => b.ts - a.ts);
-          const last = rows[0];
+        const currentPrice = (async () => {
+          const rows = await service['snapshots'].find({ where: { instrument: po.signal.instrument } });
+          const sorted = (rows as any[]).sort((a: any, b: any) => b.ts - a.ts);
+          const last = sorted[0];
           return last ? Number(last.price) : po.signal.price;
         })();
         const reAnalysis = pullbackAnalysisForBuy(po.signal, () => currentPrice);
@@ -800,7 +800,7 @@ async function runSandboxTrading() {
 
       // Advance each instrument price one tick.
       for (const inst of instruments) {
-        const lastSnap = (service['snapshots']['find']({ where: { instrument: inst.name } }) as any[])
+        const lastSnap = (await service['snapshots'].find({ where: { instrument: inst.name } }))
           .sort((a: any, b: any) => b.ts - a.ts)[0];
         if (!lastSnap) continue;
         const newPrice = tickPrice(Number(lastSnap.price), rng);
@@ -817,8 +817,7 @@ async function runSandboxTrading() {
       // Check open positions for TP/SL hits.
       const stillOpen: PaperPosition[] = [];
       for (const pos of openPositions) {
-        const latest = (service['snapshots']['find']({ where: { instrument: pos.trade.instrument } }) as any[])
-          .sort((a: any, b: any) => b.ts - a.ts)[0];
+        const latest = (await service['snapshots'].find({ where: { instrument: pos.trade.instrument } })).sort((a: any, b: any) => b.ts - a.ts)[0];
         if (!latest) { stillOpen.push(pos); continue; }
         const price = Number(latest.price);
         const hitTp = pos.side === 'BUY' ? price >= pos.tp : price <= pos.tp;
@@ -853,8 +852,7 @@ async function runSandboxTrading() {
     // Force-close remaining open positions at session end at last price.
     if (openPositions.length) {
       for (const pos of openPositions) {
-        const latest = (service['snapshots']['find']({ where: { instrument: pos.trade.instrument } }) as any[])
-          .sort((a: any, b: any) => b.ts - a.ts)[0];
+        const latest = (await service['snapshots'].find({ where: { instrument: pos.trade.instrument } })).sort((a: any, b: any) => b.ts - a.ts)[0];
         if (!latest) continue;
         const price = Number(latest.price);
         const closed = closePaperTrade(service, pos, price, sessionClock);
@@ -875,8 +873,7 @@ async function runSandboxTrading() {
   if (openPositions.length) {
     console.log('\n── force-closing residual open positions ──────────────────────');
     for (const pos of openPositions) {
-      const latest = (service['snapshots']['find']({ where: { instrument: pos.trade.instrument } }) as any[])
-        .sort((a: any, b: any) => b.ts - a.ts)[0];
+      const latest = (await service['snapshots'].find({ where: { instrument: pos.trade.instrument } })).sort((a: any, b: any) => b.ts - a.ts)[0];
       if (!latest) continue;
       const closed = closePaperTrade(service, pos, Number(latest.price), new Date());
       closedTrades.push(closed);

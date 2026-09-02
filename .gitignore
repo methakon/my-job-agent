@@ -7,3 +7,4 @@ logs/
 agent.pid
 uploads/
 __pycache__/
+.env.password

@@ -111,12 +111,12 @@ After SEBI's April 1, 2026 migration:
 - Live order placement through broker APIs requires a static IP registered with the broker (your tunnel provides this via Cloudflare's egress IPs — but confirm with FYERS whether they accept Cloudflare Tunnel IPs for the static IP registration requirement, or if you need to add Cloudflare's IP ranges to your FYERS account)
 - Paper trading / data-only access should not require the static IP registration
 
-### 7. Important — Paper Trading Only
+### 7. Important — F&O Paper Trading Only
 
 Per your rules:
 - Simulated balance: ₹5,000
 - Profits increase it, losses reduce it
-- FYERS activation required for live data but ALL execution stays paper
+- FYERS activation required for live F&O data (options and futures) but ALL execution stays paper
 - No real broker orders or order-placement APIs called
 - Yahoo Finance used only for interim underlying/index research and historical imports
 
