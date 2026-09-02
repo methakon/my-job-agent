@@ -1,7 +1,17 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-02
+> Last updated: 2026-09-02 (evening)
+
+## USER-APPROVED APPLY PENDING (2026-09-02 evening) — 🚫 needs engine adapter first
+- [ ] **"OK SN APPLY TO THIS JOB https://zebratechiessolution.com/public/career/job-opportunities/9#apply"** — EXPLICIT user approval on record (FR-17.6 satisfied). NOT yet executed: job is NOT in `job_leads` (fresh company-site lead, source has no portal adapter → `prepareApplication` would fail "no adapter for source X"). Investigation done (2026-09-02): posting live as "Ongoing WALK-IN INTERVIEW" on the company index; role = Laravel Developer (3–5 yrs) + AI knowledge, Full Time, Sector V Kolkata, walk-in dates listed 22 Oct–7 Nov 2025 (page may be stale — verify before send). JD contains EVIDENCE email `hr@zebratechies.com` (contact Sharmila Saha, phone +91-8334922887) + company apply form on the page. Channel decision per priority: HR email found in description → direct SMTP to hr@zebratechies.com (evidence-only rule satisfied; skip portal). NEXT SESSION: create lead (source tag e.g. `zebra` w/ adapter OR reuse a generic direct-channel path), run pre-apply prepare → show user on /pre-apply-page → approve → muhurta sweep sends. Do NOT send blind.
+
+## Auth + pre-apply page session (2026-09-02 evening) — pre-apply page "not showing JD/email" ROOT-CAUSED + FIXED
+- [x] **User report**: "/pre-apply-page is not showing job description email to be send and other details".
+- [x] **Root cause (two stacked bugs)**: (1) sessions live in express-session default in-memory MemoryStore → every pm2 restart silently logs the user out; a logged-out browser got raw 401 JSON (`{"message":"Operator password required."}`) instead of any page. Two restarts happened that day (SMTP wiring + APP_SECRET restore) → user's session died. (2) Independently, the pre-apply card template (`src/applications/pre-apply-page.controller.ts`) never rendered `job_leads.description` even when logged in (34/37 leads have the field).
+- [x] **Fix**: new `src/auth/unauthorized-html-redirect.filter.ts` (`UnauthorizedHtmlRedirectFilter`, global) — HTML-Accept browser requests that hit a 401 now redirect to the login shell; API/XHR clients still get clean 401 JSON (security matrix unchanged). Registered in `src/main.ts`. Card now renders a collapsible "📋 Job description" block (`details.jd` + CSS) in every pre-apply card.
+- [x] **Verified live on berhampore.in**: logged-out browser GET /pre-apply-page → 302 to login shell (was raw JSON); logged-out API POST → 401 JSON unchanged; logged-in GET → HTTP 200, 37 cards, 37 "Email draft" blocks, 37 JD blocks (first JD 2,636 chars). Commit `24bb879`, pushed.
+- [x] **Caveat for user**: in-memory sessions mean EVERY pm2 restart logs everyone out. Offer: switch to a MySQL-backed session store so logins survive restarts (user hasn't decided — ask next session).
 
 ## Auth requirement CHANGED (2026-09-02) — login now required on LOCAL too; remote showed raw 401 instead of login page
 - [x] **User directive**: "IN LOCAL IT IS SHOWING PASSWORD CHANGING PAGE NOT THE DASHBOARD … MAKE LOGIN REQUIRE TO LOCAL ALSO. AFTER LOGIN IT SHOULD GO TO DASHBOARD." Plus report: berhampore.in showed `{"message":"Operator password required for remote access.",…401}` with no login page at all.
