@@ -3,6 +3,13 @@
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
 > Last updated: 2026-09-02
 
+## Auth requirement CHANGED (2026-09-02) — login now required on LOCAL too; remote showed raw 401 instead of login page
+- [x] **User directive**: "IN LOCAL IT IS SHOWING PASSWORD CHANGING PAGE NOT THE DASHBOARD … MAKE LOGIN REQUIRE TO LOCAL ALSO. AFTER LOGIN IT SHOULD GO TO DASHBOARD." Plus report: berhampore.in showed `{"message":"Operator password required for remote access.",…401}` with no login page at all.
+- [x] **Root cause (both symptoms)**: (1) the SPA shell (`AppFallbackController`, serves dashboard.html at `/`) sat INSIDE the Nest router behind the global guard → remote visitors got raw 401 JSON before any HTML could load; (2) the guard still had the HOST-based localhost exemption + dashboard.js had an `IS_LOCAL` branch → localhost showed the "Local mode / change-password" card instead of login or dashboard.
+- [x] **Fix**: removed the localhost exemption from `ConditionalAuthGuard` (login required everywhere — loopback bypass is gone and must never return, Cloudflare tunnel arrives as 127.0.0.1). `AppFallbackController` marked `@BypassAuth` (shell has no data; login form must load pre-auth). Session cookie `secure: 'auto'` so plain-http localhost login works while the https tunnel still gets Secure cookies. dashboard.html/js rebuilt: no session → sign-in form (any host); session → dashboard hub (pre-apply queue, applications, interview practice, market data, F&O, option trading, visa guide, side income) with change-password under Account + sign-out.
+- [x] **Verified live**: localhost GET / → 200 (login page); local login over plain http sets cookie → `/auth/me` returns operator; `/leads` 401 without session, 200 with; https://berhampore.in/ → 200 serving the login HTML (was 401 JSON); remote login sets Secure cookie; `/pre-apply-page` 401 without session, 200 with; `x-operator-password` header path (server-to-server) still 200.
+- [ ] Next: replace placeholder `SESSION_SECRET` in `.env` with a random secret (security-report follow-up, still open).
+
 ## Agent-not-applying investigation (2026-09-02) — NO engine fault, blocked on approvals
 - [x] **Diagnosis**: pipeline is gated by design — lead → pre-apply queue (`ready`) → **user approval** → muhurta sweep (10-min tick) sends only `status='approved'` items inside shubh windows (score ≥ 65).
 - [x] Evidence: last real submission **2026-08-31 10:34**; queue = **18 `ready`, 0 `approved`**, 10 sent, 3 failed (approved-then-failed), 6 hold. Sweep early-returns on 0 approved → nothing sends. Shubh windows (score 70) were open today but nothing was approved.

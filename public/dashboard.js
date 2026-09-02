@@ -1,22 +1,22 @@
-/* my-job-agent dashboard auth UI.
-   Rules implemented here mirror the server:
-   - localhost / 127.0.0.1  -> NO authentication (local mode)
-   - any other host         -> operator password gate
-   Google login was removed from the product; password only.
+/* my-job-agent dashboard UI.
+   Auth model (2026-09-02 requirement change): login is required for BOTH
+   local and public access. No user session -> sign-in form. Session active ->
+   dashboard hub. Google login was removed from the product; password only.
 */
 (function () {
   'use strict';
 
   var $ = function (id) { return document.getElementById(id); };
-  var LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', '[::1]'];
-  var IS_LOCAL = LOCAL_HOSTS.indexOf(location.hostname) !== -1;
 
-  var views = { login: $('view-login'), local: $('view-local'), signedin: $('view-signedin') };
+  var views = { login: $('view-login'), dashboard: $('view-dashboard') };
+  var shell = $('shell');
   var pill = $('modePill');
 
   function showView(name) {
     Object.keys(views).forEach(function (k) { views[k].classList.add('hidden'); });
     views[name].classList.remove('hidden');
+    if (name === 'dashboard') { shell.classList.add('wide'); }
+    else { shell.classList.remove('wide'); }
   }
 
   function flash(msgEl, kind, text) {
@@ -40,7 +40,7 @@
     });
   }
 
-  /* ---- change-password form builder (used in local + signed-in views) ---- */
+  /* ---- change-password form builder (account section of the dashboard) ---- */
   function changePasswordForm(onDone) {
     var wrap = document.createElement('div');
     var f = document.createElement('form');
@@ -65,7 +65,7 @@
         .then(function (d) {
           if (d.status === 200) {
             f.reset();
-            onDone('ok', 'Password changed. Remote sign-in now uses the new password.');
+            onDone('ok', 'Password changed. Sign-in now uses the new password.');
           } else if (d.error === 'invalid_old_password') {
             onDone('err', 'Old password is incorrect.');
           } else if (d.error === 'new_password_too_short') {
@@ -83,64 +83,64 @@
     return wrap;
   }
 
+  function wireLogin() {
+    $('loginForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      clearFlash($('loginMsg'));
+      var btn = $('loginBtn');
+      btn.disabled = true;
+      api('/auth/login', { method: 'POST', body: { password: $('password').value } })
+        .then(function (d) {
+          if (d.status === 200 && d.user) {
+            location.reload(); // -> /auth/me now returns a user -> dashboard view
+          } else {
+            flash($('loginMsg'), 'err', d.error === 'invalid_password'
+              ? 'Wrong password. Check the operator password or use the recovery link below.'
+              : 'Sign-in failed (status ' + d.status + ').');
+          }
+        })
+        .catch(function () { flash($('loginMsg'), 'err', 'Network error — could not reach the server.'); })
+        .then(function () { btn.disabled = false; });
+    });
+    $('forgotBtn').addEventListener('click', function () {
+      var btn = $('forgotBtn');
+      btn.disabled = true;
+      clearFlash($('loginMsg'));
+      api('/auth/forgot-password', { method: 'POST' })
+        .then(function (d) {
+          if (d.status === 200) {
+            flash($('loginMsg'), 'ok', 'Password sent to ' + d.sentTo + '. Check that inbox.');
+          } else if (d.error === 'smtp_not_configured') {
+            flash($('loginMsg'), 'err', 'Recovery email is not enabled yet (no SMTP credentials on the server).');
+          } else {
+            flash($('loginMsg'), 'err', 'Could not send the recovery email (status ' + d.status + ').');
+          }
+        })
+        .catch(function () { flash($('loginMsg'), 'err', 'Network error — could not reach the server.'); })
+        .then(function () { btn.disabled = false; });
+    });
+  }
+
   function render(user) {
     if (user) {
       pill.textContent = 'Signed in as operator';
       pill.className = 'pill ok';
-      $('signedinChangeSlot').appendChild(changePasswordForm(function (kind, text) { flash($('signedinMsg'), kind, text); }));
+      $('whoAmI').textContent = user.name + ' · ' + user.email;
+      $('accountChangeSlot').appendChild(changePasswordForm(function (kind, text) { flash($('accountMsg'), kind, text); }));
       $('logoutBtn').addEventListener('click', function () {
         api('/auth/logout', { method: 'POST' }).then(function () { location.reload(); });
       });
-      showView('signedin');
-    } else if (IS_LOCAL) {
-      pill.textContent = 'Local mode — no sign-in required';
-      pill.className = 'pill ok';
-      $('localChangeSlot').appendChild(changePasswordForm(function (kind, text) { flash($('localMsg'), kind, text); }));
-      showView('local');
+      showView('dashboard');
     } else {
-      pill.textContent = 'Remote access — password required';
+      pill.textContent = 'Password required';
       pill.className = 'pill warn';
-      $('loginForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        clearFlash($('loginMsg'));
-        var btn = $('loginBtn');
-        btn.disabled = true;
-        api('/auth/login', { method: 'POST', body: { password: $('password').value } })
-          .then(function (d) {
-            if (d.status === 200 && d.user) {
-              location.reload();
-            } else {
-              flash($('loginMsg'), 'err', d.error === 'invalid_password'
-                ? 'Wrong password. Check the operator password or use the recovery link below.'
-                : 'Sign-in failed (status ' + d.status + ').');
-            }
-          })
-          .catch(function () { flash($('loginMsg'), 'err', 'Network error — could not reach the server.'); })
-          .then(function () { btn.disabled = false; });
-      });
-      $('forgotBtn').addEventListener('click', function () {
-        var btn = $('forgotBtn');
-        btn.disabled = true;
-        clearFlash($('loginMsg'));
-        api('/auth/forgot-password', { method: 'POST' })
-          .then(function (d) {
-            if (d.status === 200) {
-              flash($('loginMsg'), 'ok', 'Password sent to ' + d.sentTo + '. Check that inbox.');
-            } else if (d.error === 'smtp_not_configured') {
-              flash($('loginMsg'), 'err', 'Recovery email is not enabled yet (no SMTP credentials on the server).');
-            } else {
-              flash($('loginMsg'), 'err', 'Could not send the recovery email (status ' + d.status + ').');
-            }
-          })
-          .catch(function () { flash($('loginMsg'), 'err', 'Network error — could not reach the server.'); })
-          .then(function () { btn.disabled = false; });
-      });
+      wireLogin();
       showView('login');
     }
   }
 
   api('/auth/me').then(function (d) { render(d.user || null); }).catch(function () {
     pill.textContent = 'Server unreachable';
-    showView(IS_LOCAL ? 'local' : 'login');
+    showView('login');
   });
 })();

@@ -63,7 +63,13 @@ async function bootstrap() {
       saveUninitialized: false,
       cookie: {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        // 'auto': Secure flag only when the request is actually https.
+        // Local login now happens over plain http://localhost:3010 (login is
+        // required locally too since 2026-09-02), and express-session will not
+        // set a Secure cookie over http — which silently broke local login.
+        // The Cloudflare tunnel forwards X-Forwarded-Proto: https, so remote
+        // sessions still get Secure cookies.
+        secure: 'auto',
         maxAge: 24 * 60 * 60 * 1000,
       },
     }),

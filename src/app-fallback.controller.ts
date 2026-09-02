@@ -1,6 +1,7 @@
 import { All, Controller, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import * as path from 'path';
+import { BypassAuth } from './auth/bypass-auth.decorator';
 
 /**
  * SPA fallback — MUST stay the LAST entry in AppModule.controllers.
@@ -12,8 +13,14 @@ import * as path from 'path';
  * path showed the login page. Moving the fallback INTO the router (this
  * controller) lets all real routes win first, and only unmatched requests
  * get the dashboard shell.
+ *
+ * @BypassAuth: the shell HTML contains no data (the login form lives in it,
+ * and every data call goes through guarded APIs), so it must be reachable
+ * before any session exists — otherwise remote visitors would get a raw 401
+ * instead of the login page.
  */
 @Controller()
+@BypassAuth()
 export class AppFallbackController {
   @All('*')
   fallback(@Req() req: Request, @Res() res: Response) {

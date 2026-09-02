@@ -26,10 +26,10 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
       padding: 24px;
     }
     .shell { width: 100%; max-width: 460px; }
+    .shell.wide { max-width: 980px; }
     header.app { text-align: center; margin-bottom: 22px; }
     header.app h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: 0.3px; }
     header.app p { margin: 0; color: var(--muted); font-size: 13px; }
@@ -74,20 +74,45 @@
     }
     .hidden { display: none !important; }
     code { background: #0d1117; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+    /* Dashboard hub */
+    .grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 12px; margin-top: 4px;
+    }
+    a.tile {
+      display: block; background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px 18px; text-decoration: none; color: var(--text);
+      transition: border-color .15s ease, transform .15s ease;
+    }
+    a.tile:hover { border-color: var(--accent); transform: translateY(-1px); }
+    a.tile .t-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    a.tile .t-sub { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+    .topbar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 10px; flex-wrap: wrap; margin-bottom: 18px;
+    }
+    .topbar .who { font-size: 13px; color: var(--muted); }
+    .topbar button { width: auto; margin: 0; padding: 7px 14px; font-size: 13px; }
+    details.account { margin-top: 22px; }
+    details.account summary {
+      cursor: pointer; color: var(--muted); font-size: 13px; text-align: center; padding: 6px;
+    }
+    details.account summary:hover { color: var(--accent); }
   </style>
 </head>
 <body>
-  <div class="shell">
+  <div id="shell" class="shell">
     <header class="app">
       <h1>my-job-agent</h1>
       <p>job applications · interview prep · market data</p>
       <span id="modePill" class="pill">checking…</span>
     </header>
 
-    <!-- Public remote access: password gate -->
+    <!-- Sign in (required for local AND public access) -->
     <section id="view-login" class="card hidden">
       <h2>Sign in</h2>
-      <p class="hint">This dashboard is reachable over the public internet. Enter the operator password to continue.</p>
+      <p class="hint">This dashboard is password-protected for local and public access. Enter the operator password to continue.</p>
       <form id="loginForm" autocomplete="off">
         <label for="password">Password</label>
         <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Operator password" required />
@@ -97,26 +122,59 @@
       <div id="loginMsg" class="msg"></div>
     </section>
 
-    <!-- Local (localhost) access: no authentication -->
-    <section id="view-local" class="card hidden">
-      <h2>Local mode</h2>
-      <p class="hint">You are on the operator&rsquo;s own machine — no sign-in is required here. The remote-access password below can be changed anytime (old + new password).</p>
-      <div id="localChangeSlot"></div>
-      <div id="localMsg" class="msg"></div>
-    </section>
+    <!-- Dashboard (visible only after sign-in) -->
+    <section id="view-dashboard" class="hidden">
+      <div class="topbar">
+        <div class="who" id="whoAmI"></div>
+        <button type="button" class="secondary" id="logoutBtn">Sign out</button>
+      </div>
 
-    <!-- Signed in -->
-    <section id="view-signedin" class="card hidden">
-      <h2>Signed in</h2>
-      <p class="hint">Session cookie is active for remote access. Password changes apply immediately to remote sign-in.</p>
-      <div id="signedinChangeSlot"></div>
-      <button type="button" class="secondary" id="logoutBtn">Sign out</button>
-      <div id="signedinMsg" class="msg"></div>
+      <div class="grid" id="hubGrid">
+        <a class="tile" href="/pre-apply-page">
+          <div class="t-title">🕉️ Pre-Apply Queue</div>
+          <div class="t-sub">Review prepared applications — astro match, CV, email draft — then approve for the next shubh muhurta send.</div>
+        </a>
+        <a class="tile" href="/applications-page">
+          <div class="t-title">Applications &amp; Tracking</div>
+          <div class="t-sub">Submitted, failed, needs-info and sandboxed applications across all portals.</div>
+        </a>
+        <a class="tile" href="/interview-practice-page">
+          <div class="t-title">🎯 Interview Practice</div>
+          <div class="t-sub">Role-specific Q&amp;A practice with tailored answers.</div>
+        </a>
+        <a class="tile" href="/market-data">
+          <div class="t-title">📊 Market Data</div>
+          <div class="t-sub">Live Nifty/F&O quotes, option chain and market inspection.</div>
+        </a>
+        <a class="tile" href="/fnf-trading">
+          <div class="t-title">📈 F&amp;O Paper Desk</div>
+          <div class="t-sub">Futures &amp; options paper trading with decay engine and astro gating.</div>
+        </a>
+        <a class="tile" href="/option-trading">
+          <div class="t-title">Option Trading</div>
+          <div class="t-sub">Strategy library and option trade planning.</div>
+        </a>
+        <a class="tile" href="/visa-guide">
+          <div class="t-title">🛂 Visa Guide</div>
+          <div class="t-sub">Sponsored-role visa guide with live application stats.</div>
+        </a>
+        <a class="tile" href="/side-income-dashboard/dashboard">
+          <div class="t-title">💰 Side Income</div>
+          <div class="t-sub">Side-income dashboard and earnings summary.</div>
+        </a>
+      </div>
+
+      <details class="account">
+        <summary>Account — change operator password</summary>
+        <div class="card">
+          <div id="accountChangeSlot"></div>
+          <div id="accountMsg" class="msg"></div>
+        </div>
+      </details>
     </section>
 
     <footer>
-      local access: no login required<br />
-      public access: operator password &middot; recovery email bapay.9@gmail.com
+      operator password required for local &amp; public access &middot; recovery email bapay.9@gmail.com
     </footer>
   </div>
   <script src="/dashboard.js" defer></script>

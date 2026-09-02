@@ -21,9 +21,9 @@ const SESSION_COOKIE_NAME = (): string => process.env.SESSION_NAME || 'MYJOB_SES
 const RECOVERY_EMAIL = (): string => process.env.RECOVERY_EMAIL || 'bapay.9@gmail.com';
 
 /**
- * Operator password auth — the ONLY authentication for public IP / domain
- * access. Local (localhost) access never needs these endpoints; the page
- * still calls /auth/me to decide which UI to show.
+ * Operator password auth — the ONLY authentication, for local AND public
+ * (IP / domain) access. Login is required everywhere since 2026-09-02; the
+ * page calls /auth/me to decide login vs dashboard.
  *
  * All routes are @BypassAuth: they are the wall itself, so they must be
  * reachable before any session or password exists. 3rd-party callbacks and
