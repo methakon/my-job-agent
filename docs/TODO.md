@@ -3,10 +3,14 @@
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
 > Last updated: 2026-09-01
 
-## Recently completed (2026-09-01 session — Google OAuth wiring + tunnel restore)
-- [x] **Google OAuth login wired** — `.env` has real `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL=https://berhampore.in/auth/google/callback`, `GOOGLE_ALLOWED_EMAILS` (bapay.9@gmail.com + swarna.s.jobs@gmail.com). `src/auth/` = Passport Google strategy + auth.guard localhost bypass. Node 26 passport import fixed (`import passport from 'passport'`). App healthy on 3010 after `pm2 restart --update-env`; verified ConfigModule loads .env at runtime.
-- [x] **Cloudflare tunnel restored** — cloudflared had died; berhampore.in was returning 530 (origin unreachable; local app was healthy on 3010). Restarted `cloudflared tunnel run ce9458f2-...` → both berhampore.in and dev.berhampore.in answer again (404 on / = normal). Not reboot-surviving yet.
-- 🚫 **Blocked on user — Google Cloud Console**: register the single Authorized redirect URI `https://berhampore.in/auth/google/callback`, set consent screen to External with test users `bapay.9@gmail.com` + `swarna.s.jobs@gmail.com`. Then E2E test at `https://berhampore.in/auth/google`.
+## Recently completed (2026-09-02 session — operator-password auth model; Google login REMOVED)
+- [x] **Google login removed** — no passport, no Google strategy, no consent-screen work needed. `.env` Google vars deleted.
+- [x] **Auth per user spec**: localhost access = NO authentication; public IP/domain access = single operator password (`SESSION_PASSWORD` in `.env`). `POST /auth/change-password` (old + new required) persists to `.env`; `POST /auth/forgot-password` emails the password to `RECOVERY_EMAIL` (bapay.9@gmail.com) via SMTP env creds.
+- [x] **Root cause fixed**: the middleware catch-all in main.ts swallowed the ENTIRE Nest router — every path (APIs included) returned dashboard.html. Catch-all removed; `AppFallbackController` (`@All('*')`, registered last) serves the SPA shell. All controllers reachable again.
+- [x] **Real server-side wall**: `ConditionalAuthGuard` now a global `APP_GUARD` (previously dead code → API fully open publicly). Localhost bypass is HOST-based (`localhost`/`127.0.0.1`), never IP-based (Cloudflare tunnel arrives as loopback). `@BypassAuth` + `@AllowIps` for 3rd-party callbacks / webhooks / server-to-server callers. Strict rate limiters on auth routes; `trust proxy` set.
+- [x] Auth endpoints: `POST /auth/login`, `GET /auth/me`, `POST /auth/logout`, `POST /auth/forgot-password`, `POST /auth/change-password`. Server is PM2-supervised (`pm2 list`).
+- [x] Security-report follow-ups: `/auth/me` and the old `/auth/allowed-emails` protection now handled by the global guard (`allowed-emails` route deleted with the Google stack). `SESSION_SECRET` is still the placeholder — replace with a random secret in `.env`.
+- [x] **Cloudflare tunnel restored (2026-09-01)** — cloudflared had died; restarted `cloudflared tunnel run ce9458f2-...`. Root `/` now serves the dashboard (previously 404). Not reboot-surviving yet.
 
 ## Recently completed (2026-09-01 session — CeeVi document packet)
 - [x] **Printable CeeVi document packet prepared** — combined locally available identity, education, birth-proof, joining, and employment documents into `/home/swarna-sekhar-dhar/Downloads/Swarna_Sekhar_Dhar_CeeVi_Actual_Document_Packet.pdf` (41 pages). Missing requirements are identified in the packet; no submission was made.

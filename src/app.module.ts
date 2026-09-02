@@ -69,6 +69,9 @@ import { LearningWeightsService } from './applications/learning-weights.service'
 import { DailyDigestService } from './applications/daily-digest.service';
 import { LinkedInProfileService } from './applications/linkedin-profile.service';
 import { SideIncomeModule } from './side-income/side-income.module';
+import { AuthModule } from './auth/auth.module';
+import { AuthController } from './auth/auth.controller';
+import { AppFallbackController } from './app-fallback.controller';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
 import { ProfileService } from './profile/profile.service';
@@ -93,8 +96,11 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		}),
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote]),
 		SideIncomeModule,
+		AuthModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController,
+		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
+		AppFallbackController], // MUST stay last: serves dashboard.html for unmatched GETs
 	providers: [
 		ProfileService,
 		ProfileRepository,

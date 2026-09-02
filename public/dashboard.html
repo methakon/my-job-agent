@@ -1,162 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>my-job-agent — login</title>
-<style>
-  :root{
-    --bg:#0b0d12; --panel:#13161e; --border:#272d3a; --text:#e6e9ef;
-    --muted:#8b93a6; --accent:#5b8cff; --accent2:#4aa8ff; --danger:#ff5c6c;
-    --ok:#4ade80; --shadow:0 6px 24px rgba(0,0,0,.35);
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
-  body{
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif;
-    background:var(--bg); color:var(--text); min-height:100vh;
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    padding:24px;
-  }
-  .card{
-    background:var(--panel); border:1px solid var(--border); border-radius:14px;
-    box-shadow:var(--shadow); width:100%; max-width:460px; padding:32px;
-  }
-  h1{font-size:22px; margin:0 0 6px; font-weight:600}
-  .sub{color:var(--muted); font-size:14px; margin:0 0 22px; line-height:1.5}
-  .google-btn{
-    display:flex; align-items:center; justify-content:center; gap:12px;
-    width:100%; padding:14px 18px; margin:8px 0 16px;
-    background:#fff; color:#1f2330; border:none; border-radius:10px;
-    font-size:15px; font-weight:600; cursor:pointer; text-decoration:none;
-    transition:transform .06s ease, box-shadow .15s ease, background .15s;
-    box-shadow:0 1px 3px rgba(0,0,0,.25);
-  }
-  .google-btn:hover{box-shadow:0 4px 14px rgba(89,140,255,.35); transform:translateY(-1px)}
-  .google-btn:active{transform:translateY(0)}
-  .google-btn .g-brand{width:22px; height:22px}
-  .accounts{
-    margin-top:18px; padding-top:18px; border-top:1px dashed var(--border);
-    font-size:13px; color:var(--muted); line-height:1.6;
-  }
-  .accounts strong{color:var(--text); font-weight:600}
-  .status{margin-top:18px; font-size:13px; color:var(--muted)}
-  .status .dot{display:inline-block; width:9px; height:9px; border-radius:50%;
-    background:#6b7280; margin-right:7px; vertical-align:middle}
-  .status .dot.ok{background:var(--ok)}
-  .status .dot.err{background:var(--danger)}
-  footer{margin-top:24px; font-size:12px; color:var(--muted); text-align:center; max-width:460px; line-height:1.5}
-  .error{color:var(--danger); font-size:13px; margin-top:10px}
-  .links{display:flex; gap:14px; margin-top:18px; font-size:13px}
-  .links a{color:var(--accent); text-decoration:none}
-  .links a:hover{text-decoration:underline}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>my-job-agent</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #2f81f7;
+      --ok: #3fb950;
+      --err: #f85149;
+      --warn: #d29922;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .shell { width: 100%; max-width: 460px; }
+    header.app { text-align: center; margin-bottom: 22px; }
+    header.app h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: 0.3px; }
+    header.app p { margin: 0; color: var(--muted); font-size: 13px; }
+    .pill {
+      display: inline-block; margin-top: 10px; padding: 3px 12px;
+      border-radius: 999px; font-size: 12px; border: 1px solid var(--border);
+      color: var(--muted); background: #0f141b;
+    }
+    .pill.ok { color: var(--ok); border-color: rgba(63,185,80,.4); }
+    .pill.warn { color: var(--warn); border-color: rgba(210,153,34,.4); }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 26px 26px 18px; margin-bottom: 14px;
+    }
+    .card h2 { margin: 0 0 14px; font-size: 17px; }
+    .card p.hint { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 16px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 5px; }
+    input[type="password"] {
+      width: 100%; padding: 10px 12px; font-size: 15px; color: var(--text);
+      background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+    }
+    input[type="password"]:focus { outline: none; border-color: var(--accent); }
+    button {
+      margin-top: 16px; width: 100%; padding: 10px 12px; font-size: 15px;
+      background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+      cursor: pointer;
+    }
+    button.secondary { background: #21262d; border: 1px solid var(--border); color: var(--text); }
+    button:disabled { opacity: 0.6; cursor: default; }
+    a.link {
+      display: block; text-align: center; margin-top: 14px; font-size: 13px;
+      color: var(--accent); cursor: pointer; text-decoration: none; background: none; border: 0;
+      width: 100%; padding: 4px;
+    }
+    .msg { display: none; margin-top: 14px; padding: 9px 12px; border-radius: 6px; font-size: 13px; line-height: 1.45; word-break: break-word; }
+    .msg.show { display: block; }
+    .msg.err { background: rgba(248,81,73,.1); border: 1px solid rgba(248,81,73,.35); color: #ffa198; }
+    .msg.ok { background: rgba(63,185,80,.1); border: 1px solid rgba(63,185,80,.35); color: #7ee787; }
+    footer {
+      text-align: center; color: var(--muted); font-size: 11.5px; line-height: 1.7;
+      margin-top: 6px;
+    }
+    .hidden { display: none !important; }
+    code { background: #0d1117; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  </style>
 </head>
 <body>
-  <div class="card" role="main">
-    <h1>my-job-agent</h1>
-    <p class="sub">Sign in with the Google account that is authorised for this dashboard.</p>
+  <div class="shell">
+    <header class="app">
+      <h1>my-job-agent</h1>
+      <p>job applications · interview prep · market data</p>
+      <span id="modePill" class="pill">checking…</span>
+    </header>
 
-    <a class="google-btn" href="/auth/google" id="googleLogin">
-      <svg class="g-brand" viewBox="0 0 24 24" aria-hidden="true">
-        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32c-.36.26-.78.43-1.27.5V13.78a1.06 1.06 0 1 1-2.12 0v-.65a5.93 5.93 0 0 1-1.27-.5 10.53 10.53 0 0 1-3.09-3.32 5.92 5.92 0 0 1-3.28-3.28c0-3.26 2.92-4.13 5.5-4.13h5.44c2.2 0 4.1 1.72 4.9 3.28 1.12-1.18 2.68-2.9 3.62-3.28z"/>
-        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.6-4.71a8.32 8.32 0 0 0-10.16 0l-3.6 4.71C6.54 22.02 9.03 23 12 23z"/>
-        <path fill="#FBBC05" d="M5.3 11.95a7.2 7.2 0 0 1 12.05-3.55l1.95 2.55a1 1 0 1 1-1.6 1.35l-1.95-2.55A7.2 7.2 0 0 1 5.3 11.95z"/>
-        <path fill="#EA4335" d="M12 4.95a7.2 7.2 0 0 1 6.75 2.55l1.95-2.55a1 1 0 1 1 1.6 1.35l-1.95 2.55A7.2 7.2 0 0 1 12 4.95z"/>
-      </svg>
-      Sign in with Google
-    </a>
+    <!-- Public remote access: password gate -->
+    <section id="view-login" class="card hidden">
+      <h2>Sign in</h2>
+      <p class="hint">This dashboard is reachable over the public internet. Enter the operator password to continue.</p>
+      <form id="loginForm" autocomplete="off">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" placeholder="Operator password" required />
+        <button type="submit" id="loginBtn">Sign in</button>
+      </form>
+      <button type="button" class="link" id="forgotBtn">Forgot password? Email it to the recovery address</button>
+      <div id="loginMsg" class="msg"></div>
+    </section>
 
-    <div class="accounts" id="accountsBlock">
-      <strong>Only these two accounts can log in:</strong>
-      <ul id="allowedEmails" style="margin:6px 0 0; padding-left:18px"></ul>
-    </div>
+    <!-- Local (localhost) access: no authentication -->
+    <section id="view-local" class="card hidden">
+      <h2>Local mode</h2>
+      <p class="hint">You are on the operator&rsquo;s own machine — no sign-in is required here. The remote-access password below can be changed anytime (old + new password).</p>
+      <div id="localChangeSlot"></div>
+      <div id="localMsg" class="msg"></div>
+    </section>
 
-    <div class="status" id="status">
-      <span class="dot" id="statusDot"></span>
-      <span id="statusText">Checking configuration…</span>
-    </div>
-    <div class="error" id="error" style="display:none"></div>
+    <!-- Signed in -->
+    <section id="view-signedin" class="card hidden">
+      <h2>Signed in</h2>
+      <p class="hint">Session cookie is active for remote access. Password changes apply immediately to remote sign-in.</p>
+      <div id="signedinChangeSlot"></div>
+      <button type="button" class="secondary" id="logoutBtn">Sign out</button>
+      <div id="signedinMsg" class="msg"></div>
+    </section>
 
-    <div class="links">
-      <a href="/auth/logout" id="logoutLink" style="display:none">Sign out</a>
-    </div>
+    <footer>
+      local access: no login required<br />
+      public access: operator password &middot; recovery email bapay.9@gmail.com
+    </footer>
   </div>
-
-  <footer>
-    my-job-agent · local dev bypasses login; public access requires Google sign-in.
-  </footer>
-
-<script>
-(function(){
-  const LOGOUT_URL = '/auth/logout';
-  const ALLOWED_EMAILS_URL = '/auth/allowed-emails';
-
-  const $ = (id)=> document.getElementById(id);
-  const allowedList = $('allowedEmails');
-  const statusBlock = $('status');
-  const statusDot = $('statusDot');
-  const statusText = $('statusText');
-  const errorBox = $('error');
-  const logoutLink = $('logoutLink');
-
-  function setStatus(kind, text){
-    statusDot.className = 'dot' + (kind ? ' ' + kind : '');
-    statusText.textContent = text;
-  }
-  function showError(msg){
-    errorBox.textContent = msg;
-    errorBox.style.display = 'block';
-  }
-  function clearError(){
-    errorBox.textContent = '';
-    errorBox.style.display = 'none';
-  }
-
-  function loadAllowedEmails(){
-    return fetch(ALLOWED_EMAILS_URL, { credentials:'include' })
-      .then(r=> r.json())
-      .then(emails=>{
-        allowedList.innerHTML = '';
-        emails.forEach(e=>{
-          const li = document.createElement('li');
-          li.textContent = e;
-          allowedList.appendChild(li);
-        });
-      })
-      .catch(()=>{
-        allowedList.innerHTML =
-          '<li style="color:var(--muted)">(allowed-emails endpoint unreachable)</li>';
-      });
-  }
-
-  function checkAuth(){
-    fetch('/auth/me', { credentials:'include' })
-      .then(r=>{
-        if(r.status === 401 || r.status === 403){
-          logoutLink.style.display = 'none';
-          setStatus('', 'Sign in below to access the dashboard.');
-        } else {
-          return r.json().then(data=>{
-            if(data && data.user){
-              logoutLink.style.display = 'inline-block';
-              const name = data.user.name || data.user.email || 'user';
-              setStatus('ok', 'Signed in as ' + name);
-            } else {
-              logoutLink.style.display = 'none';
-              setStatus('', 'Sign in below to access the dashboard.');
-            }
-          });
-        }
-      })
-      .catch(()=>{
-        logoutLink.style.display = 'none';
-        setStatus('', 'Unable to reach the server. Make sure my-job-agent is running.');
-      });
-  }
-
-  loadAllowedEmails().then(checkAuth);
-})();
-</script>
+  <script src="/dashboard.js" defer></script>
 </body>
 </html>
