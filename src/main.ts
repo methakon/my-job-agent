@@ -6,6 +6,7 @@ import session from 'express-session';
 import * as path from 'path';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { UnauthorizedHtmlRedirectFilter } from './auth/unauthorized-html-redirect.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: true });
@@ -84,6 +85,10 @@ async function bootstrap() {
   // real route (the bug that made all paths return the login page).
   // Unmatched GETs are served dashboard.html by AppFallbackController, which
   // is registered LAST inside the router (see app.module.ts).
+
+  // Browser UX for the wall: logged-out HTML GETs → redirect to / (login
+  // shell); API/JSON clients keep the plain 401.
+  app.useGlobalFilters(new UnauthorizedHtmlRedirectFilter());
 
   await app.listen(3010);
   console.log(`my-job-agent listening on port 3010`);

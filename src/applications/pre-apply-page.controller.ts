@@ -64,6 +64,9 @@ h1{font-size:22px}.sub{color:var(--dim);margin-bottom:18px}a{color:var(--accent)
 h3{color:var(--accent);margin:14px 0 4px;font-size:13px;text-transform:uppercase;letter-spacing:.05em}
 .kv{display:flex;gap:8px}.kv b{min-width:130px;display:inline-block;color:var(--dim);font-weight:400}
 pre.mail{white-space:pre-wrap;font:13px/1.55 system-ui;color:#c9ced6;background:var(--bg);padding:10px;border-radius:8px;max-height:260px;overflow:auto}
+details.jd{background:var(--bg);border:1px solid var(--line);border-radius:8px;margin:8px 0}
+details.jd summary{cursor:pointer;padding:8px 10px;color:var(--accent);font-size:13px;user-select:none}
+details.jd pre.jd-body{white-space:pre-wrap;font:12.5px/1.55 system-ui;color:#c9ced6;padding:0 10px 10px;max-height:180px;overflow:auto;margin:0}
 .meta{color:var(--dim);font-size:13px}
 .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 button{background:var(--line);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer}
@@ -152,7 +155,7 @@ function card(i: {
 	astroJson: string | null; muhurtaWindowJson: string | null; channelJson: string | null;
 	coverLetter: string | null; emailSubject: string | null; cvPath: string | null; userCvPath: string | null;
 	leadId: string; createdAt: Date; approvedAt: Date | null;
-	lead?: { title?: string; company?: string; url?: string | null };
+	lead?: { title?: string; company?: string; url?: string | null; description?: string | null };
 }): string {
 	const astro = parseJson(i.astroJson) as { reasons?: string[]; muhurta?: { label?: string } } | null;
 	const win = parseJson(i.muhurtaWindowJson) as { startsAt?: string; endsAt?: string; score?: number; tithi?: number; nakshatra?: string; weekday?: string } | null;
@@ -169,6 +172,7 @@ function card(i: {
       <div class="meta">${esc(i.lead?.company ?? '')} · ${esc(i.source)} · prepared ${fmt(i.createdAt)}</div></div>
     <span class="badge ${esc(i.status)}">${esc(i.status.toUpperCase())}</span>
   </div>
+  ${i.lead?.description ? `<details class="jd"><summary>📋 Job description</summary><pre class="jd-body">${esc(i.lead.description)}</pre></details>` : ''}
   <div class="kv"><b>Match</b><span>${matchPct}%</span></div>
   <div class="kv"><b>Astro match</b><span class="astro">${astroPct}/100</span></div>
   <div class="astro-bar"><i style="width:${astroPct}%"></i></div>
