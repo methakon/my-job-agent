@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   Logger,
   Post,
   Req,
@@ -36,6 +37,7 @@ export class AuthController {
 
   /** Password login. Success mints req.session.user (sent back as a cookie). */
   @Post('login')
+  @HttpCode(200)
   @BypassAuth()
   login(@Body() body: { password?: string }, @Req() req: Request, @Res() res: Response) {
     const password = body && typeof body.password === 'string' ? body.password : '';
@@ -54,6 +56,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @HttpCode(200)
   @BypassAuth()
   logout(@Req() req: Request, @Res() res: Response) {
     const session = req.session as (Request['session'] & { destroy?: (cb: () => void) => void }) | undefined;
@@ -74,6 +77,7 @@ export class AuthController {
    * Only enabled when SMTP creds exist in .env.
    */
   @Post('forgot-password')
+  @HttpCode(200)
   @BypassAuth()
   async forgotPassword(@Res() res: Response) {
     const password = process.env.SESSION_PASSWORD;
@@ -118,6 +122,7 @@ export class AuthController {
    * it to the running process immediately.
    */
   @Post('change-password')
+  @HttpCode(200)
   @BypassAuth()
   changePassword(
     @Body() body: { oldPassword?: string; newPassword?: string },

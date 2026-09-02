@@ -91,7 +91,7 @@
       btn.disabled = true;
       api('/auth/login', { method: 'POST', body: { password: $('password').value } })
         .then(function (d) {
-          if (d.status === 200 && d.user) {
+          if (d.status >= 200 && d.status < 300 && d.user) {
             location.reload(); // -> /auth/me now returns a user -> dashboard view
           } else {
             flash($('loginMsg'), 'err', d.error === 'invalid_password'
@@ -108,7 +108,7 @@
       clearFlash($('loginMsg'));
       api('/auth/forgot-password', { method: 'POST' })
         .then(function (d) {
-          if (d.status === 200) {
+          if (d.status >= 200 && d.status < 300) {
             flash($('loginMsg'), 'ok', 'Password sent to ' + d.sentTo + '. Check that inbox.');
           } else if (d.error === 'smtp_not_configured') {
             flash($('loginMsg'), 'err', 'Recovery email is not enabled yet (no SMTP credentials on the server).');
