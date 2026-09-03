@@ -40,7 +40,15 @@ async function main(): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const istTodayStart = Math.floor((now + IST_OFFSET_S) / 86400) * 86400 - IST_OFFSET_S;
 
-  const url = 'https://api-t1.fyers.in/data/v3/history';
+  const url = 'https://api-t1.fyers.in/data/history'; // GET — v3 data API (no /v3/ prefix on data paths)
+  const auth = `${appId}:${token}`;
+  const getHistory = (symbol: string, resolution: string, fromS: number, toS: number) => {
+    const q = new URLSearchParams({
+      symbol, resolution, date_format: '1',
+      range_from: String(fromS), range_to: String(toS), cont_flag: '1',
+    });
+    return fetch(`${url}?${q}`, { method: 'GET', headers: { Authorization: auth } }).then((r) => r.json());
+  };
   let fetched = 0;
   const rows = [];
 
@@ -48,11 +56,7 @@ async function main(): Promise<void> {
     if (res === 'D') {
       const from = istTodayStart - days * 86400;
       const to = now;
-      const j: any = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `${appId}:${token}` },
-        body: JSON.stringify({ symbol, resolution: res, date_format: '1', range_from: String(from), range_to: String(to), cont_flag: '1' }),
-      }).then((r) => r.json());
+      const j: any = await getHistory(symbol, res, from, to);
       if (!j.candles) throw new Error(`${symbol} D: ${j.code ?? ''} ${j.message ?? JSON.stringify(j)}`);
       for (const c of j.candles) {
         rows.push(mkRow(symbol, c));
@@ -68,11 +72,7 @@ async function main(): Promise<void> {
       if (dow === 0 || dow === 6) continue;
       const from = dayStart + (9 * 3600 + 15 * 60);
       const to = dayStart + (15 * 3600 + 30 * 60);
-      const j: any = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `${appId}:${token}` },
-        body: JSON.stringify({ symbol, resolution: res, date_format: '1', range_from: String(from), range_to: String(to), cont_flag: '1' }),
-      }).then((r) => r.json());
+      const j: any = await getHistory(symbol, res, from, to);
       if (!j.candles) {
         console.error(`[fyers-history] ${symbol} ${d}d: ${j.code ?? ''} ${j.message ?? JSON.stringify(j)}`);
         break;
