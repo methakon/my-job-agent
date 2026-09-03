@@ -3,6 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { Application } from './application.entity';
 
+/**
+ * Statuses that mean the application actually went out (email sent / ATS
+ * submitted). 'submitted' is what the engine writes on success; 'sent' and
+ * 'applied' are legacy values from older flows + the manual retry endpoint.
+ * Rows with a stamped sent_at count regardless of status.
+ */
+const SENT_STATUSES = ['submitted', 'sent', 'applied'];
+
 @Injectable()
 export class ApplicationRepository {
 	constructor(
@@ -59,31 +67,32 @@ export class ApplicationRepository {
 		return [rows.map(a => this.serialize(a)), total];
 	}
 
-		async countByMonth(year: number, month: number, statusFilter: string = 'applied'): Promise<Map<string, number>> {
+	/**
+	 * Count applications actually sent, per calendar day (month range).
+	 * "Sent" = terminal success status (submitted/sent/applied) or a stamped
+	 * sent_at. The bucket date is sent_at when known, else created_at (legacy
+	 * rows predate sent_at stamping). Rows that never went out (queued,
+	 * needs_info, submitting, failed, sandboxed, and no sent_at) are excluded.
+	 */
+	async countByMonth(year: number, month: number): Promise<Map<string, number>> {
 		const firstDay = new Date(year, month - 1, 1);
 		const lastDay  = new Date(year, month, 0, 23, 59, 59, 999);
 		const qb = this.repo.createQueryBuilder('app')
-			.select('app.appliedAt', 'day')
+			.select("DATE_FORMAT(COALESCE(app.sentAt, app.createdAt), '%Y-%m-%d')", 'day')
 			.addSelect('COUNT(app.id)', 'cnt')
-			.where('app.appliedAt >= :start', { start: firstDay })
-			.andWhere('app.appliedAt <= :end', { end: lastDay });
-		if (statusFilter && statusFilter !== 'all') {
-			qb.andWhere('app.status = :status', { status: statusFilter });
-		}
-		qb.groupBy('app.appliedAt').orderBy('app.appliedAt', 'ASC');
+			.where('(app.status IN (:...sentStatuses) OR app.sentAt IS NOT NULL)', { sentStatuses: SENT_STATUSES })
+			.andWhere('COALESCE(app.sentAt, app.createdAt) >= :start', { start: firstDay })
+			.andWhere('COALESCE(app.sentAt, app.createdAt) <= :end', { end: lastDay })
+			.groupBy('day')
+			.orderBy('day', 'ASC');
 		const rows = await qb.getRawMany();
-		return new Map(rows.map(r => [r.day.toISOString().slice(0, 10), Number(r.cnt)]));
+		return new Map(rows.map(r => [String(r.day), Number(r.cnt)]));
 	}
 
-	async findDay(day: string, page = 1, limit = 20, statusFilter?: string): Promise<[Application[], number]> {
-		const start = new Date(day + 'T00:00:00.000Z');
-		const end   = new Date(day + 'T23:59:59.999Z');
+	async findDay(day: string, page = 1, limit = 20): Promise<[Application[], number]> {
 		const qb = this.repo.createQueryBuilder('app')
-			.where('app.appliedAt >= :start', { start })
-			.andWhere('app.appliedAt <= :end', { end });
-		if (statusFilter && statusFilter !== 'all') {
-			qb.andWhere('app.status = :status', { status: statusFilter });
-		}
+			.where('(app.status IN (:...sentStatuses) OR app.sentAt IS NOT NULL)', { sentStatuses: SENT_STATUSES })
+			.andWhere("DATE_FORMAT(COALESCE(app.sentAt, app.createdAt), '%Y-%m-%d') = :day", { day });
 		const [rows, total] = await qb.getManyAndCount();
 		const ordered = rows.sort((a, b) => Number(b.createdAt) - Number(a.createdAt));
 		const skip = (page - 1) * limit;
@@ -91,30 +100,26 @@ export class ApplicationRepository {
 		return [paged.map(a => this.serialize(a)), total];
 	}
 
-	async distinctDays(statusFilter?: string): Promise<string[]> {
-		const qb = this.repo.createQueryBuilder('app')
-			.select('DISTINCT DATE(app.appliedAt)', 'day')
-			.orderBy('day', 'DESC');
-		if (statusFilter && statusFilter !== 'all') {
-			qb.andWhere('app.status = :status', { status: statusFilter });
-		}
-		const rows = await qb.getRawMany();
-		return rows.map(r => r.day);
+	async distinctDays(): Promise<string[]> {
+		const rows = await this.repo.createQueryBuilder('app')
+			.select("DISTINCT DATE_FORMAT(COALESCE(app.sentAt, app.createdAt), '%Y-%m-%d')", 'day')
+			.where('(app.status IN (:...sentStatuses) OR app.sentAt IS NOT NULL)', { sentStatuses: SENT_STATUSES })
+			.orderBy('day', 'DESC')
+			.getRawMany();
+		return rows.map(r => String(r.day));
 	}
 
 	async counts(): Promise<{ sent: number; failed: number; pending: number }> {
 		const qb = this.repo.createQueryBuilder('app')
-			.select('app.status', 'status')
+			.select("CASE WHEN app.status IN ('submitted','sent','applied') OR app.sentAt IS NOT NULL THEN 'sent' WHEN app.status = 'failed' THEN 'failed' ELSE 'pending' END", 'bucket')
 			.addSelect('COUNT(app.id)', 'cnt')
-			.groupBy('app.status');
+			.groupBy('bucket');
 		const rows = await qb.getRawMany();
 		const out: { sent: number; failed: number; pending: number } = { sent: 0, failed: 0, pending: 0 };
 		for (const r of rows) {
-			switch (r.status) {
-				case 'sent':   out.sent    = Number(r.cnt); break;
-				case 'failed': out.failed  = Number(r.cnt); break;
-				default:       out.pending = Number(r.cnt);
-			}
+			if (r.bucket === 'sent') out.sent = Number(r.cnt);
+			else if (r.bucket === 'failed') out.failed = Number(r.cnt);
+			else out.pending = Number(r.cnt);
 		}
 		return out;
 	}

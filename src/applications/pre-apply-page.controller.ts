@@ -41,7 +41,8 @@ export class PreApplyPageController {
 
 	@Get()
 	async page(@Res() res: Response) {
-		const items = await this.preApply.listAll();
+		const items = await this.preApply.listReview();
+		const sentCount = await this.items.countSent();
 		const leadIds = [...new Set(items.map((i) => i.leadId))];
 		const leads = leadIds.length
 			? await this.leadRepo.findRecent(500).then((all) => all.filter((l) => leadIds.includes(l.id)))
@@ -80,14 +81,18 @@ button:disabled{opacity:.5;cursor:not-allowed}
 input[type=file]{font-size:12px;color:var(--dim)}
 </style></head><body>
 <h1>🕉️ Pre-Apply Review Queue</h1>
-<div class="sub">Applications are <b>prepared but NOT sent</b> until you approve. Approved items send at the next <span class="astro">shubh muhurta</span> window. · <a href="/">← dashboard</a></div>
+<div class="sub">Applications are <b>prepared but NOT sent</b> until you approve. Approved items send at the next <span class="astro">shubh muhurta</span> window.${sentCount > 0 ? ` · <b style="color:var(--ok)">${sentCount} sent</b> → moved to <a href="/applications-page">Applications &amp; Tracking</a>` : ''} · <a href="/">← dashboard</a></div>
 <div id="list">${items.map((i) => card({ ...i, lead: byId.get(i.leadId) })).join('') || '<p class="meta">no prepared applications yet</p>'}</div>
 <script>
 async function act(id, action, btn) {
   btn.disabled = true;
-  const r = await fetch('/pre-apply-page/' + id + '/' + action, { method: 'POST' }).then(r => r.json());
-  if (r.ok) location.reload();
-  else { btn.disabled = false; alert(r.error || 'failed'); }
+  try {
+    const res = await fetch('/pre-apply-page/' + id + '/' + action, { method: 'POST' });
+    const r = await res.json().catch(() => null);
+    if (r && r.ok) { location.reload(); return; }
+    alert((r && (r.error || r.message)) || ('HTTP ' + res.status));
+  } catch (e) { alert('network error — is the agent running?'); }
+  btn.disabled = false;
 }
 async function uploadCv(id, input, btn) {
   if (!input.files.length) return;

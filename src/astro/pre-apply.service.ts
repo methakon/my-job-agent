@@ -99,6 +99,7 @@ export class PreApplyService {
 	async hold(id: string): Promise<PreApplyItem | { error: string }> {
 		const item = await this.items.findOneById(id);
 		if (!item) return { error: 'not found' };
+		if (item.status === 'sent') return { error: 'already sent — it lives in Applications & Tracking now' };
 		item.status = 'hold';
 		await this.items.save(item);
 		return item;
@@ -134,6 +135,12 @@ export class PreApplyService {
 
 	listAll(): Promise<PreApplyItem[]> {
 		return this.items.findAll();
+	}
+
+	/** Review-queue items: everything still actionable — ready, hold, approved,
+	 * failed. Sent items are excluded (they belong to Application Tracking). */
+	listReview(): Promise<PreApplyItem[]> {
+		return this.items.findReviewQueue();
 	}
 
 	/** Items approved by the user, waiting on a shubh muhurta window. */

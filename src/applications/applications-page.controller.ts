@@ -36,7 +36,7 @@ export class ApplicationsPageController {
 		const validYear  = isNaN(y) ? cy : y;
 
 		const [counts, totals] = await Promise.all([
-			this.appRepo.countByMonth(validYear, validMonth, 'applied'),
+			this.appRepo.countByMonth(validYear, validMonth),
 			this.appRepo.counts(),
 		]);
 
@@ -68,7 +68,7 @@ export class ApplicationsPageController {
 		const y  = year  ? parseInt(year, 10)  : cy;
 		const validMonth = isNaN(m) ? cm : Math.max(1, Math.min(12, m));
 		const validYear  = isNaN(y) ? cy : y;
-		const [counts] = await this.appRepo.countByMonth(validYear, validMonth, 'applied');
+		const [counts] = await this.appRepo.countByMonth(validYear, validMonth);
 		const dayCounts: Record<string, number> = {};
 		for (const [iso, n] of Array.from(counts.entries())) { dayCounts[iso] = Number(n); }
 		const first = new Date(validYear, validMonth - 1, 1);
@@ -91,7 +91,7 @@ export class ApplicationsPageController {
 	) {
 		if (!day) return { error: 'day required' };
 		const p = parseInt(page || '1', 10);
-		const [applications, total] = await this.appRepo.findDay(day, p, 20, 'applied');
+		const [applications, total] = await this.appRepo.findDay(day, p, 20);
 		const d = new Date(day + 'T00:00:00.000Z');
 		const label = d.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 		return { day, page: p, total, label, applications };

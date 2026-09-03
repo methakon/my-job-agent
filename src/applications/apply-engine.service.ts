@@ -234,6 +234,10 @@ export class ApplyEngineService implements OnModuleInit {
 			application.questionsJson = JSON.stringify(result.questions ?? []);
 			application.missingInfoJson = result.missingInfo ? JSON.stringify(result.missingInfo) : null;
 			application.errorDetail = result.errorDetail ?? null;
+			// Stamp the moment it actually went out — Application Tracking's
+			// calendar buckets by sent_at (was never written before, so sent
+			// applications never appeared on the calendar).
+			if (result.status === 'submitted') application.sentAt = new Date();
 			await this.appRepo.save(application);
 			if (result.status === 'submitted') {
 				await this.leadRepo.setStatus(lead.id, 'applied');
@@ -547,6 +551,7 @@ export class ApplyEngineService implements OnModuleInit {
 			application.missingInfoJson = result.missingInfo ? JSON.stringify(result.missingInfo) : null;
 			application.errorDetail = result.errorDetail ?? null;
 			application.cvPath = cvPath;
+			if (result.status === 'submitted') application.sentAt = new Date();
 			await this.appRepo.save(application);
 			if (result.status === 'submitted') {
 				await this.leadRepo.setStatus(lead.id, 'applied');

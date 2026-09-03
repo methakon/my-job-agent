@@ -1,7 +1,18 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-03 (afternoon)
+> Last updated: 2026-09-03 (evening)
+
+## Status-routing fix cluster (2026-09-03 evening) — sent items leave the review queue & land in Application Tracking
+- [x] **User report**: ZEBRA (status `sent`) still listed in the Pre-Apply Review Queue; expected rule "sent ⇒ appears in Application Tracking depending on its status"; **Application Tracking returned `500 {"message":"Internal server error"}`**; approve/hold buttons "not working at all".
+- [x] **Root causes (four, all fixed)**:
+  1. **Tracking 500 — dead column**: `application.repository.ts` calendar queries selected `app.appliedAt`, a property that no longer exists on the entity (renamed to `sentAt` → `sent_at` long ago; TypeORM synchronize dropped the old column). Every calendar/count query threw `Unknown column 'app.appliedAt'` → whole page 500. Page was broken since the rename.
+  2. **Nothing ever stamped `sent_at`**: engine success paths saved status `submitted` but never set `sentAt` → even with (1) fixed, sent apps would never appear on the calendar (sent_at NULL on every row). Both send paths (`applyToLead`, `submitPrepared`) now stamp `application.sentAt = new Date()` on `submitted`.
+  3. **Queue never hid sent items**: `listAll()` returned everything incl. 11 `sent` → ZEBRA lingered. Review page now uses `findReviewQueue()` (`status != sent`) + header shows "N sent → moved to Applications & Tracking"; `hold()` refuses sent items.
+  4. **Buttons looked dead**: `act()` had no error path — a failed/expired-session POST left the button disabled forever with no alert; approve/hold also only ever rendered sensibly once sent items leave. Now: try/catch + clear alert + button re-enable.
+- [x] **Sent-set semantics**: "sent" = status `submitted|sent|applied` OR `sent_at` set; bucket date = `COALESCE(sent_at, created_at)` (UTC-safe `DATE_FORMAT`, no tz drift). `counts()` buckets: sent/failed/pending via CASE. Calendar & day-list now show REAL sends (36 legacy `queued` rows correctly stay out — they never went out).
+- [x] **History backfill**: 10 app rows stuck `queued` for items sent Aug 27–28 → `submitted` with real `sent_at`; ZEBRA's `submitted` row stamped `sent_at = created_at` (2026-09-03 14:57). Applications now: 11 submitted (all dated) + 26 queued.
+- [x] **Verified live (2026-09-03)**: `/applications-page` 200 (was 500) with Sent/Pending/Failed buckets; day lists 2026-08-27→6, 2026-08-28→4, 2026-09-03→1 (ZEBRA); `/pre-apply-page` 0 ZEBRA, 0 sent badges, 31 actionable cards, "11 sent → moved to Applications & Tracking". Commit `4bf1b59`, pushed.
 
 ## USER-APPROVED APPLY — ZEBRA prepared, AWAITING user approval to send (2026-09-03)
 - [x] **"OK SN APPLY TO THIS JOB https://zebratechiessolution.com/public/career/job-opportunities/9#apply"** — explicit user approval on record (2026-09-02 evening, FR-17.6 satisfied).
