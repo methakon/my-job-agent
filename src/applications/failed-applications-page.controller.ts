@@ -26,7 +26,6 @@ export class FailedApplicationsPageController {
 		const unsentStatuses = ['failed', 'needs_info', 'open', 'pending_review', 'req_info', 'saved'];
 		const apps = await this.appRepo.repo.createQueryBuilder('app')
 			.andWhere('app.status IN (:...statuses)', { statuses: unsentStatuses })
-			.innerJoin('app.jobLead', 'lead')
 			.andWhere('app.createdAt >= CURRENT_DATE - 1')
 			.orderBy('app.createdAt', 'DESC')
 			.take(80)

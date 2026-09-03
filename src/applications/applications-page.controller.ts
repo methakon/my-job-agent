@@ -291,6 +291,12 @@ function template(
 	monthSel.addEventListener('change', () => renderCalendar());
 	yearSel.addEventListener('change',  () => renderCalendar());
 
+	function wireDayCells(){
+	  document.querySelectorAll('#calGrid .cal-day:not(.empty)').forEach(cell => {
+	    cell.addEventListener('click', () => loadDay(cell.dataset.day));
+	  });
+	}
+
 	function renderCalendar(){
 	  const m = parseInt(monthSel.value,10);
 	  const y = parseInt(yearSel.value,10);
@@ -299,15 +305,16 @@ function template(
 	    .then(data => {
 	      calTitle.textContent = data.title;
 	      calGrid.innerHTML = data.grid;
-	      document.querySelectorAll('.cal-day:not(.empty)').forEach(cell => {
-	        cell.addEventListener('click', () => loadDay(cell.dataset.day));
-	      });
+	      wireDayCells();
 	    });
 	}
 
-	async function loadDay(iso){
+	// The initial grid is server-rendered — wire its day cells too.
+	wireDayCells();
+
+	async function loadDay(iso, page = 1){
 	  dayView.style.display = '';
-	  const params = new URLSearchParams({day:iso, page:1});
+	  const params = new URLSearchParams({day:iso, page});
 	  dayView.innerHTML = '<p class="meta" style="text-align:center">loading...</p>';
 	  const data = await fetch('/applications-page/day?' + params).then(r => r.json());
 	  if(!data || !data.applications) return;
@@ -316,7 +323,7 @@ function template(
 	  let paginate = '';
 	  if(totalPages > 1){
 	    paginate = '<div class="paginate">' + Array.from({length:totalPages},(_,i)=>
-	      '<a href="#" data-page="'+(i+1)+'" class="'+(i+1===data.page?'active':'')+'">'+(i+1)+'</a>').join('') + '</div>';
+	      '<a href="#" data-day="'+iso+'" data-page="'+(i+1)+'" class="'+(i+1===data.page?'active':'')+'">'+(i+1)+'</a>').join('') + '</div>';
 	  }
 	  dayView.innerHTML = '<div class="day-view">' +
 	    '<div class="back-link" id="dayBack">Back to calendar</div>' +
@@ -332,8 +339,7 @@ function template(
 	  document.querySelectorAll('.paginate a').forEach(a => {
 	    a.addEventListener('click', e => {
 	      e.preventDefault();
-	      const page = parseInt(a.dataset.page,10);
-	      loadDay(iso + '?page=' + page);
+	      loadDay(a.dataset.day, parseInt(a.dataset.page,10));
 	    });
 	  });
 	}
@@ -366,9 +372,9 @@ function template(
 
 	  html += '<div class="btn-action-row">';
 	  if(a.status !== 'applied') {
-	    html += '<button class="btn-action" onclick="applyNow('+id+')">Apply / Resend</button>';
+	    html += '<button class="btn-action" onclick="applyNow(\''+id+'\')">Apply / Resend</button>';
 	  }
-	  html += '<button class="btn-action secondary" onclick="followUp('+id+')">Follow up via email</button>';
+	  html += '<button class="btn-action secondary" onclick="followUp(\''+id+'\')">Follow up via email</button>';
 	  html += '</div>';
 
 	  html += '</div>';

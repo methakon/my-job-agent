@@ -82,7 +82,13 @@ input[type=file]{font-size:12px;color:var(--dim)}
 </style></head><body>
 <h1>🕉️ Pre-Apply Review Queue</h1>
 <div class="sub">Applications are <b>prepared but NOT sent</b> until you approve. Approved items send at the next <span class="astro">shubh muhurta</span> window.${sentCount > 0 ? ` · <b style="color:var(--ok)">${sentCount} sent</b> → moved to <a href="/applications-page">Applications &amp; Tracking</a>` : ''} · <a href="/">← dashboard</a></div>
-<div id="list">${items.map((i) => card({ ...i, lead: byId.get(i.leadId) })).join('') || '<p class="meta">no prepared applications yet</p>'}</div>
+<div id="list">${(() => {
+	const actionable = items.filter((i) => i.status !== 'failed');
+	const failed = items.filter((i) => i.status === 'failed');
+	const cardFor = (i: typeof items[number]) => card({ ...i, lead: byId.get(i.leadId) });
+	return actionable.map(cardFor).join('')
+		+ (failed.length ? `<details class="failed-block"><summary>❌ Previously failed (${failed.length}) — need a resolved channel / portal login before retry</summary>${failed.map(cardFor).join('')}</details>` : '');
+})() || '<p class="meta">no prepared applications yet</p>'}</div>
 <script>
 async function act(id, action, btn) {
   btn.disabled = true;
@@ -159,6 +165,7 @@ function card(i: {
 	id: string; status: string; source: string; matchScore: number | string; astroScore: number | string;
 	astroJson: string | null; muhurtaWindowJson: string | null; channelJson: string | null;
 	coverLetter: string | null; emailSubject: string | null; cvPath: string | null; userCvPath: string | null;
+	errorDetail: string | null;
 	leadId: string; createdAt: Date; approvedAt: Date | null;
 	lead?: { title?: string; company?: string; url?: string | null; description?: string | null };
 }): string {
@@ -167,30 +174,38 @@ function card(i: {
 	const channel = parseJson(i.channelJson) as { kind?: string; target?: string; detectedBy?: string } | null;
 	const astroPct = Math.round(Number(i.astroScore ?? 0));
 	const matchPct = Math.round(Number(i.matchScore ?? 0));
+	const canSend = !!(channel?.kind && channel?.target);
 	const holdActions = i.status === 'hold' ? `
 	<button onclick="act('${i.id}','resume',this)">▶ Resume</button>` : `
 	<button class="hold" onclick="act('${i.id}','hold',this)">⏸ Hold / Pause</button>`;
+	const approveBtn = (i.status === 'ready' || (i.status === 'failed' && canSend))
+		? `<button class="ok" onclick="act('${i.id}','approve',this)">${i.status === 'failed' ? '🔄 Retry — approve & send' : '✅ Approve — send at shubh muhurta'}</button>`
+		: i.status === 'approved' ? '<button class="ok" disabled>⏳ approved — awaiting shubh muhurta</button>' : '';
+	const leadTitle = i.lead?.title ?? i.leadId;
 	return `
 <div class="card">
   <div class="row">
-    <div><b>${esc(i.lead?.title ?? i.leadId)}</b>
-      <div class="meta">${esc(i.lead?.company ?? '')} · ${esc(i.source)} · prepared ${fmt(i.createdAt)}</div></div>
+    <div><b>${i.lead?.url ? `<a target="_blank" rel="noopener" href="${esc(i.lead.url)}">${esc(leadTitle)}</a>` : esc(leadTitle)}</b>
+      <div class="meta">${esc(i.lead?.company ?? '')} · ${esc(i.source)} · prepared ${fmt(i.createdAt)}${i.lead?.url ? ` · <a target="_blank" rel="noopener" href="${esc(i.lead.url)}">🔗 job listing ↗</a>` : ''}</div></div>
     <span class="badge ${esc(i.status)}">${esc(i.status.toUpperCase())}</span>
   </div>
+  ${i.status === 'failed' && i.errorDetail ? `<div class="kv" style="color:var(--bad)"><b style="color:var(--bad)">Failed reason</b><span>${esc(i.errorDetail)}</span></div>` : ''}
   ${i.lead?.description ? `<details class="jd"><summary>📋 Job description</summary><pre class="jd-body">${esc(i.lead.description)}</pre></details>` : ''}
   <div class="kv"><b>Match</b><span>${matchPct}%</span></div>
   <div class="kv"><b>Astro match</b><span class="astro">${astroPct}/100</span></div>
   <div class="astro-bar"><i style="width:${astroPct}%"></i></div>
   ${astro?.reasons?.length ? `<div class="meta">${esc(astro.reasons.join(' · '))}</div>` : ''}
   ${win ? `<div class="kv"><b>Shubh window</b><span class="astro">${fmt(win.startsAt)} → ${fmt(win.endsAt)} IST · ${esc(win.weekday ?? '')} tithi ${win.tithi ?? ''} ${esc(win.nakshatra ?? '')} (score ${win.score ?? ''})</span></div>` : ''}
-  ${channel ? `<div class="kv"><b>Channel</b><span>${esc(channel.kind ?? '')}${channel.target ? ' → ' + esc(channel.target) : ''} <span class="meta">(${esc(channel.detectedBy ?? '')})</span></span></div>` : ''}
+  ${channel && channel.kind === 'email' ? `<div class="kv"><b>Send to email</b><span>${esc(channel.target ?? '—')} <span class="meta">(${esc(channel.detectedBy ?? '')})</span></span></div>`
+		: channel ? `<div class="kv"><b>Channel</b><span>${esc(channel.kind ?? '')}${channel.target ? ' → ' + esc(channel.target) : ''} <span class="meta">(${esc(channel.detectedBy ?? '')})</span></span></div>`
+		: i.status === 'failed' ? `<div class="kv"><b>Channel</b><span class="meta">no channel resolved — cannot send until a channel exists</span></div>` : ''}
   <h3>📧 Email draft</h3>
   <div class="kv"><b>Subject</b><span>${esc(i.emailSubject ?? i.coverLetter?.split('\n')[0] ?? '')}</span></div>
   <pre class="mail">${esc(i.coverLetter ?? '')}</pre>
   <h3>📄 CV</h3>
   <div class="meta">${i.userCvPath ? `user-uploaded CV: ${esc(i.userCvPath.split(/[\\/]/).pop())} (overrides tailored)` : `tailored ATS CV: ${esc(i.cvPath?.split(/[\\/]/).pop() ?? 'none')}`}</div>
   <div class="actions">
-    ${i.status === 'ready' ? `<button class="ok" onclick="act('${i.id}','approve',this)">✅ Approve — send at shubh muhurta</button>` : i.status === 'approved' ? '<button class="ok" disabled>⏳ approved — awaiting shubh muhurta</button>' : ''}
+    ${approveBtn}
     ${holdActions}
     <a href="/pre-apply-page/${i.id}/cv" target="_blank"><button class="cv">👁 Preview CV</button></a>
     <label class="cv"><button class="cv" onclick="document.getElementById('cv-${i.id}').click();return false">⬆ Upload corrected CV</button>

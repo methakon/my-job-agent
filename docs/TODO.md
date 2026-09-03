@@ -1,7 +1,16 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-03 (evening)
+> Last updated: 2026-09-03 (night)
+
+## UI acceptance pass round 2 (2026-09-03 night) — failed-page 500 + date-click + pre-apply failed cards
+- [x] **User report**: failed application page → `{"statusCode":500,"message":"Internal server error"}`; Applications & Tracking calendar date-clicks do nothing on first load; pre-apply page still dominated by FAILED cards with no job-listing link, no destination email shown, and hold/resume/approve buttons feeling dead.
+- [x] **500 root cause**: `failed-applications-page.controller.ts:29` did `.innerJoin('app.jobLead', 'lead')` but `application.entity.ts` has only a bare `leadId` FK — no `jobLead` relation → TypeORMError on every page load (err log confirmed at 22:41/22:42). Join was unused (page renders app fields only; detail endpoint fetches the lead separately) → removed. `/applications-page/failed` now 200.
+- [x] **Date-click dead on first load**: click listeners were only attached inside `renderCalendar()` (fires on month/year change); the server-rendered initial `#calGrid` never got listeners. Fixed: `wireDayCells()` helper + an initial call after the grid exists; `renderCalendar()` reuses it after innerHTML swaps.
+- [x] **Day pagination ISO mangling**: paginate anchors called `loadDay(iso + '?page=' + page)` → day value became `2026-09-03?page=2` (server saw a bogus day). Anchors now carry `data-day` + `data-page`; `loadDay(iso, page = 1)` builds `URLSearchParams({day:iso, page})` cleanly.
+- [x] **Detail-view buttons dead (unquoted UUIDs)**: `onclick="applyNow('+id+')"` emitted `applyNow(9a8eb1ac-…)` — bare UUID parsed as JS identifiers → syntax error on click. Now `applyNow(\''+id+'\')` (double-escaped through the template literal; verified in compiled output + served HTML). Same for `followUp`.
+- [x] **Pre-apply failed cards**: 22 dead `failed` naukri rows (channelJson NULL — no email/portal ever resolved, errorDetail set) dominated the queue with only a Hold button. Card now shows: 🔗 job-listing link (`lead.url`) when present, explicit "Send to email" line for email channels, the failure reason (`errorDetail`) in red, "no channel resolved — cannot send until a channel exists" when channel is NULL. Failed items with a resolvable channel get an honest `🔄 Retry — approve & send` button (service `approve()` permits failed→approved, clears errorDetail, sweep retries). All failed items moved into a collapsed `❌ Previously failed (N)` details section below the actionable queue so ready/hold/approved items surface first.
+- [x] **Verified live**: `/pre-apply-page` 200 (failed section, retry button, links, email lines present), `/applications-page` 200 (wireDayCells ×2 calls, data-day pagination, quoted applyNow/followUp in served JS), `/applications-page/failed` 200 (was 500). Build clean; pm2 restarted.
 
 ## Status-routing fix cluster (2026-09-03 evening) — sent items leave the review queue & land in Application Tracking
 - [x] **User report**: ZEBRA (status `sent`) still listed in the Pre-Apply Review Queue; expected rule "sent ⇒ appears in Application Tracking depending on its status"; **Application Tracking returned `500 {"message":"Internal server error"}`**; approve/hold buttons "not working at all".
