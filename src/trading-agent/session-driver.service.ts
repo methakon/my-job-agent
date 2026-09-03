@@ -166,6 +166,18 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		if (dow === 5 && !portfolio.fridayTradingEnabled) return false;
 		const price = Number(signal.price);
 		if (!Number.isFinite(price) || price <= 0) return false;
+		// Account model (user directive 2026-09-03): paper trading starts with a
+		// ₹5,000 deposit. Losses and service charges reduce the balance; the desk
+		// keeps trading in later sessions with whatever remains (no freeze on
+		// drawdown). Only when the remaining balance is truly gone do we hold new
+		// opens and log "awaiting redeposit" — the user tops up at their discretion.
+		const effectiveBalance = Number(portfolio.capital) + Number(portfolio.netPnl);
+		if (effectiveBalance <= 0) {
+			this.logger.warn(
+				`paper account depleted (capital ${Number(portfolio.capital).toFixed(2)} + netPnl ${Number(portfolio.netPnl).toFixed(2)}) — holding new opens until user redeposits`,
+			);
+			return false;
+		}
 		try {
 			const decisionParams = JSON.stringify({
 				openedBy: 'session-driver',

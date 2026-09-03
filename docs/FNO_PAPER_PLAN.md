@@ -10,8 +10,16 @@ Status: paper-only; no live orders. Yahoo is used only for experimental underlyi
 - **Position layering for recovery is allowed.** When a F&O position drops and there's a reasonable possibility the price will reverse back up, an additional (cover) trade at a lower price may be taken to reduce the net drawdown — as long as the combined cost and risk stay within the remaining balance/risk budget. The agent should prefer entering the cover trade near the lowest point of the drop rather than chasing mid-fall. This is a learnable behavior, not a fixed rule: the exact trigger (how deep the drop must be, how to recognize the bottom) is to be fine-tuned from session outcomes.
 - Maximum simultaneous open positions: governed by the remaining balance and per-trade risk budget, not capped at 1. Because the simulated balance is limited, the preferred default is **one F&O trade at a time**; additional layering is taken only when the recovery logic justifies it and the budget allows.
 - No averaging down for the sake of averaging down, no martingale sizing, and no revenge trades. Recovery layering is a measured, evidence-backed decision — not an automatic response to every dip.
-- Closed paper profits increase the next simulated balance; losses reduce it
+- Closed paper profits/losses and service charges accrue into portfolio net P&L; the available balance is deposit + net realized P&L
 - Costs must be included in maximum-loss and P&L calculations
+
+### Account model & redeposit rule (user directive 2026-09-03)
+
+- Paper trading starts with a **₹5,000 deposit** (portfolio `sandbox-live`: capital = 5000.00; ceiling = 100000.00 — a notional headroom cap so one qty-1 index position (~₹25k–₹82k notional) can always open while runaway stacking stays capped).
+- On losses, the desk **keeps trading in the next session with the remaining balance** (deposit + net realized P&L − open-trade risk). There is no arbitrary freeze on drawdown and no imaginary money — the account behaves like a real brokerage balance.
+- The user **redeposits at their own discretion** (a top-up raises portfolio capital). Until the redeposit arrives, the desk trades only what remains.
+- Only when the remaining balance is truly exhausted (≤ ₹0) does the desk hold new opens and log **"paper account depleted … holding new opens until user redeposits"** — encoded in the session driver (2026-09-03) as the `effectiveBalance = capital + netPnl ≤ 0` guard.
+- Implementation note: `capital` stays fixed at the deposit amount; realized P&L and service charges accumulate in `netPnl`/`totalCost` across sessions; the driver's depletion guard and the dashboard's Capital + Net P&L together express "remaining money".
 
 ## Non-negotiable entry gate
 
