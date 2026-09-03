@@ -24,9 +24,13 @@ temp/
 # (real secrets injected at runtime or in a separate non-tracked .env.local)
 .env.local
 .env.*.local
+# .env.password — tracked (not junk); contains SESSION_PASSWORD
 
-# Build / dist artifacts
-dist/
-build/
-*.pyc
-__pycache__/
+# Agent PID files — tracked (not junk); kept for agent lifecycle reference
+# agent.pid
+
+# Generated artifacts (CVs, screenshots, browser captures) — large, ephemeral
+generated/
+
+# Dependencies — install from package-lock.json, never commit
+node_modules/
