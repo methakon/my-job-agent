@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     console.error('[fyers-history] FYERS_ACCESS_TOKEN missing — exchange an auth code first (see FYERS_API_SETUP.md).');
     process.exit(2);
   }
-  const symbols = (process.env.FYERS_HIST_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
+  const symbols = (process.env.FYERS_HIST_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,BSE:SENSEX-INDEX')
     .split(',').map((s) => s.trim()).filter(Boolean);
   const res = process.env.FYERS_HIST_RES ?? '5';
   const days = Number(process.env.FYERS_HIST_DAYS ?? 30);
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const auth = `${appId}:${token}`;
   const getHistory = (symbol: string, resolution: string, fromS: number, toS: number) => {
     const q = new URLSearchParams({
-      symbol, resolution, date_format: '1',
+      symbol, resolution, date_format: '0', // 0 = epoch seconds (script passes epoch range)
       range_from: String(fromS), range_to: String(toS), cont_flag: '1',
     });
     return fetch(`${url}?${q}`, { method: 'GET', headers: { Authorization: auth } }).then((r) => r.json());
@@ -87,8 +87,18 @@ async function main(): Promise<void> {
   }
 
   console.log(`[fyers-history] fetched ${fetched} candles — ingesting into fnf_market_snapshots …`);
-  await trading.ingestSnapshots(rows);
-  console.log(`[fyers-history] DONE: ${fetched} rows stored (source='fyers-history')`);
+  if (rows.length > 0) {
+    // Chunked: a single TypeORM save() of thousands of rows wedges the pool executor.
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const n = await trading.ingestSnapshots(chunk);
+      console.log(`[fyers-history] chunk ${i + 1}-${i + chunk.length}: ${n} new rows stored`);
+    }
+    console.log(`[fyers-history] DONE: ${rows.length} fetched — ingest complete`);
+  } else {
+    console.error('[fyers-history] NOTHING fetched — aborting without ingest');
+    process.exitCode = 1;
+  }
   await app.close();
 }
 
