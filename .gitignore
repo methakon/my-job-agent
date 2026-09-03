@@ -34,3 +34,9 @@ generated/
 
 # Dependencies — install from package-lock.json, never commit
 node_modules/
+
+# Build output / Python caches
+node_modules/
+dist/
+__pycache__/
+*.pyc
