@@ -29,8 +29,11 @@ the old `myapi.fyers.in/api/oauth/*` endpoints no longer apply).
 
 3. Exchange the code — POST https://api-t1.fyers.in/api/v3/validate-authcode
    Content-Type: application/json
-   Body: { "grant_type": "authorization_code", "appIdHash": "<base64(APP_ID:SECRET)>", "code": "<auth_code>" }
-   where appIdHash = `printf '%s:%s' "$FYERS_APP_ID" "$FYERS_APP_SECRET" | base64` (no newline).
+   Body: { "grant_type": "authorization_code", "appIdHash": "<sha256_hex(APP_ID:SECRET)>", "code": "<auth_code>" }
+   where appIdHash = `printf '%s:%s' "$FYERS_APP_ID" "$FYERS_APP_SECRET" | sha256sum | cut -d' ' -f1`
+   — SHA-256 HEX digest (NOT base64 — base64 is the old v2 scheme and returns
+   `invalid app id hash` code -5 on v3). APP_ID must be the FULL id WITH suffix
+   (TQHWHBA2SZ-200); the suffix-less form fails. Verified 2026-09-03.
 
    Response: { "s": "ok", "access_token": "..." } → store in `FYERS_ACCESS_TOKEN`.
 
@@ -66,10 +69,12 @@ messages; write it via masked python/ssh only.
 
 ## 4. Troubleshooting
 
-- `invalid app id hash` on validate-authcode → the secret is wrong/truncated.
-  FYERS v3 secrets are ~24+ chars (base64-style, may end `=`). A 16-char value
-  is almost certainly a truncated copy: re-copy the FULL secret from
-  myapi.fyers.in → My Apps → reveal. Do not trust chat history.
+- `invalid app id hash` on validate-authcode → appIdHash must be SHA-256 hex of
+  `FULL_APP_ID_WITH_SUFFIX:SECRET` (base64 fails with code -5). If still failing
+  with the correct hash, the secret itself is wrong/truncated.
+  FYERS v3 app secrets can be exactly 16 alphanumeric chars (e.g. `9hLm...tw6`
+  for TQHWHBA2SZ-200, verified 2026-09-03) — length alone is not a truncation
+  signal; trust a fresh copy from myapi.fyers.in → My Apps → reveal.
 - Auth code errors → codes are single-use and short-lived; regenerate the
   login URL before every exchange attempt.
 - Callback mismatch → redirect_uri must match the console registration
