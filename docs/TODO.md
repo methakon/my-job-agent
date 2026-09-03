@@ -12,7 +12,7 @@
   4. **Buttons looked dead**: `act()` had no error path — a failed/expired-session POST left the button disabled forever with no alert; approve/hold also only ever rendered sensibly once sent items leave. Now: try/catch + clear alert + button re-enable.
 - [x] **Sent-set semantics**: "sent" = status `submitted|sent|applied` OR `sent_at` set; bucket date = `COALESCE(sent_at, created_at)` (UTC-safe `DATE_FORMAT`, no tz drift). `counts()` buckets: sent/failed/pending via CASE. Calendar & day-list now show REAL sends (36 legacy `queued` rows correctly stay out — they never went out).
 - [x] **History backfill**: 10 app rows stuck `queued` for items sent Aug 27–28 → `submitted` with real `sent_at`; ZEBRA's `submitted` row stamped `sent_at = created_at` (2026-09-03 14:57). Applications now: 11 submitted (all dated) + 26 queued.
-- [x] **Verified live (2026-09-03)**: `/applications-page` 200 (was 500) with Sent/Pending/Failed buckets; day lists 2026-08-27→6, 2026-08-28→4, 2026-09-03→1 (ZEBRA); `/pre-apply-page` 0 ZEBRA, 0 sent badges, 31 actionable cards, "11 sent → moved to Applications & Tracking". Commit `4bf1b59`, pushed.
+- [x] **Verified live (2026-09-03)**: `/applications-page` 200 (was 500) with Sent/Pending/Failed buckets; day lists 2026-08-27→6, 2026-08-28→4, 2026-09-03→1 (ZEBRA); `/pre-apply-page` 0 ZEBRA, 0 sent badges, 31 actionable cards, "11 sent → moved to Applications & Tracking". Commit `f90dc6f`, pushed.
 
 ## USER-APPROVED APPLY — ZEBRA prepared, AWAITING user approval to send (2026-09-03)
 - [x] **"OK SN APPLY TO THIS JOB https://zebratechiessolution.com/public/career/job-opportunities/9#apply"** — explicit user approval on record (2026-09-02 evening, FR-17.6 satisfied).
