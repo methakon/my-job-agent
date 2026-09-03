@@ -294,6 +294,7 @@ export class FnfTradingService {
 				low: d.low ?? undefined,
 				close: d.close ?? undefined,
 				ts: d.ts,
+				source: d.source ?? null,
 			}));
 		if (!rows.length) return 0;
 		const saved = await this.snapshots.save(rows);

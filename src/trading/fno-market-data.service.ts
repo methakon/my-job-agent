@@ -24,6 +24,10 @@ type FyersSocket = {
 
 type FeedStatus = {
   provider: 'fyers' | 'yahoo' | 'disabled';
+  /** Provider configured at boot (fyers = primary with Yahoo auto-fallback). */
+  requestedProvider: 'fyers' | 'yahoo';
+  /** True while Yahoo polling stands in for an unavailable FYERS socket. */
+  fallbackActive: boolean;
   enabled: boolean;
   connected: boolean;
   subscribedSymbols: string[];
@@ -82,6 +86,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private readonly yahooPollMs: number;
   private readonly yahooTimeoutMs: number;
   private readonly optionContracts: Map<string, OptionContract>;
+  private destroyed = false;
 
   constructor(private readonly trading: FnfTradingService, private readonly optionChain: FnfOptionChainService) {
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
@@ -99,9 +104,14 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     this.yahooTimeoutMs = Math.max(2_000, Number(process.env.YAHOO_FINANCE_TIMEOUT_MS ?? 10_000));
     this.optionContracts = new Map(this.optionChain.configuredContracts().map((contract) => [contract.symbol, contract]));
     const supportedProvider = provider === 'fyers' || provider === 'yahoo';
-    const subscribedSymbols = provider === 'yahoo' ? this.yahooSymbols.map(({ symbol }) => symbol) : symbols;
+    // 'fyers' (default) = FYERS primary; Yahoo poll stands in only while FYERS is unavailable.
+    // 'yahoo' = explicit Yahoo-only mode (manual override).
+    const requestedProvider: FeedStatus['requestedProvider'] = provider === 'yahoo' ? 'yahoo' : 'fyers';
+    const subscribedSymbols = requestedProvider === 'yahoo' ? this.yahooSymbols.map(({ symbol }) => symbol) : symbols;
     this.statusValue = {
-      provider: provider === 'fyers' ? 'fyers' : provider === 'yahoo' ? 'yahoo' : 'disabled',
+      provider: supportedProvider ? requestedProvider : 'disabled',
+      requestedProvider,
+      fallbackActive: false,
       enabled: enabled && supportedProvider && subscribedSymbols.length > 0,
       connected: false,
       subscribedSymbols,
@@ -121,20 +131,20 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    if (this.statusValue.provider === 'yahoo') {
-      this.statusValue.lastMessage = `polling Yahoo Finance chart API every ${this.yahooPollMs}ms (paper-only)`;
+    if (this.statusValue.requestedProvider === 'yahoo') {
+      this.statusValue.provider = 'yahoo';
+      this.statusValue.lastMessage = `polling Yahoo Finance chart API every ${this.yahooPollMs}ms (explicit Yahoo mode, paper-only)`;
       this.logger.log(this.statusValue.lastMessage);
-      void this.pollYahoo();
-      this.yahooPollTimer = setInterval(() => void this.pollYahoo(), this.yahooPollMs);
+      this.startYahooPoller();
       return;
     }
 
+    // Requested provider = fyers: FYERS socket is primary. Yahoo is NOT polled
+    // unless/until FYERS is unavailable (missing credentials, socket error/close).
     const appId = process.env.FYERS_APP_ID?.trim();
     const accessToken = process.env.FYERS_ACCESS_TOKEN?.trim();
     if (!appId || !accessToken) {
-      this.statusValue.enabled = false;
-      this.statusValue.lastError = 'FYERS credentials are not configured';
-      this.logger.warn('F&O market feed disabled: FYERS_APP_ID/FYERS_ACCESS_TOKEN are missing');
+      this.startYahooFallback('FYERS credentials missing (FYERS_APP_ID/FYERS_ACCESS_TOKEN)');
       return;
     }
 
@@ -155,11 +165,41 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
-    if (this.yahooPollTimer) clearInterval(this.yahooPollTimer);
-    this.yahooPollTimer = null;
+    this.destroyed = true;
+    this.stopYahooFallback();
     this.socket?.close?.();
     this.socket = null;
     this.statusValue.connected = false;
+  }
+
+  /** Start (or keep) the Yahoo poller for explicit-yahoo mode. */
+  private startYahooPoller(): void {
+    if (this.yahooPollTimer) return;
+    void this.pollYahoo();
+    this.yahooPollTimer = setInterval(() => void this.pollYahoo(), this.yahooPollMs);
+  }
+
+  /** Yahoo stands in ONLY while FYERS is unavailable; stops when FYERS connects. */
+  private startYahooFallback(reason: string): void {
+    if (this.destroyed || this.statusValue.requestedProvider !== 'fyers' || this.yahooPollTimer) return;
+    this.statusValue.fallbackActive = true;
+    this.statusValue.provider = 'yahoo';
+    this.statusValue.connected = false;
+    this.statusValue.lastMessage = `Yahoo fallback active (FYERS unavailable: ${reason}); every tick is recorded`;
+    this.logger.warn(this.statusValue.lastMessage);
+    this.startYahooPoller();
+  }
+
+  private stopYahooFallback(): void {
+    if (this.yahooPollTimer) {
+      clearInterval(this.yahooPollTimer);
+      this.yahooPollTimer = null;
+    }
+    if (this.statusValue.fallbackActive) {
+      this.statusValue.fallbackActive = false;
+      this.statusValue.provider = 'fyers';
+      this.logger.log('FYERS socket available again — Yahoo fallback stopped');
+    }
   }
 
   status(): FeedStatus {
@@ -168,7 +208,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
   private onConnect(): void {
     if (!this.socket) return;
+    this.stopYahooFallback();
     this.statusValue.connected = true;
+    this.statusValue.provider = 'fyers';
     this.statusValue.lastError = null;
     this.statusValue.lastMessage = `connected; subscribing to ${this.statusValue.subscribedSymbols.length} symbol(s)`;
     // FYERS' official Node client uses SymbolUpdate for full LTP/OHLCV ticks.
@@ -181,12 +223,14 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     this.statusValue.connected = false;
     this.statusValue.lastMessage = `socket closed${message ? `: ${this.safeMessage(message)}` : ''}`;
     this.logger.warn(this.statusValue.lastMessage);
+    this.startYahooFallback('FYERS socket closed');
   }
 
   private onError(message: unknown): void {
     this.statusValue.connected = false;
     this.statusValue.lastError = this.safeMessage(message);
     this.logger.warn(`FYERS market-data error: ${this.statusValue.lastError}`);
+    this.startYahooFallback(`FYERS socket error: ${this.statusValue.lastError}`);
   }
 
   private onMessage(message: unknown): void {
@@ -226,7 +270,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       const last = this.lastPersistedAt.get(tick.instrument) ?? 0;
       if (now - last < this.persistEveryMs) continue;
       this.lastPersistedAt.set(tick.instrument, now);
-      void this.trading.ingestSnapshots([tick]).catch((error: unknown) => {
+      void this.trading.ingestSnapshots([{ ...tick, source: provider }]).catch((error: unknown) => {
         this.statusValue.lastError = `snapshot persistence failed: ${this.safeMessage(error)}`;
         this.logger.warn(this.statusValue.lastError);
       });

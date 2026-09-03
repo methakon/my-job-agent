@@ -97,6 +97,10 @@ export class IngestSnapshotDto {
 
 	@IsOptional() @IsDateString()
 	ts?: string;
+
+	/** Feed provenance: 'fyers' | 'yahoo' | 'fyers-history' | 'import'. */
+	@IsOptional() @IsString()
+	source?: string;
 }
 
 export class SetDecayCalibrationDto {

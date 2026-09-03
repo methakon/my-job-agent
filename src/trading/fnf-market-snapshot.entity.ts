@@ -40,6 +40,10 @@ export class FnfMarketSnapshot {
   @Column({ type: 'datetime' })
   ts: Date;
 
+  /** Feed source: 'fyers' | 'yahoo' | 'fyers-history' | 'import' (null = legacy). */
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  source?: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 }
