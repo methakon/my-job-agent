@@ -417,10 +417,18 @@ export class ApplyEngineService implements OnModuleInit {
 				const hr = await this.investigator.investigate(lead.company, lead.url, lead.description);
 				if (hr) channel = { kind: 'email', target: hr.email, detectedBy: `${hr.source}:${hr.confidence}` };
 			}
-			// No email evidence? Use the company's OWN application form — fetch
-			// the careers page and fill its form via the browser agent, NEVER
-			// email a generic support/info mailbox (user rule 2026-08-28).
-			if (!channel || channel.kind !== 'ats') {
+			// No email evidence AND no ATS link? Use the company's OWN
+			// application form — fetch the careers page and fill its form via
+			// the browser agent, NEVER email a generic support/info mailbox
+			// (user rule 2026-08-28). A real evidence email (jd-email /
+			// description-email / investigator) must NOT be overridden by the
+			// company's own apply page: the user-mandated channel priority is
+			// stated process / real ATS → HR email → portal last, and this form
+			// fallback exists only for the no-evidence case. (Defect fixed
+			// 2026-09-03: a JD-stated hr@ was replaced by the company's own
+			// WordPress apply page, routing an approved send into the
+			// Chrome-blocked browser path instead of SMTP.)
+			if (!channel) {
 				const formUrl = await this.investigator.findApplyFormUrl(lead.company, lead.url);
 				if (formUrl) channel = { kind: 'ats', target: formUrl, detectedBy: 'careers-page-form' };
 			}

@@ -44,7 +44,12 @@ export class ProcessLearningService {
 			const m = text.match(re);
 			if (!m) continue;
 			if (kind === 'email') {
-				const email = (m[1] || m[2] || '').toLowerCase();
+				// The address is the LAST capture group in every email pattern
+				// (patterns 1–2: a single group; pattern 3: an optional ':'
+				// followed by the address). m[1] may therefore be a stray ':'
+				// — never use it as the target (defect fixed 2026-09-03:
+				// "Email: hr@…" produced target ":").
+				const email = (m[m.length - 1] || '').toLowerCase();
 				if (email && !/noreply|no-reply|example\./.test(email)) {
 					return { kind: 'email', target: email, instruction: `JD says to email ${email} — following stated process` };
 				}

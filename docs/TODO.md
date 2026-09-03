@@ -1,10 +1,17 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-02 (evening)
+> Last updated: 2026-09-03 (afternoon)
 
-## USER-APPROVED APPLY PENDING (2026-09-02 evening) — 🚫 needs engine adapter first
-- [ ] **"OK SN APPLY TO THIS JOB https://zebratechiessolution.com/public/career/job-opportunities/9#apply"** — EXPLICIT user approval on record (FR-17.6 satisfied). NOT yet executed: job is NOT in `job_leads` (fresh company-site lead, source has no portal adapter → `prepareApplication` would fail "no adapter for source X"). Investigation done (2026-09-02): posting live as "Ongoing WALK-IN INTERVIEW" on the company index; role = Laravel Developer (3–5 yrs) + AI knowledge, Full Time, Sector V Kolkata, walk-in dates listed 22 Oct–7 Nov 2025 (page may be stale — verify before send). JD contains EVIDENCE email `hr@zebratechies.com` (contact Sharmila Saha, phone +91-8334922887) + company apply form on the page. Channel decision per priority: HR email found in description → direct SMTP to hr@zebratechies.com (evidence-only rule satisfied; skip portal). NEXT SESSION: create lead (source tag e.g. `zebra` w/ adapter OR reuse a generic direct-channel path), run pre-apply prepare → show user on /pre-apply-page → approve → muhurta sweep sends. Do NOT send blind.
+## USER-APPROVED APPLY — ZEBRA prepared, AWAITING user approval to send (2026-09-03)
+- [x] **"OK SN APPLY TO THIS JOB https://zebratechiessolution.com/public/career/job-opportunities/9#apply"** — explicit user approval on record (2026-09-02 evening, FR-17.6 satisfied).
+- [x] **Page verified live 2026-09-03** (HTTP 200): "WALK-IN INTERVIEW: Laravel Developer (3–5 yrs) with AI Knowledge | Immediate Joiner", Full Time, Sector V Kolkata. Evidence: `hr@zebratechies.com` printed in the JD (contact Sharmila Saha, +91-8334922887) + own apply form on the page. ⚠️ CAVEAT: printed walk-in dates are 22 Oct–7 Nov **2025** (past) though the posting is titled as an ongoing/immediate-joiner walk-in — surfaced to user before send.
+- [x] **Lead created** `zebra`/`job-opportunities-9` (7226f149-…, full JD text; only hr@ appears in description so channel detection is unambiguous).
+- [x] **Two engine defects fixed (2026-09-03)** — without them the prepared channel would have been the Chrome-blocked browser path, not SMTP:
+  1. `apply-engine.service.ts` `prepareApplication`: the careers-page form fallback (`findApplyFormUrl`) ran even when a real evidence-email channel existed and OVERRODE it with the company's own apply page (kind `ats` → browser automation, which is blocked for this user). Now the fallback only runs when NO channel was found (`if (!channel)`), matching the user-mandated channel priority: stated process / real ATS → HR email → portal/form last. (The 09-02 prepare of this same job hit this bug: item 4594e02e sat ready with `ats` → job-page channel.)
+  2. `process-learning.service.ts` `detectProcess`: the `Email: x@y` pattern puts the optional ':' in capture 1 and the address in capture 2, but the code read `m[1]` first → target `":"`. Now takes the last capture group, which is the address in every email pattern (defect also silently broke any other JD phrased "Email: hr@…").
+- [x] **Prepared → queue item `9a8eb1ac-…` status `ready`** — channel `email → hr@zebratechies.com` (jd-email), astro 80/100, tailored ATS CV built (generated/cv/03092026/Swarna_Sekhar_Dhar_Zebra_Techies_Solution_Laravel_Developer…pdf), subject "Laravel Developer (3-5 yrs) with AI Knowledge — Walk-in Interview, Immediate Joiner — Swarna Dhar". Stale duplicate from 09-02 (lead 8a2c9df9 externalId `9` + ats-channel item 4594e02e) deleted — no application rows referenced it.
+- [ ] 🚫 **SEND: user approves on /pre-apply-page (or explicit go) → 10-min muhurta sweep emails hr@zebratechies.com with the tailored CV attached.** Do NOT send blind.
 
 ## Auth + pre-apply page session (2026-09-02 evening) — pre-apply page "not showing JD/email" ROOT-CAUSED + FIXED
 - [x] **User report**: "/pre-apply-page is not showing job description email to be send and other details".
