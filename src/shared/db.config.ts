@@ -14,7 +14,7 @@ export function mysqlConfig(databaseName: string): TypeOrmModuleOptions {
 		password: process.env.MYSQL_PASSWORD || 'mylife-secret',
 		database: databaseName,
 		autoLoadEntities: true,
-		synchronize: process.env.NODE_ENV !== 'production', // dev only; use migrations later
+		synchronize: true, // always auto-sync in dev — user request
 	};
 }
 

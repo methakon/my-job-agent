@@ -2,13 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { PreApplyService } from './pre-apply.service';
 import { ApplyEngineService } from '../applications/apply-engine.service';
-import { AstroMuhurtaService } from './astro-muhurta.service';
+import { AstroMuhurtaService, SHUBH_MIN_SCORE } from './astro-muhurta.service';
 
 /**
- * MuhurtaSendService — FR-16. Every SWEEP_MINUTES it looks at items the user
- * APPROVED in the pre-apply queue and submits them — but ONLY inside a shubh
- * (auspicious) muhurta window computed by AstroMuhurtaService. If the current
- * moment is not shubh, approved items simply wait for the next window.
+ * MuhurtaSendService — every SWEEP_MINUTES looks at items the user
+ * APPROVED in the pre-apply queue and submits them. Each send records the
+ * sweep-time muhurta match % (0–100) on the item for audit; sends are no
+ * longer gated on shubh status (the match % is informational).
  */
 @Injectable()
 export class MuhurtaSendService {
@@ -28,23 +28,19 @@ export class MuhurtaSendService {
 
 		if (approved.length === 0) return;
 
-		if (!assessment.shubh) {
-			this.logger.log(
-				`muhurta sweep: ${approved.length} approved item(s) waiting — not shubh now ` +
-				`(score ${assessment.score}; next shubh ~${this.muhurta.describeNext(now)})`,
-			);
-			return;
-		}
-
 		this.logger.log(
-			`muhurta sweep: SHUBH window open (score ${assessment.score}, ` +
-			`${assessment.weekday}, tithi ${assessment.tithi} ${assessment.paksha}, ${assessment.nakshatra}) — ` +
-			`submitting ${approved.length} approved item(s)`,
+			`muhurta sweep: ${approved.length} approved item(s) — ` +
+				`now score ${assessment.score}/${SHUBH_MIN_SCORE} ` +
+				`(${assessment.weekday}, tithi ${assessment.tithi} ${assessment.paksha}, ${assessment.nakshatra})` +
+				(assessment.shubh ? ` — SHUBH window open, submitting` : ` — not shubh, sending anyway (score recorded)`),
 		);
 
 		for (const item of approved) {
 			try {
 				const result = await this.engine.submitPrepared(item);
+				// Record the sweep-time muhurta match % on the item so it is
+				// auditable; the send proceeds regardless of shubh status.
+				await this.preApply.recordMuhurtaMatch(item.id, assessment.score);
 				if (result.ok && result.status === 'submitted') {
 					await this.preApply.markSent(item.id);
 					this.logger.log(`muhurta send OK: ${item.source} lead ${item.leadId} (${item.id})`);

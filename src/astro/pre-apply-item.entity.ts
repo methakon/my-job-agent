@@ -1,13 +1,14 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 
-/**
- * PreApplyItem — one fully-prepared application awaiting user review.
- * The agent builds the tailored ATS PDF CV, the human email draft, the
- * detected channel and the astro muhurta plan, then parks it here with
- * status 'ready'. NOTHING is sent until the user approves it; approved
- * items are submitted by MuhurtaSendService at the next shubh window.
+/** PreApplyItem — one fully-prepared application awaiting user review.
+ *  The agent builds the tailored ATS PDF CV, the human email draft, the
+ *  detected channel and the astro muhurta plan, then parks it here with
+ *  status 'ready'. NOTHING is sent until the user approves it; approved
+ *  items are submitted by MuhurtaSendService on its next sweep.
+ *  (The sweep records the sweep-time muhurta match % for audit but no
+ *  longer gates the send on shubh status.)
  *
- * Status flow: ready → approved → sent | (hold ⇄ ready) | failed
+ *  Status flow: ready → approved → sent | (hold ⇄ ready) | failed
  */
 @Entity('pre_apply_items')
 export class PreApplyItem {
@@ -73,6 +74,10 @@ export class PreApplyItem {
 	/** error from the last prepare/approve attempt */
 	@Column({ type: 'text', nullable: true })
 	errorDetail!: string | null;
+
+	/** astrological muhurta match score (0–100) recorded at send time */
+	@Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+	muhurtaMatchScore!: number;
 
 	@Column({ type: 'datetime', nullable: true })
 	approvedAt!: Date | null;

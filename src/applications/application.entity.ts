@@ -7,23 +7,28 @@ export class Application {
 
 	/** FK to job_leads.id */
 	@Column({
-	type: 'varchar', length: 36 })
+		type: 'varchar', length: 36
+	})
 	@Index('idx_app_lead')
 	leadId!: string;
 
 	@Column({
-	type: 'varchar', length: 30 })
+		type: 'varchar', length: 30
+	})
 	source!: string;
 
 	@Column({
-	type: 'varchar', length: 20, default: 'queued' })
-	status!: string; // queued | needs_info | submitting | submitted | failed
+		type: 'varchar', length: 120, default: 'queued'
+	})
+	status!: string;
 
 	@Column({ type: 'text', nullable: true })
 	coverLetter!: string | null;
 
 	@Column({
-	type: 'varchar', length: 255, nullable: true, comment: 'path of tailored CV variant used' })
+		type: 'varchar', length: 255, nullable: true,
+		comment: 'path of tailored CV variant used'
+	})
 	cvPath!: string | null;
 
 	/** JSON array of [{question, answer}] actually submitted */
@@ -49,6 +54,18 @@ export class Application {
 	 */
 	@Column({ type: 'tinyint', width: 1, default: 0 })
 	isSandbox!: boolean;
+
+	/** When the application email / submission was actually sent. */
+	@Column({ type: 'datetime', nullable: true, name: 'sent_at' })
+	sentAt!: Date | null;
+
+	/** Free-text note (e.g. follow-up timestamp, manual override reason). */
+	@Column({ type: 'text', nullable: true })
+	note!: string | null;
+
+	/** Applicant name (pre-filled from profile or manual entry). */
+	@Column({ type: 'varchar', length: 255, nullable: true })
+	applicant!: string | null;
 
 	@CreateDateColumn({ name: 'created_at' })
 	createdAt!: Date;

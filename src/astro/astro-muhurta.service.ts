@@ -57,7 +57,7 @@ export interface MuhurtaWindowDto {
 }
 
 const LAGNA_INDEX = 5; // Virgo (Aries=0 … Pisces=11)
-const SHUBH_MIN_SCORE = Number(process.env.SHUBH_MIN_SCORE ?? 65);
+export const SHUBH_MIN_SCORE = Number(process.env.SHUBH_MIN_SCORE ?? 65);
 const STEP_MINUTES = 10; // scan granularity when finding windows
 const LON = 88.25;
 const LAT = 24.1;

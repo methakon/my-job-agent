@@ -1,10 +1,32 @@
-node_modules/
+# Python virtual environments (local only, never commit)
+.venv/
+.oci-venv/
+venv/
+env/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+tmp/
+temp/
+
+# Environment files with secrets — committed .env uses *** placeholders only
+# (real secrets injected at runtime or in a separate non-tracked .env.local)
+.env.local
+.env.*.local
+
+# Build / dist artifacts
 dist/
-*.tsbuildinfo
-generated/
-generated/
-logs/
-agent.pid
-uploads/
+build/
+*.pyc
 __pycache__/
-.env.password

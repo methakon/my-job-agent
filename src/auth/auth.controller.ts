@@ -103,7 +103,7 @@ export class AuthController {
         auth: { user, pass },
       });
       await transport.sendMail({
-        from: `"my-job-agent" <${user}>`,
+        from: `"Dhar-egent" <${user}>`,
         to,
         subject: 'my-job-agent password recovery',
         text: `The dashboard password for my-job-agent is:\n\n${password}\n\nYou can change it from the sign-in screen by providing the old and a new password.`,

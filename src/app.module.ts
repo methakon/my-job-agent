@@ -61,6 +61,7 @@ import { BrowserFormService } from './applications/browser-form.service';
 import { BrowserFormController } from './applications/browser-form.controller';
 import { LearningController } from './applications/learning.controller';
 import { ApplicationsPageController } from './applications/applications-page.controller';
+import { FailedApplicationsPageController } from './applications/failed-applications-page.controller';
 import { PreApplyPageController } from './applications/pre-apply-page.controller';
 import { LinkedInController } from './applications/linkedin.controller';
 import { SandboxController } from './applications/sandbox.controller';
@@ -98,7 +99,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		SideIncomeModule,
 		AuthModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController,
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController,
 		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
 		AppFallbackController], // MUST stay last: serves dashboard.html for unmatched GETs
 	providers: [

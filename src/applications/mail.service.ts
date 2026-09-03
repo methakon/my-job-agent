@@ -18,7 +18,7 @@ const PROVIDER_SMTP: Record<string, { host: string; port: number }> = {
 	outlook: { host: 'smtp.office365.com', port: 587 },
 };
 
-/**
+/** 
  * MailService — sends application emails through the user's own mailboxes
  * (Gmail primary, Outlook backup). App-passwords are stored encrypted in the
  * mail_accounts table (key = APP_SECRET). User completes 2FA once when
@@ -111,7 +111,7 @@ export class MailService implements OnModuleInit {
 			try {
 				const transport = await this.transportFor(account);
 				await transport.sendMail({
-					from: `"Swarna Sekhar Dhar" <${account.email}>`,
+					from: `"Dhar-egent" <${account.email}>`,
 					to: app.to,
 					subject: app.subject,
 					html: app.html.replace(/\n/g, '<br>'),
@@ -127,6 +127,6 @@ export class MailService implements OnModuleInit {
 				return { ok: false, error: `send-failed:${String(err).slice(0, 120)}` };
 			}
 		}
-		return { ok: false, error: 'no-primary-mail-account' };
+		return { ok: false, error: 'no-active-mail-account' };
 	}
 }

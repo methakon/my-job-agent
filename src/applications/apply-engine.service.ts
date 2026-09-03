@@ -365,10 +365,17 @@ export class ApplyEngineService implements OnModuleInit {
 		const lead = await this.leadRepo.findRecent(500).then((all) => all.find((l) => l.id === leadId));
 		if (!lead) return { ok: false, status: 'failed', errorDetail: 'lead not found' };
 
-		const adapter = this.adapters.get(lead.source);
-		// LinkedIn leads have no portal adapter but CAN use a detected direct
-		// channel (company ATS / HR email) or the pre-apply queue — don't gate.
-		if (!adapter && lead.source !== 'linkedin') return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source}` };
+			const adapter = this.adapters.get(lead.source);
+			// LinkedIn leads have no portal adapter but CAN use a detected direct
+			// channel (company ATS / HR email) or the pre-apply queue — don't gate.
+			// Likewise, a lead whose source has no adapter BUT whose posting states or
+			// investigation reveals a real apply channel (HR email / company form) can
+			// still be prepared here and parked in the pre-apply queue for user review.
+			// A missing adapter only hard-fails when prepare would otherwise have nothing
+			// to build against (no channel, no form, no email evidence).
+			if (!adapter && lead.source !== 'linkedin' && !lead.description) {
+				return { ok: false, status: 'failed', errorDetail: `no adapter for source ${lead.source} and no posting text to mine a channel from` };
+			}
 
 		const setting = await this.settingsRepo.findBySource(lead.source);
 		// FR-18: per-portal total cap (27) — count all non-failed applications.

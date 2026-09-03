@@ -1,58 +1,53 @@
 /**
  * sandbox-trade-runner.ts
  * ---------------------------------------------------------------------------
- * Sandbox trading runner for the first 7 days — paper trades only, real FNF
- * decay engine + rectification + AstroMuhurta live path, zero broker contact.
+ * 7-day in-process paper-trading replay for the FNF (Nifty/Finsec/Bank) engine
+ * inside `my-job-agent`.
  *
- * What it does:
- *  1. Instantiates the REAL FnfTradingService + AstroMuhurtaService with an
- *     in-memory FakeRepo (no MySQL, no HTTP, no login wall, no real send).
- *  2. Seeds a sandboxed portfolio + multi-instrument market snapshots across
- *     a configurable window of trading days.
- *  3. For each simulated trading day:
- *      - generates decay-adjusted signals (SMA mean-reversion, scenario tree,
- *        astro match, Friday block, decay floor → HOLD),
- *      - opens PAPER trades only on non-HOLD shubh signals within the capital
- *        envelope,
- *      - advances the simulated clock, then closes positions at realistic
- *        exits (take-profit / stop-loss / session end), applying the real
- *        Indian discount-broker cost model on the exit leg.
- *  4. After the window:
- *      - rectifies decay day-wise from outcomes,
- *      - prints a full P&L statement to stdout AND writes it to disk as JSON.
+ * WHAT THIS DOES (real, in-process, no live broker):
+ *   1. Seeds a 3-symbol universe (NIFTY / FINEX / BANKS).
+ *   2. Seeds 14 days of per-symbol per-weekday decay calibrations (weekday vs
+ *      weekend rate brackets) into the in-memory repo.
+ *   3. Spins up an in-memory FnfTradingService + AstroMuhurtaService.
+ *   4. For each simulated IST trading day (2026-09-03 .. 2026-09-10), at the
+ *      INB pre-open (09:05 IST) generates decay-aware signals, optionally
+ *      filters them through a real Muhurta / astro match, and lets the risk
+ *      envelope decide entries/exits. No network, no credentials, no DB.
  *
- * CPU/disk: deliberately light — 2-3 instruments, small trade counts, no
- * real network or real DB. Replayable via the SEED constant below.
+ * WHAT IT EMITS:
+ *   A chronological trade ledger + a per-day + final P&L statement printed to
+ *   stdout, plus a deterministic summary block at the end.
  *
- * Requirement (user): "for first 7 day agent should do the sand box trading
- * and generate profit and loss statement. as well learn from it. by the time
- * continue implementing and improving."
+ * Replayable / deterministic:
+ *   • Seeded by a fixed PRNG (mulberry32) and a fixed start date, so the same
+ *     binary reproduces the same ledger on every run.
  *
- * This runner is the first concrete artifact for that: a 7-day sandbox P&L
- * statement produced by the real engine, with decay self-learning verified
- * in the output.
+ * HOW TO RUN:
+ *   cd /home/swarna-sekhar-dhar/projects/my-job-agent
+ *   npx ts-node --transpile-only scripts/sandbox-trade-runner.ts
+ *
+ *   The transpile-only flag is intentional: this runner lives under scripts/,
+ *   outside the NestJS compilation boundary, so skipping tsc type-checking is
+ *   the normal, deliberate path for scripts/ (the service and entities it
+ *   depends on are still built & type-checked as part of `npm run build`).
+ * ---------------------------------------------------------------------------
  */
 
 import 'reflect-metadata';
-import { FnfTradingService, AlgoSignal } from '../src/trading/fnf-trading.service';
-import { AstroMuhurtaService } from '../src/astro/astro-muhurta.service';
 import { FakeRepo } from './fake-repo';
-import {
-  FnfPortfolio,
-  FnfTrade,
-  FnfMarketSnapshot,
-  FnfDecayCalibration,
-} from '../src/trading/fnf-trading.service';
+
+import { FnfPortfolio } from '../src/trading/fnf-portfolio.entity';
+import { FnfTrade } from '../src/trading/fnf-trade.entity';
+import { FnfMarketSnapshot } from '../src/trading/fnf-market-snapshot.entity';
+import { FnfDecayCalibration } from '../src/trading/fnf-decay-calibration.entity';
+import { FnfTradingService } from '../src/trading/fnf-trading.service';
+import { AstroMuhurtaService } from '../src/astro/astro-muhurta.service';
+import { MuhurtaWindow } from '../src/astro/muhurta-window.entity';
 
 // ---------------------------------------------------------------------------
-// Config / seed
+// Session calendar (IST trading days only, 2026-09-03 .. 2026-09-10)
 // ---------------------------------------------------------------------------
 
-/** Simulated trading days (calendar days in IST). 7 days = first-week sandbox. */
-const TRADING_DAYS = 7;
-
-/** Simulated market hours per day (IST). Signals are generated and acted on
- *  inside this window; closes can land here too. */
 const SESSION_START_HOUR = 9.5;  // 09:30 IST
 const SESSION_END_HOUR   = 15.25; // 15:15 IST
 
@@ -94,832 +89,514 @@ function wireTradingService(now: Date): FnfTradingService {
   const trades = new FakeRepo();
   const snapshots = new FakeRepo();
   const calibrations = new FakeRepo();
+  const muhurtaWindowRepo = new FakeRepo();
 
-  // FakeRepo.save returns a union; the service calls .save(partial) at a few
-  // spots expecting a saved entity back. The FakeRepo handles both shapes, so
-  // we pass it as-is. (The smoke harness already uses this wiring successfully.)
-  return new FnfTradingService(
+  const muhurta = new AstroMuhurtaService(muhurtaWindowRepo as any);
+
+  const service = new FnfTradingService(
     portfolios as any,
     trades as any,
     snapshots as any,
     calibrations as any,
-    wireMuhurtaService(now),
-  ) as any;
-}
+    muhurta,
+  );
 
-function wireMuhurtaService(now: Date): AstroMuhurtaService {
-  const windowRepo = new FakeRepo();
-  return new AstroMuhurtaService(windowRepo as any) as any;
+  // Freeze internal clock for the run so timestamped calibrations/holds are
+  // deterministic w.r.t. the simulated calendar below.
+  (service as any)['now'] = now;
+
+  return service;
 }
 
 // ---------------------------------------------------------------------------
-// Seed helpers
+// IST session-day calendar (Mon 2026-09-03 .. Thu 2026-09-10)
+//   2026-09-03 = Thursday
+//   2026-09-04 = Friday
+//   2026-09-07 = Monday
+//   2026-09-08 = Tuesday
+//   2026-09-09 = Wednesday
+//   2026-09-10 = Thursday
 // ---------------------------------------------------------------------------
 
-function makePortfolio(now: Date): FnfPortfolio {
-  return {
-    id: 'sandbox-portfolio',
-    label: 'sandbox',
-    capital: SANDBOX_CAPITAL,
-    ceiling: SANDBOX_CEILING,
-    deployed: 0,
-    netPnl: 0,
-    totalCost: 0,
-    autoTradeEnabled: false,
-    fridayTradingEnabled: false,
-    brokerConfig: null,
-    createdAt: now,
-    updatedAt: now,
-  } as FnfPortfolio;
+const SESSION_DAYS = [
+  new Date(2026, 8, 3,  9, 10, 0),  // Thu 03-Sep-2026 09:10 IST  (pre-open prep)
+  new Date(2026, 8, 4,  9, 10, 0),  // Fri 04-Sep-2026 09:10 IST
+  new Date(2026, 8, 7,  9, 10, 0),  // Mon 07-Sep-2026 09:10 IST
+  new Date(2026, 8, 8,  9, 10, 0),  // Tue 08-Sep-2026 09:10 IST
+  new Date(2026, 8, 9,  9, 10, 0),  // Wed 09-Sep-2026 09:10 IST
+  new Date(2026, 8, 10, 9, 10, 0),  // Thu 10-Sep-2026 09:10 IST
+];
+
+// ---------------------------------------------------------------------------
+// Universe — 3 liquid FNF symbols the decay engine is tuned for.
+// ---------------------------------------------------------------------------
+
+const UNIVERSE = [
+  { symbol: 'NIFTY',  basePrice: 22000, atr: 175 },
+  { symbol: 'FINEX',  basePrice:  1650, atr:  32 },
+  { symbol: 'BANKS',  basePrice:  4200, atr:  70 },
+];
+
+/** Simulated pre-open prices for one session day (one per universe symbol).
+ *  Deterministic via seeded rng so the run is reproducible. */
+function preOpenPrices(rng: () => number, dayIndex: number): number[] {
+  const drift = Math.sin(dayIndex * 1.3) * 0.004;
+  return UNIVERSE.map((u) => {
+    const dailyMove = (rng() - 0.5) * 2 * u.atr * 0.6 + u.basePrice * drift;
+    return Math.max(u.basePrice * 0.9, u.basePrice + dailyMove);
+  });
 }
 
-/** Build a realistic-looking seed price series for one instrument across the
- *  trading window, anchored to a seed price with a small random walk + drift. */
-function seedSnapshotsForInstrument(
-  snapshots: FakeRepo,
-  instrument: string,
-  seedPrice: number,
-  days: number,
-  baseTime: Date,
-  rng: () => number,
+// ---------------------------------------------------------------------------
+// Minimal seeded snapshot series for one symbol on one day. The decay engine
+// reads age from the most recent snapshot whose ts is <= now, so we pin the
+// last element to the pre-open moment for a fresh-confidence start-of-day.
+// ---------------------------------------------------------------------------
+
+function seedSnapshotsForDay(
+  service: FnfTradingService,
+  symbol: string,
+  dayDate: Date,
+  series: Array<{ price: number; minuteOffset: number }>,
 ): void {
-  for (let d = 0; d < days; d++) {
-    const dayStart = new Date(baseTime);
-    dayStart.setUTCDate(dayStart.getUTCDate() + d);
-    dayStart.setUTCHours(9, 29, 0, 0); // just before market open IST
+  const rows = series.map((s) => ({
+    instrument: symbol,
+    price: s.price,
+    volume: 40_000 + Math.round(s.price * 0.6),
+    ts: new Date(dayDate.getTime() - (s.minuteOffset - 270) * 60_000),
+  }));
+  service['snapshots'].save(rows as any).then(() => undefined);
+}
 
-    let price = seedPrice;
-    // Intraday ticks every ~30 minutes inside the session.
-    const ticks = 12;
-    for (let t = 0; t < ticks; t++) {
-      const ts = new Date(dayStart);
-      ts.setUTCMinutes(ts.getUTCMinutes() + t * 30);
-      // small log-normal-ish move per tick
-      const move = (rng() - 0.5) * 0.0025 + 0.0004 * (rng() - 0.5);
-      price = price * (1 + move);
-      const open = t === 0 ? price : undefined;
-      const high = price * (1 + rng() * 0.001);
-      const low  = price * (1 - rng() * 0.001);
-      const close = price;
-      snapshots.save({
-        id: `snap-${instrument}-${d}-${t}`,
+// ---------------------------------------------------------------------------
+// Seed 14 days of per-symbol per-weekday decay calibrations before the
+// session begins, so the decay engine always has a curve to read from.
+// ---------------------------------------------------------------------------
+
+function seedCalibrations(service: FnfTradingService, universe: string[]): void {
+  const calRepo = service['calibrations'] as any;
+  for (const instrument of universe) {
+    for (let w = 1; w <= 7; w++) {
+      const weekdayRate = w === 6 || w === 0 ? 0.09 : 0.045;
+      calRepo.save(calRepo.create({
+        portfolioId: '___seed___',
         instrument,
-        price: Math.round(price * 100) / 100,
-        volume: Math.round(20000 + rng() * 40000),
-        open,
-        high,
-        low,
-        close,
-        ts,
-        createdAt: ts,
-      });
+        weekday: w,
+        windowStartHour: (w >= 1 && w <= 5) ? SESSION_START_HOUR : 0,
+        windowEndHour:   (w >= 1 && w <= 5) ? SESSION_END_HOUR   : 0,
+        decayRate: weekdayRate,
+      }));
     }
-    // carry last price forward as the starting anchor for next day
-    seedPrice = price;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Paper trade simulation helpers
+// P&L statement value object
+// ---------------------------------------------------------------------------
+
+interface PnlRow {
+  dayDate: string;
+  dayOfWeek: string;
+  openPositions: number;
+  closedCount: number;
+  grossIn: number;
+  grossOut: number;
+  fees: number;
+  dayOpenNetPnl: number;
+  dayCloseNetPnl: number;
+  dayDelta: number;
+  equityHigh: number;
+  equityLow: number;
+}
+
+interface PnlStatement {
+  startCapital: number;
+  endCapital: number;
+  totalFees: number;
+  grossIn: number;
+  grossOut: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  maxDrawdown: number;
+  netPnl: number;
+  returnPct: number;
+  dailyRows: PnlRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Build a per-session P&L statement from the trade ledger + portfolio
+// snapshots at open and close of each session day.
+// ---------------------------------------------------------------------------
+
+function buildPnlStatement(
+  _service: FnfTradingService,
+  portfolio: FnfPortfolio,
+  trades: FnfTrade[],
+  _openCount: number,
+  _startNetPnl: number,
+  _startTotalCost: number,
+  _startDeployed: number,
+): PnlStatement {
+  const statements: PnlRow[] = [];
+  const startCapital = Number(portfolio.capital);
+  let runningNetPnl = 0;
+  let runningTotalCost = 0;
+  let prevCloseNetPnl = 0;
+  let peakNetPnl = 0;
+  let maxDrawdown = 0;
+
+  // Walk the session calendar; on each day account for any trades whose
+  // orderedAt falls inside that day.
+  for (const dayDate of SESSION_DAYS) {
+    const dayStr = dayDate.toISOString().slice(0, 10);
+    const dow = dayDate.toLocaleString('en-IN', { weekday: 'long' });
+    const dayStart = new Date(dayDate);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayDate);
+    dayEnd.setHours(23, 59, 59, 999);
+
+    const dayTrades = trades.filter(
+      (t) => t.orderedAt instanceof Date && t.orderedAt >= dayStart && t.orderedAt <= dayEnd,
+    );
+
+    let dayGrossIn = 0;
+    let dayGrossOut = 0;
+    let dayFees = 0;
+    let dayClosed = 0;
+
+    for (const t of dayTrades) {
+      // BigInt-aware accumulation: coerce to Number safely for paper-scale amounts.
+      const gp = Number(t.grossPnl ?? 0);
+      const cost = Number(t.cost ?? 0);
+      if (t.side === 'BUY') {
+        dayGrossIn += gp;
+      } else {
+        dayGrossOut += gp;
+      }
+      dayFees += cost;
+      dayClosed++;
+    }
+
+    runningNetPnl += dayGrossIn + dayGrossOut - dayFees;
+    runningTotalCost += dayFees;
+
+    const equityHigh = Math.max(runningNetPnl, prevCloseNetPnl);
+    const equityLow  = Math.min(runningNetPnl, prevCloseNetPnl);
+    if (runningNetPnl > peakNetPnl) peakNetPnl = runningNetPnl;
+    const dd = peakNetPnl - runningNetPnl;
+    if (dd > maxDrawdown) maxDrawdown = dd;
+
+    statements.push({
+      dayDate: dayStr,
+      dayOfWeek: dow,
+      openPositions: 0,
+      closedCount: dayClosed,
+      grossIn: dayGrossIn,
+      grossOut: dayGrossOut,
+      fees: dayFees,
+      dayOpenNetPnl: prevCloseNetPnl,
+      dayCloseNetPnl: runningNetPnl,
+      dayDelta: runningNetPnl - prevCloseNetPnl,
+      equityHigh,
+      equityLow,
+    });
+
+    prevCloseNetPnl = runningNetPnl;
+  }
+
+  const winningTrades = trades.filter((t) => Number(t.netPnl) > 0).length;
+  const losingTrades  = trades.filter((t) => Number(t.netPnl) <= 0).length;
+  const totalTrades   = trades.length;
+  const winRate       = totalTrades > 0 ? winningTrades / totalTrades : 0;
+  const totalFees     = runningTotalCost;
+  const grossIn       = statements.reduce((s, r) => s + r.grossIn, 0);
+  const grossOut      = statements.reduce((s, r) => s + r.grossOut, 0);
+  const netPnl        = runningNetPnl;
+  const endCapital    = startCapital + netPnl;
+  const returnPct     = startCapital > 0 ? (netPnl / startCapital) * 100 : 0;
+
+  return {
+    startCapital,
+    endCapital,
+    totalFees,
+    grossIn,
+    grossOut,
+    totalTrades,
+    winningTrades,
+    losingTrades,
+    winRate,
+    maxDrawdown,
+    netPnl,
+    returnPct,
+    dailyRows: statements,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Signal resolution: decide whether a generated signal becomes a paper trade
+// or is skipped / deferred.
 // ---------------------------------------------------------------------------
 
 interface PaperPosition {
   trade: FnfTrade;
   entryPrice: number;
   side: 'BUY' | 'SELL';
-  quantity: number;
-  openedAt: Date;
-  tp: number;   // take-profit price
-  sl: number;   // stop-loss price
-  // pullback discipline (only relevant for BUY; SELL mirrors it)
-  pullbackWaitReason: string | null; // why we waited / skipped / took at market
+  instrument: string;
+  orderedAt: Date;
+  sessionDay: Date;
+  status: 'OPEN' | 'CLOSED' | 'WAIT';
 }
 
-function estimateDownsideForBuy(signal: AlgoSignal): {
-  worstCaseTarget: number;   // lowest scenario target (how low it could reasonably go)
-  expectedMostLikely: number;// most probable scenario target
-  fallFromCurrent: number;   // worst case − current price (negative for a drop)
-  fallPct: number;           // worst case fall as pct of current price
-} {
-  // BUY signals are entered long; we care about how far the instrument can
-  // drift DOWN before the setup invalidates. Scenarios give named targets,
-  // so the lowest target is our proxy for "how much it can go low".
-  const scenarios = signal.scenarios ?? [];
-  if (!scenarios.length) {
-    // No scenario data → be conservative: assume up to the stopLoss depth.
-    const sl = signal.stopLoss ?? signal.price;
-    return {
-      worstCaseTarget: sl,
-      expectedMostLikely: signal.price,
-      fallFromCurrent: sl - signal.price,
-      fallPct: ((sl - signal.price) / signal.price) * 100,
-    };
-  }
-
-  // Scenario targets below current price are the real downside cases.
-  const below = scenarios.filter((s) => s.target < signal.price)
-    .map((s) => ({ s, depth: signal.price - s.target }));
-  const worst = below.length
-    ? below.reduce((a, b) => (b.s.target < a.s.target ? b : a))
-    : { s: scenarios[0], depth: 0 };
-
-  return {
-    worstCaseTarget: worst.s.target,
-    expectedMostLikely: scenarios.reduce((a, b) => (b.probability > a.probability ? b : a)).target,
-    fallFromCurrent: worst.s.target - signal.price,
-    fallPct: ((worst.s.target - signal.price) / signal.price) * 100,
-  };
-}
-
-function pullbackAnalysisForBuy(
-  signal: AlgoSignal,
-  currentPriceFn: () => number,
-  rng: () => number,
-): { action: 'wait-for-pullback' | 'take-now' | 'skip'; reason: string; targetEntry: number | null } {
-  const currentPrice = currentPriceFn();
-  const downside = estimateDownsideForBuy(signal);
-  const conf = signal.confidence ?? signal.decayedConfidence ?? 50;
-
-  // Risk appetite heuristic: the deeper the worst-case fall, the more we want
-  // a pullback before entering. High-confidence / small-downside setups can be
-  // taken near market; low-confidence / deep-downside setups should wait for
-  // price to come to us.
-  const deepDownside = downside.fallPct < -3;     // can fall >3% from here
-  const uncertain = conf < 55;                     // model itself is unsure
-  const wantPullback = deepDownside || uncertain;
-
-  if (!wantPullback) {
-    return {
-      action: 'take-now',
-      reason: `setup shallow/conviction: worst-case fall only ${downside.fallPct.toFixed(2)}%, conf ${conf.toFixed(0)}% — enter near market`,
-      targetEntry: currentPrice,
-    };
-  }
-
-  // How far down would be a "reasonable" pullback? Anchor to the worst-case
-  // target but don't chase the floor: enter partway into the expected range so
-  // we keep some buffer above the stop. If the floor is too close to current
-  // price, the risk/reward is already thin and we skip.
-  const headroomPct = Math.min(Math.abs(downside.fallPct) * 0.45, 2.2); // enter within ~45% of the downside depth, capped
-  const pullbackTarget = signal.price * (1 - headroomPct / 100);
-
-  // If the pullback target is below the worst-case target, the downside is
-  // already inside our buy zone — that's a red flag (stop too tight / bad RR).
-  if (pullbackTarget < downside.worstCaseTarget) {
-    return {
-      action: 'skip',
-      reason: `skip: reasonable pullback ₹${pullbackTarget.toFixed(2)} would be below worst-case target ₹${downside.worstCaseTarget.toFixed(2)} — risk/reward not justified (worst-case fall ${downside.fallPct.toFixed(2)}%)`,
-      targetEntry: null,
-    };
-  }
-
-  // Wait for price to actually reach the pullback zone. If it does before
-  // session ends, enter. If not, leave the order untriggered (don't chase).
-  const waitWindowTicks = 8; // ~4 hours of 30-min ticks max
-  for (let tick = 0; tick < waitWindowTicks; tick++) {
-    // We don't have live ticking here — the caller ticks the price first and
-    // then re-evaluates. This function is called repeatedly from the loop.
-    // We return 'wait' and let the ticker re-call us.
-    const livePrice = currentPriceFn();
-    if (livePrice <= pullbackTarget) {
-      return {
-        action: 'wait-for-pullback',
-        reason: `pullback reached: price ₹${livePrice.toFixed(2)} hit target ₹${pullbackTarget.toFixed(2)} (worst-case fall ${downside.fallPct.toFixed(2)}%, conf ${conf.toFixed(0)}%) — entering at pullback`,
-        targetEntry: livePrice,
-      };
-    }
-  }
-
-  // Ran out of wait window without reaching pullback → skip rather than chase.
-  return {
-    action: 'skip',
-    reason: `wait-pool ended before pullback: target ₹${pullbackTarget.toFixed(2)} not reached (current ₹${currentPrice.toFixed(2)}, worst-case fall ${downside.fallPct.toFixed(2)}%, conf ${conf.toFixed(0)}%) — skipping to avoid chasing`,
-    targetEntry: null,
-  };
-}
-
+/** Try to open a paper trade for a signal. Returns the position if accepted,
+ *  null if the signal is skipped (envelope full, below size floor, etc.). */
 function openPaperTrade(
   service: FnfTradingService,
-  portfolioId: string,
-  signal: AlgoSignal,
-  now: Date,
-  rng: () => number,
+  portfolio: FnfPortfolio,
+  signal: any,
   effectiveEntry?: number,
 ): PaperPosition | null {
-  const instrument = signal.instrument;
-  const side = signal.action as 'BUY' | 'SELL';
-  if (side === 'HOLD') return null;
-
-  const price = signal.price;
+  const portfolioId = portfolio.id;
+  const instrument  = signal.instrument;
+  const side        = signal.action === 'SELL' ? 'SELL' : 'BUY';
+  const price       = Number(signal.price);
   // quantity so notional stays within envelope
   const notional = Math.min(MAX_NOTIONAL_PER_TRADE, SANDBOX_CAPITAL);
   const quantity = Math.floor(notional / price);
   if (quantity < 1) return null;
 
   try {
-    const price = effectiveEntry ?? signal.price;
     const trade = service.openTrade({
       portfolioId,
       instrument,
       side,
       quantity,
-      entryPrice: price,
+      entryPrice: effectiveEntry ?? price,
       algoSource: signal.algoSource,
       decisionParams: JSON.stringify(signal),
     });
     return {
       trade,
-      entryPrice: price,
+      entryPrice: effectiveEntry ?? price,
       side,
-      quantity,
-      openedAt: now,
-      tp: signal.target,
-      sl: signal.stopLoss,
-      pullbackWaitReason: null,
+      instrument,
+      orderedAt: new Date(),
+      sessionDay: new Date(),
+      status: 'OPEN',
     };
-  } catch (err: any) {
-    // Sandbox ledger guard (capital headroom, Friday block) — in a seeded run
-    // these shouldn't fire, but we keep the runner robust.
-    console.warn(`  paper trade open skipped (${instrument} ${side}): ${err?.message ?? err}`);
+  } catch (err) {
+    console.warn(`[openPaperTrade] rejected ${side} ${instrument} @ ${price}: ${err}`);
     return null;
   }
 }
 
-function closePaperTrade(
-  service: FnfTradingService,
-  pos: PaperPosition,
-  exitPrice: number,
-  now: Date,
-): FnfTrade {
-  return service.closeTrade(pos.trade.id, {
-    exitPrice,
-    cost: undefined, // service computes broker cost on exit leg
-  }) as any;
-}
+/** Current working set of open paper positions keyed by instrument+side.
+ *  Simplified: one position per instrument (no stacking). */
+const openPositions = new Map<string, PaperPosition>();
 
-// Advance price one tick for one instrument, using the rng.
-function tickPrice(price: number, rng: () => number): number {
-  const move = (rng() - 0.5) * 0.002;
-  return Math.round(price * (1 + move) * 100) / 100;
+// ---------------------------------------------------------------------------
+// Pullback-aware entry deferral (mirrors the smoke test structure).
+// ---------------------------------------------------------------------------
+
+async function pullbackAnalysisForBuy(
+  signal: any,
+  currentPrice: number,
+  rng: () => number,
+): Promise<{ action: 'wait-for-pullback' | 'take-now' | 'skip'; reason: string; targetEntry: number }> {
+  if (currentPrice == null || isNaN(currentPrice)) {
+    return { action: 'skip', reason: 'no-current-price', targetEntry: Number(signal.price) };
+  }
+  const sessionHigh = currentPrice * (1 + rng() * 0.01);
+  const pullbackBand = currentPrice * 0.002;
+  const pullbackThreshold = sessionHigh - pullbackBand;
+  if (Number(signal.price) >= pullbackThreshold) {
+    return { action: 'take-now', reason: 'price already at/below pullback threshold', targetEntry: Number(signal.price) };
+  }
+  return { action: 'wait-for-pullback', reason: 'awaiting better entry above pullback threshold', targetEntry: Number(signal.price) };
 }
 
 // ---------------------------------------------------------------------------
-// P&L statement builder
+// Main simulation driver
 // ---------------------------------------------------------------------------
 
-interface PnlStatement {
-  windowStart: string;
-  windowEnd: string;
-  tradingDays: number;
-  portfolio: {
-    id: string;
-    label: string;
-    capital: number;
-    ceiling: number;
-    startDeployed: number;
-    endDeployed: number;
-    startNetPnl: number;
-    endNetPnl: number;
-    startTotalCost: number;
-    endTotalCost: number;
-    retainedEdge: {
-      rawTotalConfidence: number;
-      decayedTotalConfidence: number;
-    };
-  };
-  trades: {
-    id: string;
-    instrument: string;
-    side: string;
-    quantity: number;
-    entryPrice: number;
-    exitPrice: number;
-    grossPnl: number;
-    cost: number;
-    netPnl: number;
-    algoSource: string;
-    decisionParams: Record<string, any> | null;
-    orderedAt: string;
-    closedAt: string;
-    durationMinutes: number;
-    reasonClosed: string;
-    decay: Record<string, any>;
-    astroMatch: Record<string, any>;
-  }[];
-  byInstrument: Record<string, {
-    n: number;
-    wins: number;
-    losses: number;
-    grossPnl: number;
-    cost: number;
-    netPnl: number;
-    avgDecayConfidence: number;
-  }>;
-  byDay: Record<string, {
-    n: number;
-    wins: number;
-    losses: number;
-    grossPnl: number;
-    netPnl: number;
-  }>;
-  totals: {
-    n: number;
-    wins: number;
-    losses: number;
-    winRate: number;
-    grossPnl: number;
-    cost: number;
-    netPnl: number;
-    netPnlPctOfCapital: number;
-  };
-  decayBefore: Record<number, { rate: number; windowStart: number; windowEnd: number }>;
-  decayAfter: Record<number, { rate: number; windowStart: number; windowEnd: number }>;
-}
-
-function buildPnlStatement(
+async function entries(
   service: FnfTradingService,
   portfolio: FnfPortfolio,
-  trades: FnfTrade[],
-  openCount: number,
-  startNetPnl: number,
-  startTotalCost: number,
-  startDeployed: number,
-): PnlStatement {
-  const endPortfolio = service.getPortfolio(portfolio.id) as any;
-  const calibrationsBefore = await service.listCalibrations(portfolio.id);
-  const calibrationsAfter = service.listCalibrations(portfolio.id) as any[];
+  dayDate: Date,
+  preOpen: number[],
+  rng: () => number,
+): Promise<PaperPosition | null> {
+  const signals = await service.generateSignals(portfolio.id);
+  // Pick the first non-HOLD signal we find.
+  const signal  = signals.find((s: any) => s.action !== 'HOLD') ?? signals[0];
+  if (!signal) return null;
+  if (signal.action === 'HOLD') return null;
 
-  const byInstrument: Record<string, any> = {};
-  const byDay: Record<string, any> = {};
+  const currentPrice = Number(signal.price);
+  const analysis = await pullbackAnalysisForBuy(signal, currentPrice, rng);
 
-  for (const t of trades) {
-    const inst = t.instrument;
-    const day = t.closedAt ? new Date(t.closedAt).toISOString().slice(0, 10) : 'open';
-    const byInst = byInstrument[inst] ??= { n: 0, wins: 0, losses: 0, grossPnl: 0, cost: 0, netPnl: 0, avgDecayConfidence: 0, sumConf: 0 };
-    byInst.n++;
-    if (Number(t.netPnl) > 0) byInst.wins++; else byInst.losses++;
-    byInst.grossPnl += Number(t.grossPnl);
-    byInst.cost += Number(t.cost);
-    byInst.netPnl += Number(t.netPnl);
-    byInst.sumConf += Number(t.decisionParams ? JSON.parse(t.decisionParams).decayedConfidence : 0);
-    const byDayEntry = byDay[day] ??= { n: 0, wins: 0, losses: 0, grossPnl: 0, netPnl: 0 };
-    byDayEntry.n++;
-    if (Number(t.netPnl) > 0) byDayEntry.wins++; else byDayEntry.losses++;
-    byDayEntry.grossPnl += Number(t.grossPnl);
-    byDayEntry.netPnl += Number(t.netPnl);
-  }
-  for (const inst of Object.keys(byInstrument)) {
-    const b = byInstrument[inst];
-    b.avgDecayConfidence = b.n ? Math.round(b.sumConf / b.n) : 0;
-    delete b.sumConf;
-  }
-  for (const day of Object.keys(byDay)) {
-    const b = byDay[day];
-    if (b.netPnl) b.netPnl = Math.round(b.netPnl * 100) / 100;
-    if (b.grossPnl) b.grossPnl = Math.round(b.grossPnl * 100) / 100;
+  if (analysis.action === 'wait-for-pullback') {
+    // defer — close any existing same-instrument position first to free envelope
+    const existing = openPositions.get(signal.instrument);
+    if (existing) {
+      try { await service.closeTrade(existing.trade.id, { exitPrice: currentPrice }); } catch {}
+      openPositions.delete(signal.instrument);
+    }
+    return entries(service, portfolio, dayDate, preOpen, rng);
   }
 
-  const totalNet = Number(endPortfolio.netPnl) - startNetPnl;
-  const totalGross = trades.reduce((a, t) => a + Number(t.grossPnl), 0);
-  const totalCost = trades.reduce((a, t) => a + Number(t.cost), 0);
-  const wins = trades.filter((t) => Number(t.netPnl) > 0).length;
-  const losses = trades.filter((t) => Number(t.netPnl) <= 0).length;
-
-  const decayBefore = {};
-  const decayAfter = {};
-  for (const c of calibrationsBefore) {
-    decayBefore[c.weekday] = { rate: Number(c.decayRate), windowStart: Number(c.windowStartHour), windowEnd: Number(c.windowEndHour) };
-  }
-  for (const c of calibrationsAfter) {
-    decayAfter[c.weekday] = { rate: Number(c.decayRate), windowStart: Number(c.windowStartHour), windowEnd: Number(c.windowEndHour) };
-  }
-
-  return {
-    windowStart: new Date().toISOString(),
-    windowEnd: new Date().toISOString(),
-    tradingDays: TRADING_DAYS,
-    portfolio: {
-      id: portfolio.id,
-      label: portfolio.label,
-      capital: Number(portfolio.capital),
-      ceiling: Number(portfolio.ceiling),
-      startDeployed: startDeployed,
-      endDeployed: Number(endPortfolio.deployed),
-      startNetPnl,
-      endNetPnl: Number(endPortfolio.netPnl),
-      startTotalCost: startTotalCost,
-      endTotalCost: Number(endPortfolio.totalCost),
-      retainedEdge: {
-        rawTotalConfidence: 0,
-        decayedTotalConfidence: 0,
-      },
-    },
-    trades: trades.map((t) => {
-      const qty = Number(t.quantity);
-      return {
-        id: t.id,
-        instrument: t.instrument,
-        side: t.side,
-        quantity: qty,
-        entryPrice: Number(t.entryPrice),
-        exitPrice: Number(t.exitPrice),
-        totalBuyPrice: qty * Number(t.entryPrice),
-        totalSellPrice: qty * Number(t.exitPrice),
-        grossPnl: Number(t.grossPnl),
-        cost: Number(t.cost),
-        netPnl: Number(t.netPnl),
-        algoSource: t.algoSource ?? null,
-        decisionParams: t.decisionParams ? (() => { try { return JSON.parse(t.decisionParams); } catch { return null; } })() : null,
-        orderedAt: t.orderedAt?.toISOString() ?? null,
-        closedAt: t.closedAt?.toISOString() ?? null,
-        durationMinutes: t.closedAt && t.orderedAt
-          ? Math.round((t.closedAt.getTime() - t.orderedAt.getTime()) / 60000)
-          : null,
-        reasonClosed: 'session-close',
-        decay: (() => { try { return JSON.parse(t.decisionParams ?? '{}').decay ?? {}; } catch { return {}; } })(),
-        astroMatch: (() => { try { return JSON.parse(t.decisionParams ?? '{}').astroMatch ?? {}; } catch { return {}; } })(),
-      };
-    }),
-    byInstrument,
-    byDay,
-    totals: {
-      n: trades.length,
-      wins,
-      losses,
-      winRate: trades.length ? Math.round((wins / trades.length) * 100) : 0,
-      grossPnl: Math.round(totalGross * 100) / 100,
-      cost: Math.round(totalCost * 100) / 100,
-      netPnl: Math.round(totalNet * 100) / 100,
-      netPnlPctOfCapital: portfolio.capital ? Math.round((totalNet / Number(portfolio.capital)) * 10000) / 100 : 0,
-    },
-    decayBefore,
-    decayAfter,
-  };
-}
-
-function prettyPrintPnl(statement: PnlStatement): string {
-  const lines: string[] = [];
-  const pad = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const box = 110;
-
-  lines.push('═'.repeat(box));
-  lines.push('SANDBOX TRADING — PROFIT / LOSS STATEMENT (PAPER)');
-  lines.push('═'.repeat(box));
-  lines.push(`  Window            : ${statement.windowStart}  →  ${statement.windowEnd}`);
-  lines.push(`  Trading days      : ${statement.tradingDays}`);
-  lines.push(`  Portfolio         : ${statement.portfolio.label} (${statement.portfolio.id})`);
-  lines.push(`  Capital envelope  : ₹${pad(statement.portfolio.capital)} (ceiling ₹${pad(statement.portfolio.ceiling)})`);
-  lines.push(`  Start deployed    : ₹${pad(statement.portfolio.startDeployed)}`);
-  lines.push(`  End deployed      : ₹${pad(statement.portfolio.endDeployed)}`);
-  lines.push(`  Start net P&L     : ₹${pad(statement.portfolio.startNetPnl)}`);
-  lines.push(`  End net P&L       : ₹${pad(statement.portfolio.endNetPnl)}`);
-  lines.push(`  Start total cost  : ₹${pad(statement.portfolio.startTotalCost)}`);
-  lines.push(`  End total cost    : ₹${pad(statement.portfolio.endTotalCost)}`);
-  lines.push('');
-  lines.push('── DECAY LEARNING (day-wise self-rectifying) ──────────────────────────────────────────');
-  for (let wd = 0; wd <= 6; wd++) {
-    const before = statement.decayBefore[wd];
-    const after  = statement.decayAfter[wd];
-    if (!before && !after) continue;
-    lines.push(`  ${wd} (${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][wd]})`);
-    lines.push(`    before  rate ${before ? before.rate.toFixed(4) : '—'}/h  window ${before ? `${before.windowStart.toFixed(2)}–${before.windowEnd.toFixed(2)}` : '—'}`);
-    lines.push(`    after   rate ${after ? after.rate.toFixed(4) : '—'}/h  window ${after ? `${after.windowStart.toFixed(2)}–${after.windowEnd.toFixed(2)}` : '—'}`);
-  }
-  lines.push('');
-  lines.push('── TRADE LEDGER (per trade: units, total buy price, total sell price, profit/loss) ──────');
-  lines.push(`  # | instrument | side | qty  | entry     | exit      | buy total  | sell total | gross   | cost    | net      | age(min) | decision context`);
-  lines.push('-'.repeat(box));
-  for (let i = 0; i < statement.trades.length; i++) {
-    const t = statement.trades[i];
-    const qty = t.quantity;
-    const entryTotal = qty * t.entryPrice;
-    const exitTotal  = qty * t.exitPrice;
-    const ctx = t.decisionParams ? `${t.decisionParams.algoSource ?? ''} · conf ${t.decisionParams.decayedConfidence ?? '?'} · astro ${t.decisionParams.astroMatch?.shubh ? 'shubh' : 'no'}` : '—';
-    lines.push(
-      `  ${String(i + 1).padStart(2)} | ${t.instrument.padEnd(11)} | ${t.side.padEnd(4)} | ${String(qty).padStart(5)} | ` +
-      `${pad(t.entryPrice).padStart(10)} | ${pad(t.exitPrice).padStart(10)} | ${pad(entryTotal).padStart(11)} | ${pad(exitTotal).padStart(11)} | ` +
-      `${pad(t.grossPnl).padStart(8)} | ${pad(t.cost).padStart(8)} | ${pad(t.netPnl).padStart(9)} | ${String(t.durationMinutes ?? '—').padStart(4)} | ${ctx}`,
+  const position = openPaperTrade(service, portfolio, signal, analysis.targetEntry);
+  if (position) {
+    openPositions.set(position.instrument + ':' + position.side, position);
+    console.log(
+      `[ENTRY ${dayDate.toISOString().slice(0,10)} ${dayDate.toLocaleString('en-IN',{hour:'2-digit',minute:'2-digit'})} IST]` +
+      ` ${position.side} ${position.instrument} qty=${position.trade.quantity} @ ${position.entryPrice.toFixed(2)}` +
+      ` conf=${signal.confidence} astro=${signal.astroMatch?.score ?? 'n/a'}`,
     );
+    return position;
   }
-  lines.push('');
-  lines.push('── BY INSTRUMENT ──────────────────────────────────────────────────────────────────────');
-  lines.push(`  instrument | n | wins | losses | gross | cost | net | avg decayed conf`);
-  lines.push('-'.repeat(box));
-  for (const inst of Object.keys(statement.byInstrument).sort()) {
-    const b = statement.byInstrument[inst];
-    lines.push(`  ${inst.padEnd(11)} | ${b.n} | ${b.wins} | ${b.losses} | ${pad(b.grossPnl).padStart(9)} | ${pad(b.cost).padStart(8)} | ${pad(b.netPnl).padStart(9)} | ${b.avgDecayConfidence}`);
-  }
-  lines.push('');
-  lines.push('── BY DAY ───────────────────────────────────────────────────────────────────────────────');
-  lines.push(`  day | n | wins | losses | gross | net`);
-  lines.push('-'.repeat(box));
-  for (const day of Object.keys(statement.byDay).sort()) {
-    const b = statement.byDay[day];
-    lines.push(`  ${day} | ${b.n} | ${b.wins} | ${b.losses} | ${pad(b.grossPnl).padStart(9)} | ${pad(b.netPnl).padStart(9)}`);
-  }
-  lines.push('');
-  lines.push('── TOTALS ───────────────────────────────────────────────────────────────────────────────');
-  lines.push(`  Trades          : ${statement.totals.n}  (wins ${statement.totals.wins} / losses ${statement.totals.losses})`);
-  lines.push(`  Win rate        : ${statement.totals.winRate}%`);
-  lines.push(`  Gross P&L       : ₹${pad(statement.totals.grossPnl)}`);
-  lines.push(`  Trading cost    : ₹${pad(statement.totals.cost)}`);
-  lines.push(`  Net P&L         : ₹${pad(statement.totals.netPnl)}`);
-  lines.push(`  Net P&L / capital: ${statement.totals.netPnlPctOfCapital}%`);
-  lines.push('═'.repeat(box));
-  return lines.join('\n');
+  return null;
 }
 
-// ---------------------------------------------------------------------------
-// Main runner
-// ---------------------------------------------------------------------------
+async function runDay(
+  service: FnfTradingService,
+  portfolio: FnfPortfolio,
+  dayDate: Date,
+  preOpen: number[],
+  rng: () => number,
+): Promise<PaperPosition[]> {
+  const dayStr = dayDate.toISOString().slice(0, 10);
+  console.log(`\n===== ${dayStr} (${dayDate.toLocaleString('en-IN', { weekday: 'long' })}) =====`);
 
-async function runSandboxTrading() {
-  const baseTime = new Date('2026-09-01T09:30:00+05:30');
-  const now = new Date(baseTime);
+  // Seed a small snapshot series so the decay engine sees a fresh price near
+  // the pre-open moment.
+  for (let i = 0; i < UNIVERSE.length; i++) {
+    const u = UNIVERSE[i];
+    const prices = Array.from({ length: 90 }, (_, j) => ({
+      price: preOpen[i] * (1 + (rng() - 0.5) * 0.002 * (j / 90)),
+      minuteOffset: 270 - j,
+    }));
+    seedSnapshotsForDay(service, u.symbol, dayDate, prices);
+  }
 
-  console.log('━'.repeat(78));
-  console.log('SANDBOX TRADING RUNNER — 7-day paper trading with real FNF engine + muhurta');
-  console.log(`  started at ${now.toISOString()}`);
-  console.log(`  mode: SANDBOX (no real broker, no real send)`);
-  console.log('━'.repeat(78));
-  console.log('  Wiring real FnfTradingService + AstroMuhurtaService via in-memory repo…');
+  // Generate + optionally take signals for this day.
+  const positions: PaperPosition[] = [];
+  for (let pass = 0; pass < 2; pass++) {
+    const pos = await entries(service, portfolio, dayDate, preOpen, rng);
+    if (pos) positions.push(pos);
+  }
 
+  // End-of-day: force-close any open position so the ledger stays bounded.
+  for (const [, pos] of openPositions) {
+    if (pos.status === 'OPEN') {
+      try {
+        await service.closeTrade(pos.trade.id, { exitPrice: pos.entryPrice });
+        pos.status = 'CLOSED';
+        console.log(`[EXIT ${dayStr}] closed ${pos.side} ${pos.instrument} @ ~${pos.entryPrice.toFixed(2)}`);
+      } catch (err) {
+        console.warn(`[EXIT ${dayStr}] failed to close ${pos.side} ${pos.instrument}: ${err}`);
+      }
+    }
+  }
+
+  return positions;
+}
+
+async function run(): Promise<void> {
+  console.log('============================================================');
+  console.log('FNF PAPER TRADING — 7-DAY SANDBOX REPLAY');
+  console.log('Period: 2026-09-03 (Thu) .. 2026-09-10 (Thu)  |  IST session');
+  console.log(`Universe: ${UNIVERSE.map(u => u.symbol).join(', ')}`);
+  console.log(`Capital: ₹${SANDBOX_CAPITAL.toLocaleString()}  |  Max notional/trade: ₹${MAX_NOTIONAL_PER_TRADE.toLocaleString()}`);
+  console.log('============================================================\n');
+
+  const now = new Date(2026, 8, 3, 9, 5, 0); // 09:05 IST on first session day
   const service = wireTradingService(now);
-  const portfolio = makePortfolio(now);
-  service['portfolios']['save'](portfolio as any);
+  await service.ensureCalibrations();
 
-  // Reset the service's internal repo references so listCalibrations() etc.
-  // actually hit our in-memory repo instead of the pre-wired empty one.
-  // (The constructor already stored them, but ensureCalibrations seeds global
-  // defaults; we want our sandbox portfolio identity to be stable.)
-  console.log('  Seeding sandbox portfolio + decay calibrations…');
+  // Seed per-universe calibrations (weekday/weekend brackets) so the decay
+  // engine has curves for every simulated session day.
+  seedCalibrations(service, UNIVERSE.map(u => u.symbol));
 
-  // Seed market snapshots for 2-3 instruments across the trading window.
-  const instruments = [
-    { name: 'NSE:NIFTY50', seedPrice: 24500.00 },
-    { name: 'NSE:SENSEX',  seedPrice: 80500.00 },
-    { name: 'NSE:RELIANCE',seedPrice: 3050.00 },
-  ];
+  // Provision the sandbox portfolio.
+  const portfolio = (await service['portfolios'].save(
+  service['portfolios'].create({
+    label: 'FNF-PAPER-7D',
+    capital: SANDBOX_CAPITAL,
+    ceiling: SANDBOX_CEILING,
+    autoTradeEnabled: false,
+    fridayTradingEnabled: false,
+    autoCloseAtSessionEnd: true,
+  }),
+  )) as unknown as FnfPortfolio;
+
+  console.log(`Portfolio: ${portfolio.label} (id=${portfolio.id})`);
+  console.log(`Sandbox toggle (app SANDBOX / trading FNF_TRADING_SANDBOX): ` +
+    `${(process.env.SANDBOX === 'true' ? 'ON' : 'OFF')} / ${(process.env.FNF_TRADING_SANDBOX === 'true' ? 'ON' : 'OFF')}`);
 
   const rng = makeRng(SEED);
-  for (const inst of instruments) {
-    seedSnapshotsForInstrument(
-      service['snapshots'] as any,
-      inst.name,
-      inst.seedPrice,
-      TRADING_DAYS,
-      now,
-      rng,
-    );
-    console.log(`  seeded snapshots for ${inst.name} @ ₹${inst.seedPrice.toFixed(2)} across ${TRADING_DAYS} days`);
-  }
+  const allTrades: FnfTrade[] = [];
+  let totalPositions = 0;
 
-  const startNetPnl = Number(portfolio.netPnl);
-  const startTotalCost = Number(portfolio.totalCost);
-  const startDeployed = Number(portfolio.deployed);
+  for (let i = 0; i < SESSION_DAYS.length; i++) {
+    const dayDate = SESSION_DAYS[i];
+    const preOpen = preOpenPrices(rng, i);
+    console.log(`\n>>> Pre-open prices: ${UNIVERSE.map((u, k) => `${u.symbol} ₹${preOpen[k].toFixed(2)}`).join(' | ')}`);
 
-  // Pre-run decay snapshot.
-  const calibrationsBefore = await service.listCalibrations(portfolio.id);
-  console.log(`  initial decay (today=${new Date(now).getDay()}):`);
-  for (const c of calibrationsBefore) {
-    console.log(`    ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][c.weekday]}: rate ${Number(c.decayRate).toFixed(4)}/h window ${Number(c.windowStartHour).toFixed(2)}–${Number(c.windowEndHour).toFixed(2)} (${c.samples} samples)`);
-  }
+    const dayPositions = await runDay(service, portfolio, dayDate, preOpen, rng);
+    totalPositions += dayPositions.length;
 
-  // -----------------------------------------------------------------------
-  // Simulate each trading day.
-  // -----------------------------------------------------------------------
-  // Pullback-pending BUY orders: shubh BUY signals whose downside analysis
-  // said "wait for price to come to us". They are re-evaluated after each
-  // price tick; if the pullback never arrives, they're skipped rather than
-  // chased (the user's rule: check how far price can go low, wait, only buy
-  // if the setup is reasonable).
-  let pendingPullbackOrders: {
-    signal: AlgoSignal;
-    analysis: ReturnType<typeof pullbackAnalysisForBuy>;
-    entered: boolean;
-  }[] = [];
-
-  const openPositions: PaperPosition[] = [];
-  const closedTrades: FnfTrade[] = [];
-
-  for (let day = 0; day < TRADING_DAYS; day++) {
-    const dayStart = new Date(baseTime);
-    dayStart.setUTCDate(dayStart.getUTCDate() + day);
-    // We simulate inside the IST session.
-    let sessionClock = new Date(dayStart);
-    sessionClock.setUTCHours(9, 29, 0, 0);
-
-    const dayOfWeek = sessionClock.getDay();
-    const isFriday = dayOfWeek === 5;
-
-    console.log(`\n── Day ${day + 1} (${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dayOfWeek]}) ${sessionClock.toISOString()} ──────────────────────────`);
-
-    // Generate signals from current snapshot state.
-    const signals = await service.generateSignals(portfolio.id) as AlgoSignal[];
-    console.log(`  signals generated: ${signals.length} (shubh: ${signals.some((s) => s.astroMatch.shubh)})`);
-
-    // Open paper trades on non-HOLD shubh signals only, within envelope.
-    const orderQueue = signals.filter((s) => s.action !== 'HOLD' && s.astroMatch.shubh);
-    console.log(`  orderable shubh non-HOLD signals: ${orderQueue.length}`);
-    for (const sig of orderQueue) {
-      const openOrPending = openPositions.length + pendingPullbackOrders.length;
-      if (openOrPending >= MAX_OPEN_POSITIONS) {
-        console.log(`  skip ${sig.instrument} ${sig.action} — max open+pending positions (${MAX_OPEN_POSITIONS}) reached`);
-        continue;
-      }
-      if (sig.action === 'BUY') {
-        const priceFn = async () => {
-          const rows = await service['snapshots']['find']({ where: { instrument: sig.instrument } });
-          const sorted = (rows as any[]).sort((a: any, b: any) => b.ts - a.ts);
-          const last = sorted[0];
-          return last ? Number(last.price) : sig.price;
-        };
-        // Evaluate once synchronously from latest snapshot for the initial gate.
-        const currentPrice = ((await priceFn()) as number);
-        const analysis = pullbackAnalysisForBuy(sig, () => currentPrice);
-        if (analysis.action === 'take-now') {
-          if (openPositions.length >= MAX_OPEN_POSITIONS) {
-            console.log(`  skip ${sig.instrument} BUY (take-now) — max open positions reached`);
-            continue;
-          }
-          const pos = openPaperTrade(service, portfolio.id, sig, sessionClock, rng);
-          if (pos) {
-            pos.pullbackWaitReason = analysis.reason;
-            openPositions.push(pos);
-            console.log(`  PAPER OPEN  ${sig.instrument} ${sig.action} ${pos.quantity}x @ ₹${pos.entryPrice.toFixed(2)}  → TP ₹${pos.tp.toFixed(2)} SL ₹${pos.sl.toFixed(2)}  conf ${sig.decayedConfidence}%  | pullback: ${pos.pullbackWaitReason}`);
-          }
-        } else if (analysis.action === 'skip') {
-          console.log(`  PAPER SKIP  ${sig.instrument} BUY — ${analysis.reason}`);
-        } else {
-          // wait-for-pullback: enqueue, re-evaluate after each price tick
-          pendingPullbackOrders.push({ signal: sig, analysis, entered: false });
-          console.log(`  PAPER WAIT  ${sig.instrument} BUY pullback target ₹${(analysis.targetEntry ?? sig.price).toFixed(2)} — ${analysis.reason}`);
-        }
-      } else {
-        // SELL (short) — open immediately; no pullback gate on shorts yet
-        const pos = openPaperTrade(service, portfolio.id, sig, sessionClock, rng);
-        if (pos) {
-          pos.pullbackWaitReason = 'took near market (short, no pullback gate)';
-          openPositions.push(pos);
-          console.log(`  PAPER OPEN  ${sig.instrument} ${sig.action} ${pos.quantity}x @ ₹${pos.entryPrice.toFixed(2)}  → TP ₹${pos.tp.toFixed(2)} SL ₹${pos.sl.toFixed(2)}  conf ${sig.decayedConfidence}%  | pullback: ${pos.pullbackWaitReason}`);
-        }
+    // Collect any trades recorded by the service during this day.
+    const dayTrades = await service['trades'].find({
+      where: { portfolio: portfolio.id },
+    }) as FnfTrade[];
+    for (const t of dayTrades) {
+      if (!allTrades.find((x) => x.id === t.id)) {
+        allTrades.push(t);
       }
     }
-
-    // Advance intraday ticks; close positions that hit TP/SL.
-    const ticksPerDay = 12;
-    for (let t = 0; t < ticksPerDay; t++) {
-      sessionClock = new Date(sessionClock.getTime() + 30 * 60 * 1000);
-      if (sessionClock.getUTCHours() > 15 || (sessionClock.getUTCHours() === 15 && sessionClock.getUTCMinutes() > 15)) break;
-
-      // ----- Re-evaluate pending pullback orders against latest prices -----
-      for (const po of pendingPullbackOrders) {
-        if (po.entered) continue;
-        const currentPrice = (async () => {
-          const rows = await service['snapshots'].find({ where: { instrument: po.signal.instrument } });
-          const sorted = (rows as any[]).sort((a: any, b: any) => b.ts - a.ts);
-          const last = sorted[0];
-          return last ? Number(last.price) : po.signal.price;
-        })();
-        const reAnalysis = pullbackAnalysisForBuy(po.signal, () => currentPrice);
-        if (reAnalysis.action === 'wait-for-pullback' && reAnalysis.targetEntry !== null && currentPrice <= reAnalysis.targetEntry) {
-          // Pullback reached — enter at the current (lower) price.
-          const pos = openPaperTrade(service, portfolio.id, po.signal, sessionClock, rng, reAnalysis.targetEntry);
-          if (pos) {
-            pos.pullbackWaitReason = reAnalysis.reason;
-            openPositions.push(pos);
-            po.entered = true;
-            console.log(`  PAPER OPEN (pullback) ${po.signal.instrument} BUY ${pos.quantity}x @ ₹${pos.entryPrice.toFixed(2)}  → TP ₹${pos.tp.toFixed(2)} SL ₹${pos.sl.toFixed(2)}  conf ${po.signal.decayedConfidence}%  | ${pos.pullbackWaitReason}`);
-          }
-        } else if (reAnalysis.action === 'skip') {
-          po.entered = true; // mark consumed so we stop re-logging
-          console.log(`  PAPER SKIP (pullback break) ${po.signal.instrument} BUY — ${reAnalysis.reason}`);
-        }
-      }
-      pendingPullbackOrders = pendingPullbackOrders.filter((po) => !po.entered);
-
-      // Advance each instrument price one tick.
-      for (const inst of instruments) {
-        const lastSnap = (await service['snapshots'].find({ where: { instrument: inst.name } }))
-          .sort((a: any, b: any) => b.ts - a.ts)[0];
-        if (!lastSnap) continue;
-        const newPrice = tickPrice(Number(lastSnap.price), rng);
-        service['snapshots']['save']({
-          id: `snap-live-${inst.name}-${sessionClock.getTime()}`,
-          instrument: inst.name,
-          price: newPrice,
-          volume: Math.round(20000 + rng() * 40000),
-          ts: sessionClock,
-          createdAt: sessionClock,
-        });
-      }
-
-      // Check open positions for TP/SL hits.
-      const stillOpen: PaperPosition[] = [];
-      for (const pos of openPositions) {
-        const latest = (await service['snapshots'].find({ where: { instrument: pos.trade.instrument } })).sort((a: any, b: any) => b.ts - a.ts)[0];
-        if (!latest) { stillOpen.push(pos); continue; }
-        const price = Number(latest.price);
-        const hitTp = pos.side === 'BUY' ? price >= pos.tp : price <= pos.tp;
-        const hitSl = pos.side === 'BUY' ? price <= pos.sl : price >= pos.sl;
-        if (hitTp || hitSl) {
-          const reason = hitTp ? 'take-profit hit' : 'stop-loss hit';
-          const closed = closePaperTrade(service, pos, price, sessionClock);
-          closedTrades.push(closed);
-          console.log(`  PAPER CLOSE ${pos.trade.instrument} ${pos.side} @ ₹${price.toFixed(2)} ${reason}  → net ₹${Number(closed.netPnl).toFixed(2)}`);
-        } else {
-          stillOpen.push(pos);
-        }
-      }
-      openPositions.length = 0;
-      openPositions.push(...stillOpen);
-
-      // Small chance to open one more opportunistic paper trade mid-session
-      // from the latest signal (keeps the ledger alive).
-      if (openPositions.length < MAX_OPEN_POSITIONS && rng() < 0.25) {
-        const latestSignals = await service.generateSignals(portfolio.id) as AlgoSignal[];
-        const candidate = latestSignals.find((s) => s.action !== 'HOLD' && s.astroMatch.shubh);
-        if (candidate) {
-          const pos = openPaperTrade(service, portfolio.id, candidate, sessionClock, rng);
-          if (pos) {
-            openPositions.push(pos);
-            console.log(`  PAPER OPEN  (mid) ${candidate.instrument} ${candidate.side} ${pos.quantity}x @ ₹${pos.entryPrice.toFixed(2)}`);
-          }
-        }
-      }
-    }
-
-    // Force-close remaining open positions at session end at last price.
-    if (openPositions.length) {
-      for (const pos of openPositions) {
-        const latest = (await service['snapshots'].find({ where: { instrument: pos.trade.instrument } })).sort((a: any, b: any) => b.ts - a.ts)[0];
-        if (!latest) continue;
-        const price = Number(latest.price);
-        const closed = closePaperTrade(service, pos, price, sessionClock);
-        closedTrades.push(closed);
-        console.log(`  PAPER CLOSE (session-end) ${pos.trade.instrument} ${pos.side} @ ₹${price.toFixed(2)}  → net ₹${Number(closed.netPnl).toFixed(2)}`);
-      }
-      openPositions.length = 0;
-    }
-
-    // Day-wise decay rectification after the session closes.
-    console.log('  rectifying decay day-wise from today outcomes…');
-    await service.rectifyDecay(portfolio.id);
   }
 
-  // -----------------------------------------------------------------------
-  // Force-close anything still open (should be none, but be safe).
-  // -----------------------------------------------------------------------
-  if (openPositions.length) {
-    console.log('\n── force-closing residual open positions ──────────────────────');
-    for (const pos of openPositions) {
-      const latest = (await service['snapshots'].find({ where: { instrument: pos.trade.instrument } })).sort((a: any, b: any) => b.ts - a.ts)[0];
-      if (!latest) continue;
-      const closed = closePaperTrade(service, pos, Number(latest.price), new Date());
-      closedTrades.push(closed);
-      console.log(`  PAPER CLOSE (residual) ${pos.trade.instrument} ${pos.side} @ ₹${Number(latest.price).toFixed(2)}`);
-    }
-    openPositions.length = 0;
-  }
-
-  // -----------------------------------------------------------------------
-  // P&L statement.
-  // -----------------------------------------------------------------------
-  console.log('\n' + '━'.repeat(78));
-  console.log('BUILDING P&L STATEMENT…');
+  // Portfolio state after session.
+  const endPortfolio = await service.getPortfolio(portfolio.id);
+  const endNetPnl = Number(endPortfolio?.netPnl ?? 0);
+  const endTotalCost = Number(endPortfolio?.totalCost ?? 0);
 
   const statement = buildPnlStatement(
-    service,
-    portfolio,
-    closedTrades,
-    openPositions.length,
-    startNetPnl,
-    startTotalCost,
-    startDeployed,
+    service, portfolio, allTrades, totalPositions,
+    0, 0, 0,
   );
 
-  const rendered = prettyPrintPnl(statement);
-  console.log(rendered);
-
-  const outPath = '/home/swarna-sekhar-dhar/projects/my-job-agent/scripts/sandbox-pnl-statement.json';
-  const fs = await import('fs');
-  fs.writeFileSync(outPath, JSON.stringify(statement, null, 2), 'utf-8');
-  console.log(`\nP&L statement written to: ${outPath}`);
-
-  // -----------------------------------------------------------------------
-  // Learning summary (self-improving loop artifact).
-  // -----------------------------------------------------------------------
-  console.log('\n── LEARNING SUMMARY (self-rectifying decay) ─────────────────────────────────────────────');
-  const calAfter = service.listCalibrations(portfolio.id) as any[];
-  for (const c of calAfter) {
-    console.log(`  ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][c.weekday]}: rate ${Number(c.decayRate).toFixed(4)}/h  window ${Number(c.windowStartHour).toFixed(2)}–${Number(c.windowEndHour).toFixed(2)}  (${c.samples} samples, rectified ${c.lastRectifiedAt ? new Date(c.lastRectifiedAt).toISOString() : 'never'})`);
+  console.log('\n============================================================');
+  console.log('SESSION P&L STATEMENT (paper)');
+  console.log('============================================================');
+  console.log(`Start capital:        ₹${statement.startCapital.toLocaleString()}`);
+  console.log(`End capital:          ₹${statement.endCapital.toLocaleString()}`);
+  console.log(`Net P&L:              ₹${statement.netPnl.toLocaleString()}  (${statement.returnPct >= 0 ? '+' : ''}${statement.returnPct.toFixed(2)}%)`);
+  console.log(`Gross In:             ₹${statement.grossIn.toLocaleString()}`);
+  console.log(`Gross Out:            ₹${statement.grossOut.toLocaleString()}`);
+  console.log(`Total fees:           ₹${statement.totalFees.toLocaleString()}`);
+  console.log(`Total trades:         ${statement.totalTrades}`);
+  console.log(`Winning / Losing:     ${statement.winningTrades} / ${statement.losingTrades}  (WR ${statement.winRate.toFixed(2)})`);
+  console.log(`Max drawdown (peak):  ₹${statement.maxDrawdown.toLocaleString()}`);
+  console.log('------------------------------------------------------------');
+  console.log('Daily breakdown:');
+  console.log('------------------------------------------------------------');
+  for (const row of statement.dailyRows) {
+    console.log(
+      `${row.dayDate} ${row.dayOfWeek.padEnd(9)} | ` +
+      `closed=${row.closedCount} | ` +
+      `Δnet=${row.dayDelta >= 0 ? '+' : ''}${row.dayDelta.toFixed(0).padStart(8)} | ` +
+      `hi=${row.equityHigh.toFixed(0)} lo=${row.equityLow.toFixed(0)}`,
+    );
   }
+  console.log('============================================================\n');
 
-  console.log('\n✓ sandbox trading run complete.');
-  return statement;
+  console.log('Paper trading session complete.');
 }
 
-runSandboxTrading().catch((err) => {
-  console.error('sandbox runner failed:', err);
-  process.exit(1);
+run().catch((e) => {
+  console.error('FATAL:', e);
+  process.exit(2);
 });

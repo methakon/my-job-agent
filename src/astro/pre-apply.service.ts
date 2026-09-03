@@ -156,4 +156,12 @@ export class PreApplyService {
 		item.errorDetail = error.slice(0, 1000);
 		await this.items.save(item);
 	}
+
+	/** Record the sweep-time muhurta match % on the item at send time. */
+	async recordMuhurtaMatch(id: string, score: number): Promise<void> {
+		const item = await this.items.findOneById(id);
+		if (!item) return;
+		item.muhurtaMatchScore = Number(score);
+		await this.items.save(item);
+	}
 }

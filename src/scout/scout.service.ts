@@ -103,25 +103,54 @@ export class ScoutService {
 		const descWords = cleanDesc.toLowerCase();
 
 		const matched: string[] = [];
-		let score = 0;
+		let rawScore = 0;
 		for (const skill of skills) {
 			const inTitle = titleLower.includes(skill);
 			const inDesc = descWords.includes(skill);
 			if (!inTitle && !inDesc) continue;
 			matched.push(skill);
-			score += inTitle ? 2 : 1;
+			rawScore += inTitle ? 2 : 1;
 		}
 		// require at least one skill hit IN THE TITLE or 3 distinct skills overall
 		const titleHits = matched.filter((s) => titleLower.includes(s)).length;
 		if (matched.length === 0 || (titleHits === 0 && matched.length < 3)) {
 			return { score: 0, matched: [] };
 		}
-		return { score: Math.min(100, Math.round((score / Math.max(allSkills.length, 5)) * 130)), matched };
+
+		// --- scoring hygiene ---
+		// 1) Scale to 100 only when ALL profile skills match (was 130 — too generous
+		//    for a 13-skill profile; generic boilerplate descriptions could hit 100
+		//    with a single title keyword + a few desc mentions).
+		const pct = Math.round((rawScore / Math.max(allSkills.length, 5)) * 100);
+
+		// 2) Penalise jobs whose PRIMARY stack (title) is a technology the profile
+		//    does not include — prevents Java / Spring / Ruby / Rails roles scoring
+		//    high on backend-keyword matches alone.
+		const profileSet = new Set(allSkills);
+		const FOREIGN_TITLE = [
+			'java', 'spring boot', 'springboot', 'spring framework',
+			'ruby', 'rails', 'ruby on rails', 'ror',
+			'python', 'django', 'flask', 'fastapi',
+			'dotnet', '.net', 'c#', 'csharp',
+			'golang', 'go lang',
+			'swift', 'kotlin', 'android',
+			'rust', 'scala', 'elixir', 'phoenix',
+			'perl', 'c++', 'cpp',
+		];
+		const foreignHits = FOREIGN_TITLE.filter((kw) => titleLower.includes(kw) && !profileSet.has(kw));
+		const cap = foreignHits.length ? 55 : 100;
+
+		return { score: Math.min(cap, pct), matched };
 	}
 
 	private async storeAndScore(leads: ScrapedLead[]): Promise<number> {
-		const skills = ((await this.profileService.getResponse())?.skills ?? TARGET_SKILLS).map((s) => s.toLowerCase());
-		const haystackSkills = [...new Set([...skills, ...TARGET_SKILLS])];
+		const profileSkills = (await this.profileService.getResponse())?.skills ?? [];
+		// Score only against the candidate's REAL skills. TARGET_SKILLS is a
+		// fallback ONLY when no profile exists — never merged on top of a real
+		// profile, otherwise skills the user does not have (react, ruby, java…)
+		// would inflate match scores.
+		const skills = profileSkills.length ? profileSkills : TARGET_SKILLS;
+		const haystackSkills = skills.map((s) => s.toLowerCase());
 		let added = 0;
 		for (const lead of leads) {
 			if (await this.leadRepo.findByExternal(lead.source, lead.externalId)) continue;
