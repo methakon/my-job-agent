@@ -5,15 +5,23 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 1,
 "item": "Keep the option-only hard guard and registered contract universe.",
-"status": "done"
+"status": "done",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
 "grp_order": 1,
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 2,
-"item": "Keep universe-wide candidate ranking; capital is a filter, not an instrument-selection rule.",
-"status": "done"
+"item": "Keep universe-wide candidate ranking capital is a filter, not an instrument-selection rule.",
+"status": "done",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
@@ -21,7 +29,11 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 3,
 "item": "Keep the ₹5,000 headroom / ceiling discipline.",
-"status": "done"
+"status": "done",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
@@ -29,7 +41,11 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 4,
 "item": "Keep NO TRADE as a first-class outcome.",
-"status": "done"
+"status": "done",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
@@ -37,7 +53,11 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 5,
 "item": "Keep FYERS provenance, freshness and fallback metadata.",
-"status": "done"
+"status": "done",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
@@ -45,7 +65,11 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 6,
 "item": "Keep session archival and prevent stale pre-session data contamination.",
-"status": "done"
+"status": "done",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
@@ -53,7 +77,11 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 7,
 "item": "Add regression tests before changing ranking or affordability logic.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
@@ -61,7 +89,11 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 8,
 "item": "Keep new strategy families disabled until their research gates pass.",
-"status": "done"
+"status": "done",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 0 - PROTECT THE CURRENT PAPER DESK",
@@ -69,7 +101,11 @@
 "goal": "Preserve the current real-data, option-only paper system while expanding research.",
 "item_order": 9,
 "item": "Do not import short-premium credit-spread rules into the current long-option desk.",
-"status": "done"
+"status": "done",
+"edition": "v5",
+"instr": "Encode this as an explicit negative rule/test at the boundary where the unsafe behavior could occur. Do not rely only on prompts or operator memory.",
+"doneWhen": "A deliberate negative test demonstrates that the prohibited behavior is rejected.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -77,7 +113,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 1,
 "item": "Persist decision_id, decision time, market time, session phase and data age.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -85,7 +125,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 2,
 "item": "Persist contract, expiry, strike, option type, lot size, DTE and underlying state.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -93,7 +137,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 3,
 "item": "Persist bid/ask/mid/LTP, spread, volume, OI, OI change and quote quality.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -101,7 +149,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 4,
 "item": "Persist all candidates considered and every rejection reason.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -109,7 +161,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 5,
 "item": "Persist every feature at its actual availability timestamp.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -117,7 +173,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 6,
 "item": "Persist model/prompt/schema/feature/strategy versions and Git SHA.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -125,7 +185,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 7,
 "item": "Persist the exact feature-information cutoff.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -133,7 +197,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 8,
 "item": "Persist inference latency and data/validation errors.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -141,7 +209,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 9,
 "item": "Persist paper execution assumptions, expected fill and simulated fill.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 1 - POINT-IN-TIME DECISION JOURNAL",
@@ -149,7 +221,11 @@
 "goal": "Record enough information to reproduce every decision.",
 "item_order": 10,
 "item": "Persist final action family: BUY / HOLD / NO TRADE / REJECT / ERROR.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -157,7 +233,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 1,
 "item": "Capture pre-open buy quantity and sell quantity when available.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -165,7 +245,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 2,
 "item": "Compute OAI = (BuyQty - SellQty) / (BuyQty + SellQty).",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -173,7 +257,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 3,
 "item": "Store OAI level, slope, acceleration and persistence.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -181,7 +269,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 4,
 "item": "Measure how well pre-open imbalance survives to 1, 5 and 15 minutes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -189,7 +281,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 5,
 "item": "Store indicative equilibrium/open reference and relationship to the eventual open.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -197,7 +293,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 6,
 "item": "Measure opening depth, spread shock and first 30-60 second flow where available.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -205,7 +305,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 7,
 "item": "Build relative pre-open volume against the same-time historical distribution.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 2 - NSE OPEN / PRE-OPEN INTELLIGENCE",
@@ -213,7 +317,11 @@
 "goal": "Turn the opening auction into a measurable information source.",
 "item_order": 8,
 "item": "Time-align all pre-open and cross-market information before inference.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -221,7 +329,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 1,
 "item": "Implement GapPct and GapATR.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -229,7 +341,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 2,
 "item": "Implement VWAP and price-to-VWAP distance.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -237,7 +353,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 3,
 "item": "Implement ATR and normalized intraday range.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -245,7 +365,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 4,
 "item": "Implement relative pre-open and session volume.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -253,7 +377,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 5,
 "item": "Implement ORB-5, ORB-15 and ORB-30 range features.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -261,7 +389,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 6,
 "item": "Implement opening impulse / EarlyImpulse.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -269,7 +401,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 7,
 "item": "Implement breadth, sector confirmation and futures reference/basis features where data exists.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -277,7 +413,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 8,
 "item": "Implement OI delta and strike-level concentration.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -285,7 +425,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 9,
 "item": "Implement PCR variants with explicit definitions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 3 - CORE FEATURE ENGINE",
@@ -293,7 +437,11 @@
 "goal": "Implement the Hermes P0 features before complex models.",
 "item_order": 10,
 "item": "Implement feature-health and missingness flags.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -301,7 +449,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 1,
 "item": "Build taxonomy: common, breakaway, runaway/continuation, exhaustion, island and older-gap interaction.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -309,7 +461,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 2,
 "item": "Build separate GAP-FILL and GAP-AND-GO hypotheses.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -317,7 +473,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 3,
 "item": "Build GAP-FADE and FAILED-ORB candidates.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -325,7 +485,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 4,
 "item": "Compute GapRangePos relative to prior-day range.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -333,7 +497,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 5,
 "item": "Compute opening position relative to prior Value Area.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -341,7 +509,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 6,
 "item": "Add early acceptance/rejection state.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -349,7 +521,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 7,
 "item": "Build independent FadeScore and FollowScore.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -357,7 +533,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 8,
 "item": "Add event/catalyst gate.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -365,7 +545,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 9,
 "item": "Add microstructure confirmation.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -373,7 +557,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 10,
 "item": "Estimate expected value after spread, slippage and fees.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -381,7 +569,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 11,
 "item": "Return FADE, FOLLOW or NO TRADE.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 4 - TWO-SIDED GAP ENGINE",
@@ -389,7 +581,11 @@
 "goal": "Learn whether a gap is more likely to fade or continue.",
 "item_order": 12,
 "item": "Keep old U.S. statistics as benchmark metadata only.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -397,7 +593,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 1,
 "item": "Implement OBI where depth exists.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -405,7 +605,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 2,
 "item": "Implement OFI from event-based queue changes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -413,7 +617,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 3,
 "item": "Implement MLOFI when multi-level depth exists.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -421,7 +629,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 4,
 "item": "Implement microprice and queue-imbalance features.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -429,7 +641,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 5,
 "item": "Track spread and spread shock.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -437,7 +653,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 6,
 "item": "Track cancellation rate and quote-event intensity.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -445,7 +665,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 7,
 "item": "Track replenishment after consumption.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -453,7 +677,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 8,
 "item": "Track trade intensity / activity regime.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -461,7 +689,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 9,
 "item": "Implement CVD slope and aggressive-trade imbalance where supported.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 5 - MICROSTRUCTURE P0",
@@ -469,7 +701,11 @@
 "goal": "Use order-flow information to distinguish acceptance from temporary movement.",
 "item_order": 10,
 "item": "Treat absorption and stacked imbalance as hypotheses, not proof of institutional activity.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 6 - VOLUME PROFILE / AUCTION CONTEXT",
@@ -477,7 +713,11 @@
 "goal": "Add structural levels that interact with opening decisions.",
 "item_order": 1,
 "item": "Compute prior-day POC, VAH, VAL, HVN and LVN.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 6 - VOLUME PROFILE / AUCTION CONTEXT",
@@ -485,7 +725,11 @@
 "goal": "Add structural levels that interact with opening decisions.",
 "item_order": 2,
 "item": "Version the exact value-area construction method.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 6 - VOLUME PROFILE / AUCTION CONTEXT",
@@ -493,7 +737,11 @@
 "goal": "Add structural levels that interact with opening decisions.",
 "item_order": 3,
 "item": "Detect failed auction: excursion outside value followed by acceptance back inside.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 6 - VOLUME PROFILE / AUCTION CONTEXT",
@@ -501,7 +749,11 @@
 "goal": "Add structural levels that interact with opening decisions.",
 "item_order": 4,
 "item": "Track value migration across sessions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 6 - VOLUME PROFILE / AUCTION CONTEXT",
@@ -509,7 +761,11 @@
 "goal": "Add structural levels that interact with opening decisions.",
 "item_order": 5,
 "item": "Track gap opens above/below value and acceptance/rejection.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 6 - VOLUME PROFILE / AUCTION CONTEXT",
@@ -517,7 +773,11 @@
 "goal": "Add structural levels that interact with opening decisions.",
 "item_order": 6,
 "item": "Combine profile structure with OFI/CVD.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -525,7 +785,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 1,
 "item": "Compute IV-RV and IV-versus-forecast-volatility.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -533,7 +797,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 2,
 "item": "Build IV surface features across strike and expiry.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -541,7 +809,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 3,
 "item": "Compute skew and term-structure slope/curvature.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -549,7 +821,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 4,
 "item": "Compute independent delta/gamma/theta/vega and discrepancy flags.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -557,7 +833,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 5,
 "item": "Estimate GEX / gamma-flip only with explicit participant-position assumptions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -565,7 +845,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 6,
 "item": "Add vanna/charm as secondary explanatory features where supported.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -573,7 +857,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 7,
 "item": "Separate direction, expected movement, IV regime and holding period before option selection.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -581,7 +869,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 8,
 "item": "Measure option-expression performance separately from underlying directional accuracy.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -589,7 +881,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 9,
 "item": "Do not use 'high IV = sell' as a universal rule.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Encode this as an explicit negative rule/test at the boundary where the unsafe behavior could occur. Do not rely only on prompts or operator memory.",
+"doneWhen": "A deliberate negative test demonstrates that the prohibited behavior is rejected.",
+"note": ""
 },
 {
 "grp": "GATE 7 - OPTIONS / VOLATILITY INTELLIGENCE",
@@ -597,7 +893,11 @@
 "goal": "Select option expressions only after the underlying decision and volatility state are known.",
 "item_order": 10,
 "item": "Keep short-premium structures as a separate future strategy family.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -605,7 +905,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 1,
 "item": "Build a current NIFTY/BANKNIFTY gap database.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -613,7 +917,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 2,
 "item": "Label fade, follow, midpoint reach, full-fill, maximum extension and time-to-target.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -621,7 +929,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 3,
 "item": "Label acceptance/rejection outside prior range/value.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -629,7 +941,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 4,
 "item": "Label event-day versus non-event-day behavior.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -637,7 +953,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 5,
 "item": "Label opening location, pre-open participation and regime state.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -645,7 +965,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 6,
 "item": "Track fill probability, time-to-fill, midpoint probability, MAE/MFE and tail loss.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -653,7 +977,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 7,
 "item": "Compare FADE and FOLLOW on identical sessions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -661,7 +989,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 8,
 "item": "Evaluate gap-closer ideas with explicit maximum holding periods and hard risk caps.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -669,7 +1001,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 9,
 "item": "Never allow indefinite leveraged holding because a gap remains open.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Encode this as an explicit negative rule/test at the boundary where the unsafe behavior could occur. Do not rely only on prompts or operator memory.",
+"doneWhen": "A deliberate negative test demonstrates that the prohibited behavior is rejected.",
+"note": ""
 },
 {
 "grp": "GATE 8 - GAP-SPECIFIC LABELS AND BACKTEST DATA",
@@ -677,7 +1013,11 @@
 "goal": "Turn the gap guides into a clean current-NSE research dataset.",
 "item_order": 10,
 "item": "Segment gap results by size, volatility, event state and expiry proximity.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -685,7 +1025,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 1,
 "item": "Simulate aggressive fills at bid/ask rather than LTP by default.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -693,7 +1037,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 2,
 "item": "Simulate passive limit orders with no-fill and partial-fill states.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -701,7 +1049,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 3,
 "item": "Model signal-to-order and order-to-fill latency.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -709,7 +1061,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 4,
 "item": "Record spread, slippage, fill probability and quote age.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -717,7 +1073,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 5,
 "item": "Track adverse selection after fill.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -725,7 +1085,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 6,
 "item": "Track missed opportunities.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -733,7 +1097,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 7,
 "item": "Calibrate assumptions from archived ticks/quotes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -741,7 +1109,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 8,
 "item": "Stress costs and latency upward.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 9 - REALISTIC PAPER EXECUTION",
@@ -749,7 +1121,11 @@
 "goal": "Ensure results survive realistic fill assumptions.",
 "item_order": 9,
 "item": "Reject strategies whose edge disappears under plausible execution degradation.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 10 - REGIME ENGINE",
@@ -757,7 +1133,11 @@
 "goal": "Condition signals on state rather than pooling incompatible distributions.",
 "item_order": 1,
 "item": "Create trend, range, volatility, liquidity and opening-state tags.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 10 - REGIME ENGINE",
@@ -765,7 +1145,11 @@
 "goal": "Condition signals on state rather than pooling incompatible distributions.",
 "item_order": 2,
 "item": "Add event/catalyst state.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 10 - REGIME ENGINE",
@@ -773,7 +1157,11 @@
 "goal": "Condition signals on state rather than pooling incompatible distributions.",
 "item_order": 3,
 "item": "Add gap-state and acceptance/rejection state.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 10 - REGIME ENGINE",
@@ -781,7 +1169,11 @@
 "goal": "Condition signals on state rather than pooling incompatible distributions.",
 "item_order": 4,
 "item": "Add volatility transition state.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 10 - REGIME ENGINE",
@@ -789,7 +1181,11 @@
 "goal": "Condition signals on state rather than pooling incompatible distributions.",
 "item_order": 5,
 "item": "Store regime at decision and exit.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 10 - REGIME ENGINE",
@@ -797,7 +1193,11 @@
 "goal": "Condition signals on state rather than pooling incompatible distributions.",
 "item_order": 6,
 "item": "Measure each skill separately by regime.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 10 - REGIME ENGINE",
@@ -805,7 +1205,11 @@
 "goal": "Condition signals on state rather than pooling incompatible distributions.",
 "item_order": 7,
 "item": "Do not let regime state hard-veto until false-veto and stability are measured.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 11 - SKILL CARDS",
@@ -813,15 +1217,23 @@
 "goal": "Make every strategy a reproducible, independently testable module.",
 "item_order": 1,
 "item": "Create one Skill Card per strategy.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 11 - SKILL CARDS",
 "grp_order": 12,
 "goal": "Make every strategy a reproducible, independently testable module.",
 "item_order": 2,
-"item": "Use fields: hypothesis, data, features, trigger, confirmation, exit, risk, execution, failure modes, validation and deployment status.",
-"status": "pending"
+"item": "Use fields: hypothesis, data, features, trigger, confirmation, exit, risk, execution, failure modes, validation and deployment",
+"status": "pending",
+"edition": "v5",
+"instr": "Define exactly what is meant by this item, its source and its timestamp. Use it first as an observable feature/research input; promote it to a hard rule only after the relevant validation gate passes.",
+"doneWhen": "The item is documented, versioned and cannot silently become an untested hard veto.",
+"note": ""
 },
 {
 "grp": "GATE 11 - SKILL CARDS",
@@ -829,7 +1241,11 @@
 "goal": "Make every strategy a reproducible, independently testable module.",
 "item_order": 3,
 "item": "Start P0: gap-fill/gap-go, pre-open imbalance, ORB/Initial Balance, OFI/microprice, VWAP/relative volume/breadth.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 11 - SKILL CARDS",
@@ -837,7 +1253,11 @@
 "goal": "Make every strategy a reproducible, independently testable module.",
 "item_order": 4,
 "item": "Add P1: profile/failed auction, CVD/absorption, IV-RV/surface, GEX, cross-market lead-lag.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 11 - SKILL CARDS",
@@ -845,7 +1265,11 @@
 "goal": "Make every strategy a reproducible, independently testable module.",
 "item_order": 5,
 "item": "Add P2 only after baselines: HMM/GARCH, Kalman/cointegration, Hawkes, DeepLOB.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 11 - SKILL CARDS",
@@ -853,7 +1277,11 @@
 "goal": "Make every strategy a reproducible, independently testable module.",
 "item_order": 6,
 "item": "Keep market making outside directional V1.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 11 - SKILL CARDS",
@@ -861,7 +1289,11 @@
 "goal": "Make every strategy a reproducible, independently testable module.",
 "item_order": 7,
 "item": "Attach every result back to its Skill Card.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -869,7 +1301,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 1,
 "item": "Build point-in-time features from the decision journal.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -877,7 +1313,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 2,
 "item": "Create multi-horizon direction, magnitude, target-before-stop, MFE/MAE and realized-volatility labels.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -885,7 +1325,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 3,
 "item": "Create explicit FADE/FOLLOW/NO-TRADE labels where appropriate.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -893,7 +1337,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 4,
 "item": "Keep execution-adjusted labels.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -901,7 +1349,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 5,
 "item": "Use strict future-only labels with frozen feature cutoffs.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -909,7 +1361,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 6,
 "item": "Use deterministic and simple statistical baselines first.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define exactly what is meant by this item, its source and its timestamp. Use it first as an observable feature/research input; promote it to a hard rule only after the relevant validation gate passes.",
+"doneWhen": "The item is documented, versioned and cannot silently become an untested hard veto.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -917,7 +1373,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 7,
 "item": "Train logistic/ridge/calibrated boosting before XGBoost/LightGBM.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -925,7 +1385,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 8,
 "item": "Train XGBoost/LightGBM after leakage tests pass.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 12 - ML DATASET + BASELINES",
@@ -933,7 +1397,11 @@
 "goal": "Build leakage-controlled labels and benchmarks before training.",
 "item_order": 9,
 "item": "Prefer probability outputs such as P(return > threshold), target-before-stop and expected trade quality.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -941,7 +1409,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 1,
 "item": "Use walk-forward, time-respecting train/validation/test.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -949,7 +1421,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 2,
 "item": "Use purging when labels overlap.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -957,7 +1433,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 3,
 "item": "Use embargo where adjacent observations can leak information.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define exactly what is meant by this item, its source and its timestamp. Use it first as an observable feature/research input; promote it to a hard rule only after the relevant validation gate passes.",
+"doneWhen": "The item is documented, versioned and cannot silently become an untested hard veto.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -965,7 +1445,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 4,
 "item": "Use CPCV when many candidate strategies are tested.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -973,7 +1457,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 5,
 "item": "Track every experiment and number of attempts.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -981,7 +1469,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 6,
 "item": "Use deflated/selection-aware Sharpe as a diagnostic, not a magic threshold.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define exactly what is meant by this item, its source and its timestamp. Use it first as an observable feature/research input; promote it to a hard rule only after the relevant validation gate passes.",
+"doneWhen": "The item is documented, versioned and cannot silently become an untested hard veto.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -989,7 +1481,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 7,
 "item": "Run cost/slippage/latency stress.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -997,7 +1493,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 8,
 "item": "Remove best trades and stress regime shifts.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -1005,7 +1505,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 9,
 "item": "Stress missing data and delayed signals.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -1013,7 +1517,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 10,
 "item": "Keep a completely untouched final holdout.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 13 - VALIDATION / ANTI-OVERFITTING",
@@ -1021,7 +1529,11 @@
 "goal": "Make apparent performance survive research scrutiny.",
 "item_order": 11,
 "item": "Require parameter sensitivity across reasonable settings.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Make this a release condition or validation check, not a comment. Encode the condition in the experiment/release record and make failure block promotion where the checklist requires a gate.",
+"doneWhen": "A failing condition visibly blocks the intended promotion path and produces a reason.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1029,7 +1541,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 1,
 "item": "Classify outcomes: signal, regime, execution, liquidity, data, model, timing, event or risk-veto failure.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1037,7 +1553,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 2,
 "item": "Record original thesis and measurable success conditions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1045,7 +1565,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 3,
 "item": "Record MAE/MFE and intermediate regime changes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1053,7 +1577,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 4,
 "item": "Generate structured post-trade critique.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1061,7 +1589,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 5,
 "item": "Classify reflections as OBSERVATION / HYPOTHESIS / TESTED_RULE / REJECTED_RULE.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1069,7 +1601,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 6,
 "item": "Retrieve lessons using relevance plus measured evidence.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1077,7 +1613,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 7,
 "item": "Never promote a production rule from one trade or one critique.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Encode this as an explicit negative rule/test at the boundary where the unsafe behavior could occur. Do not rely only on prompts or operator memory.",
+"doneWhen": "A deliberate negative test demonstrates that the prohibited behavior is rejected.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1085,7 +1625,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 8,
 "item": "Require out-of-sample evidence before rule promotion.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Make this a release condition or validation check, not a comment. Encode the condition in the experiment/release record and make failure block promotion where the checklist requires a gate.",
+"doneWhen": "A failing condition visibly blocks the intended promotion path and produces a reason.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1093,7 +1637,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 9,
 "item": "Store successful trades, NO TRADEs and false negatives, not only losses.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 14 - FAILURE JOURNAL + REFLEXION",
@@ -1101,7 +1649,11 @@
 "goal": "Use LLM reflection to generate hypotheses while keeping production rules deterministic.",
 "item_order": 10,
 "item": "Maintain champion and challenger versions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1109,7 +1661,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 1,
 "item": "Register hypothesis, data range, strategy version, feature version and expected effect.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1117,7 +1673,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 2,
 "item": "Register train/validation/test windows.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1125,7 +1685,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 3,
 "item": "Register execution/cost assumptions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1133,7 +1697,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 4,
 "item": "Predefine acceptance criteria before results are inspected.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1141,7 +1709,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 5,
 "item": "Record all attempts, including failures.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add an explicit field/table for this item. Store the source timestamp, decision cutoff, version/quality metadata where applicable, and preserve the value used at decision time rather than recomputing it later.",
+"doneWhen": "A historical record contains the value, timestamp/context and version needed to reproduce or audit it.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1149,7 +1721,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 6,
 "item": "Track multiple-testing exposure and selection bias.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1157,7 +1733,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 7,
 "item": "Require challenger to beat champion under the same protocol.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Make this a release condition or validation check, not a comment. Encode the condition in the experiment/release record and make failure block promotion where the checklist requires a gate.",
+"doneWhen": "A failing condition visibly blocks the intended promotion path and produces a reason.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1165,7 +1745,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 8,
 "item": "Require rollback support.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Make this a release condition or validation check, not a comment. Encode the condition in the experiment/release record and make failure block promotion where the checklist requires a gate.",
+"doneWhen": "A failing condition visibly blocks the intended promotion path and produces a reason.",
+"note": ""
 },
 {
 "grp": "GATE 15 - EXPERIMENT REGISTRY",
@@ -1173,7 +1757,11 @@
 "goal": "Make self-improvement auditable and reproducible.",
 "item_order": 9,
 "item": "Retest older skills when regime distributions shift.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1181,7 +1769,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 1,
 "item": "Keep capital/headroom outside the model.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1189,7 +1781,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 2,
 "item": "Enforce per-trade, aggregate, concentration and drawdown limits.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1197,7 +1793,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 3,
 "item": "Add maximum daily loss and consecutive-loss shutdown.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1205,7 +1805,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 4,
 "item": "Add data-quality, spread and volatility shutdowns.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1213,7 +1817,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 5,
 "item": "Add contract, expiry/DTE and strategy-specific controls.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1221,7 +1829,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 6,
 "item": "Add scenario risk using Greeks and option-path assumptions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1229,7 +1841,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 7,
 "item": "Add duplicate-order, stale-decision and stale-quote protection.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1237,7 +1853,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 8,
 "item": "Prepare emergency kill switch / flatten path for future live mode.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1245,7 +1865,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 9,
 "item": "Use explicit PAPER / SHADOW / MICRO-LIVE / LIVE states.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define exactly what is meant by this item, its source and its timestamp. Use it first as an observable feature/research input; promote it to a hard rule only after the relevant validation gate passes.",
+"doneWhen": "The item is documented, versioned and cannot silently become an untested hard veto.",
+"note": ""
 },
 {
 "grp": "GATE 16 - INDEPENDENT RISK ENGINE",
@@ -1253,7 +1877,11 @@
 "goal": "Make risk authoritative and unreachable from LLM override.",
 "item_order": 10,
 "item": "Make LIVE unreachable unless all gates are GREEN.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 17 - CROSS-MARKET / EVENT INTELLIGENCE",
@@ -1261,7 +1889,11 @@
 "goal": "Add external information only when it is time-aligned and demonstrably useful.",
 "item_order": 1,
 "item": "Build time-aligned GIFT NIFTY/global-equity futures features.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 17 - CROSS-MARKET / EVENT INTELLIGENCE",
@@ -1269,7 +1901,11 @@
 "goal": "Add external information only when it is time-aligned and demonstrably useful.",
 "item_order": 2,
 "item": "Add USDINR, crude, rates, India VIX and sector/breadth context where reliable.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 17 - CROSS-MARKET / EVENT INTELLIGENCE",
@@ -1277,7 +1913,11 @@
 "goal": "Add external information only when it is time-aligned and demonstrably useful.",
 "item_order": 3,
 "item": "Add scheduled-event features for major macro/corporate/index events.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "GATE 17 - CROSS-MARKET / EVENT INTELLIGENCE",
@@ -1285,7 +1925,11 @@
 "goal": "Add external information only when it is time-aligned and demonstrably useful.",
 "item_order": 4,
 "item": "Compute EventDistance to the next relevant event.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "GATE 17 - CROSS-MARKET / EVENT INTELLIGENCE",
@@ -1293,7 +1937,11 @@
 "goal": "Add external information only when it is time-aligned and demonstrably useful.",
 "item_order": 5,
 "item": "Build event-volatility gap: expected movement versus historical movement around similar events.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "GATE 17 - CROSS-MARKET / EVENT INTELLIGENCE",
@@ -1301,7 +1949,11 @@
 "goal": "Add external information only when it is time-aligned and demonstrably useful.",
 "item_order": 6,
 "item": "Evaluate each external source separately.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 17 - CROSS-MARKET / EVENT INTELLIGENCE",
@@ -1309,7 +1961,11 @@
 "goal": "Add external information only when it is time-aligned and demonstrably useful.",
 "item_order": 7,
 "item": "Never use information unavailable before the decision timestamp.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Encode this as an explicit negative rule/test at the boundary where the unsafe behavior could occur. Do not rely only on prompts or operator memory.",
+"doneWhen": "A deliberate negative test demonstrates that the prohibited behavior is rejected.",
+"note": ""
 },
 {
 "grp": "GATE 18 - ADVANCED RESEARCH",
@@ -1317,7 +1973,11 @@
 "goal": "Escalate model complexity only when simpler methods stop improving OOS results.",
 "item_order": 1,
 "item": "Test HMM/GARCH regime models if deterministic regime tags plateau.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 18 - ADVANCED RESEARCH",
@@ -1325,7 +1985,11 @@
 "goal": "Escalate model complexity only when simpler methods stop improving OOS results.",
 "item_order": 2,
 "item": "Test Kalman/cointegration when stable relative-value relationships exist.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 18 - ADVANCED RESEARCH",
@@ -1333,7 +1997,11 @@
 "goal": "Escalate model complexity only when simpler methods stop improving OOS results.",
 "item_order": 3,
 "item": "Test Hawkes intensity only with a clean event stream.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 18 - ADVANCED RESEARCH",
@@ -1341,7 +2009,11 @@
 "goal": "Escalate model complexity only when simpler methods stop improving OOS results.",
 "item_order": 4,
 "item": "Test DeepLOB only with high-quality L2/trade data and strong baselines.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 18 - ADVANCED RESEARCH",
@@ -1349,7 +2021,11 @@
 "goal": "Escalate model complexity only when simpler methods stop improving OOS results.",
 "item_order": 5,
 "item": "Test a meta-model that predicts expected trade quality from component outputs.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 18 - ADVANCED RESEARCH",
@@ -1357,7 +2033,11 @@
 "goal": "Escalate model complexity only when simpler methods stop improving OOS results.",
 "item_order": 6,
 "item": "Test DPO/LoRA fine-tuning only after a large clean preference/evaluation dataset exists.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 18 - ADVANCED RESEARCH",
@@ -1365,7 +2045,11 @@
 "goal": "Escalate model complexity only when simpler methods stop improving OOS results.",
 "item_order": 7,
 "item": "Never scale infrastructure merely because the model is larger.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Encode this as an explicit negative rule/test at the boundary where the unsafe behavior could occur. Do not rely only on prompts or operator memory.",
+"doneWhen": "A deliberate negative test demonstrates that the prohibited behavior is rejected.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1373,15 +2057,23 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 1,
 "item": "Show data health, freshness and fallback status.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
 "grp_order": 20,
 "goal": "Make the complete desk state inspectable.",
 "item_order": 2,
-"item": "Show capital, ceiling, deployed capital and net P&L.;",
-"status": "pending"
+"item": "Show capital, ceiling, deployed capital and net P&L.",
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1389,7 +2081,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 3,
 "item": "Show candidate count, ranked survivors and rejection reasons.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1397,7 +2093,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 4,
 "item": "Show gap state, regime and feature health.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1405,7 +2105,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 5,
 "item": "Show option-surface state and Greek discrepancies.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1413,7 +2117,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 6,
 "item": "Show simulated fills, MAE/MFE and execution quality.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1421,7 +2129,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 7,
 "item": "Show champion/challenger versions and experiment status.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1429,7 +2141,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 8,
 "item": "Show NO TRADE reasons.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1437,7 +2153,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 9,
 "item": "Show risk-veto counts and shutdown state.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 19 - OBSERVABILITY",
@@ -1445,7 +2165,11 @@
 "goal": "Make the complete desk state inspectable.",
 "item_order": 10,
 "item": "Show system heartbeat and process health.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1453,7 +2177,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 1,
 "item": "Run complete live-data shadow decisions with orders disabled.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1461,7 +2189,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 2,
 "item": "Compare intended fills against subsequent real quotes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1469,7 +2201,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 3,
 "item": "Measure data age and end-to-end latency.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the observation window and metric before collecting results. Record both the measurement and the sample/data-quality context so later comparisons are fair.",
+"doneWhen": "A report can reproduce the metric from archived data and shows the sample size/coverage used.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1477,7 +2213,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 4,
 "item": "Validate paper-fill calibration against shadow outcomes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1485,7 +2225,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 5,
 "item": "Require stability across multiple regimes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Make this a release condition or validation check, not a comment. Encode the condition in the experiment/release record and make failure block promotion where the checklist requires a gate.",
+"doneWhen": "A failing condition visibly blocks the intended promotion path and produces a reason.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1493,7 +2237,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 6,
 "item": "Require reproducible release artifact and pinned model/risk versions.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Make this a release condition or validation check, not a comment. Encode the condition in the experiment/release record and make failure block promotion where the checklist requires a gate.",
+"doneWhen": "A failing condition visibly blocks the intended promotion path and produces a reason.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1501,7 +2249,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 7,
 "item": "Require working kill switch and order deduplication.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Make this a release condition or validation check, not a comment. Encode the condition in the experiment/release record and make failure block promotion where the checklist requires a gate.",
+"doneWhen": "A failing condition visibly blocks the intended promotion path and produces a reason.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1509,7 +2261,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 8,
 "item": "Start only with explicitly approved micro-capital and fixed loss limits.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 20 - SHADOW -> MICRO-LIVE",
@@ -1517,7 +2273,11 @@
 "goal": "Keep real money behind an explicit release gate.",
 "item_order": 9,
 "item": "Review every early live result before increasing exposure.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1525,7 +2285,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 1,
 "item": "Every decision and NO TRADE is reproducible.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1533,7 +2297,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 2,
 "item": "Every feature is point-in-time, versioned and quality-monitored.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1541,7 +2309,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 3,
 "item": "FADE/FOLLOW/NO-TRADE gap logic passes current-NSE tests.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1549,7 +2321,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 4,
 "item": "ORB, pre-open, OFI/microprice, VWAP, profile and option-surface skills have baseline results.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1557,7 +2333,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 5,
 "item": "Paper execution survives pessimistic cost/latency tests.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Run the comparison under the same data split, execution assumptions and evaluation metrics. Record both successful and failed variants instead of keeping only the winner.",
+"doneWhen": "The result is stored with its experiment ID, assumptions and comparison baseline.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1565,7 +2345,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 6,
 "item": "Labels are leakage-controlled.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the label mathematically before generating it. Labels may use future information only for the outcome window; feature rows must remain frozen at the original decision cutoff.",
+"doneWhen": "A timestamp/leakage test proves no post-decision feature information entered the label inputs.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1573,7 +2357,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 7,
 "item": "Champion/challenger evaluation is walk-forward and selection-aware.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1581,7 +2369,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 8,
 "item": "Risk can veto every AI proposal.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1589,7 +2381,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 9,
 "item": "Reflexion produces hypotheses, not silent production changes.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1597,7 +2393,11 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 10,
 "item": "Shadow behavior matches the paper model closely enough to justify controlled micro-live.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "GATE 21 - FINAL ACCEPTANCE",
@@ -1605,134 +2405,286 @@
 "goal": "Declare Hermes ready only when research and controls agree.",
 "item_order": 11,
 "item": "Advanced models have demonstrated incremental value rather than novelty.",
-"status": "pending"
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 1,
-"item": "1. Protect current option-only paper desk and regression tests.",
-"status": "pending"
+"item": "Protect current option-only paper desk and regression tests.",
+"status": "pending",
+"edition": "v5",
+"instr": "Treat this as an existing invariant. Put the control in the authoritative service/configuration layer, add a regression test for the protected behavior, and do not let new research code bypass it.",
+"doneWhen": "The old behavior still passes regression tests and a negative test proves the new code cannot bypass it.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 2,
-"item": "2. Complete point-in-time decision journal.",
-"status": "pending"
+"item": "Complete point-in-time decision journal.",
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 3,
-"item": "3. Build NSE pre-open / opening data capture.",
-"status": "pending"
+"item": "Build NSE pre-open / opening data capture.",
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 4,
-"item": "4. Implement P0 features: GapPct/GapATR, VWAP, ATR, relative volume, ORB, breadth.",
-"status": "pending"
+"item": "Implement P0 features: GapPct/GapATR, VWAP, ATR, relative volume, ORB, breadth.",
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 5,
-"item": "5. Build two-sided FADE/FOLLOW/NO-TRADE gap engine.",
-"status": "pending"
+"item": "Build two-sided FADE/FOLLOW/NO-TRADE gap engine.",
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 6,
-"item": "6. Implement P0 microstructure: OFI, microprice and supported depth/flow.",
-"status": "pending"
+"item": "Implement P0 microstructure: OFI, microprice and supported depth/flow.",
+"status": "pending",
+"edition": "v5",
+"instr": "Write the formula/algorithm down in code comments or the Skill Card, define units, windows, edge cases and missing-data behavior, then add deterministic unit/replay tests. Keep the feature versioned.",
+"doneWhen": "The same inputs produce the same result in replay, and edge cases return a safe explicit state rather than a fabricated value.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 7,
-"item": "7. Build realistic paper execution and outcome labels.",
-"status": "pending"
+"item": "Build realistic paper execution and outcome labels.",
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 8,
-"item": "8. Add P1 profile/CVD/IV-RV/surface/cross-market context.",
-"status": "pending"
+"item": "Add P1 profile/CVD/IV-RV/surface/cross-market context.",
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 9,
-"item": "9. Build regime engine and Skill Cards.",
-"status": "pending"
+"item": "Build regime engine and Skill Cards.",
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 10,
-"item": "10. Build leakage-controlled dataset and deterministic baselines.",
-"status": "pending"
+"item": "Build leakage-controlled dataset and deterministic baselines.",
+"status": "pending",
+"edition": "v5",
+"instr": "Create this as a separate, versioned module or dataset rather than burying it inside one large score. Define inputs, output schema, timestamps and failure/missing-data behavior before using it in decisions.",
+"doneWhen": "The component can be enabled/disabled independently and its output can be inspected in a historical replay.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 11,
-"item": "11. Train XGBoost/LightGBM challenger models.",
-"status": "pending"
+"item": "Train XGBoost/LightGBM challenger models.",
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 12,
-"item": "12. Harden independent risk controls.",
-"status": "pending"
+"item": "Harden independent risk controls.",
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 13,
-"item": "13. Add controlled Reflexion + experiment registry + champion/challenger promotion.",
-"status": "pending"
+"item": "Add controlled Reflexion + experiment registry + champion/challenger promotion.",
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 14,
-"item": "14. Add P2 research only where data and baselines justify it.",
-"status": "pending"
+"item": "Add P2 research only where data and baselines justify it.",
+"status": "pending",
+"edition": "v5",
+"instr": "Add the capability behind a feature flag or research status first. Define its input availability, timestamp boundary, output schema and failure behavior before allowing it to affect a decision.",
+"doneWhen": "The capability can run in research/shadow mode without changing production behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 15,
-"item": "15. Run live shadow.",
-"status": "pending"
+"item": "Run live shadow.",
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
 },
 {
 "grp": "B. FINAL PRIORITY ORDER",
 "grp_order": 23,
 "goal": "",
 "item_order": 16,
-"item": "16. Only after all gates pass, consider micro-live.",
-"status": "pending"
+"item": "Only after all gates pass, consider micro-live.",
+"status": "pending",
+"edition": "v5",
+"instr": "Define the input, transformation, output, timestamp boundary and failure behavior before wiring it into Hermes. Keep the change version-controlled and independently testable.",
+"doneWhen": "A reviewer can determine exactly what the item does and a replay/test demonstrates the behavior.",
+"note": ""
+},
+{
+"grp": "FINAL EXECUTION PROTOCOL (before next gate)",
+"grp_order": 24,
+"goal": "Do not interpret the checklist as permission to jump to live trading. A checkbox is an engineering task; a gate is a release boundary. If a prerequisite is missing, stop and record BLOCKED/UNSUPPORTED instead of inventing a value or shortcut.",
+"item_order": 1,
+"item": "Code/configuration is committed and versioned.",
+"status": "pending",
+"edition": "v5",
+"instr": "",
+"doneWhen": "",
+"note": ""
+},
+{
+"grp": "FINAL EXECUTION PROTOCOL (before next gate)",
+"grp_order": 24,
+"goal": "Do not interpret the checklist as permission to jump to live trading. A checkbox is an engineering task; a gate is a release boundary. If a prerequisite is missing, stop and record BLOCKED/UNSUPPORTED instead of inventing a value or shortcut.",
+"item_order": 2,
+"item": "Schema/data changes are backward-compatible or explicitly migrated.",
+"status": "pending",
+"edition": "v5",
+"instr": "",
+"doneWhen": "",
+"note": ""
+},
+{
+"grp": "FINAL EXECUTION PROTOCOL (before next gate)",
+"grp_order": 24,
+"goal": "Do not interpret the checklist as permission to jump to live trading. A checkbox is an engineering task; a gate is a release boundary. If a prerequisite is missing, stop and record BLOCKED/UNSUPPORTED instead of inventing a value or shortcut.",
+"item_order": 3,
+"item": "Relevant tests/replays pass.",
+"status": "pending",
+"edition": "v5",
+"instr": "",
+"doneWhen": "",
+"note": ""
+},
+{
+"grp": "FINAL EXECUTION PROTOCOL (before next gate)",
+"grp_order": 24,
+"goal": "Do not interpret the checklist as permission to jump to live trading. A checkbox is an engineering task; a gate is a release boundary. If a prerequisite is missing, stop and record BLOCKED/UNSUPPORTED instead of inventing a value or shortcut.",
+"item_order": 4,
+"item": "Logs/dashboard expose the new state when it affects decisions.",
+"status": "pending",
+"edition": "v5",
+"instr": "",
+"doneWhen": "",
+"note": ""
+},
+{
+"grp": "FINAL EXECUTION PROTOCOL (before next gate)",
+"grp_order": 24,
+"goal": "Do not interpret the checklist as permission to jump to live trading. A checkbox is an engineering task; a gate is a release boundary. If a prerequisite is missing, stop and record BLOCKED/UNSUPPORTED instead of inventing a value or shortcut.",
+"item_order": 5,
+"item": "Research changes have an experiment record and defined acceptance criteria.",
+"status": "pending",
+"edition": "v5",
+"instr": "",
+"doneWhen": "",
+"note": ""
+},
+{
+"grp": "FINAL EXECUTION PROTOCOL (before next gate)",
+"grp_order": 24,
+"goal": "Do not interpret the checklist as permission to jump to live trading. A checkbox is an engineering task; a gate is a release boundary. If a prerequisite is missing, stop and record BLOCKED/UNSUPPORTED instead of inventing a value or shortcut.",
+"item_order": 6,
+"item": "Safety changes have a negative/adversarial test proving they can block unsafe behavior.",
+"status": "pending",
+"edition": "v5",
+"instr": "",
+"doneWhen": "",
+"note": ""
+},
+{
+"grp": "FINAL EXECUTION PROTOCOL (before next gate)",
+"grp_order": 24,
+"goal": "Do not interpret the checklist as permission to jump to live trading. A checkbox is an engineering task; a gate is a release boundary. If a prerequisite is missing, stop and record BLOCKED/UNSUPPORTED instead of inventing a value or shortcut.",
+"item_order": 7,
+"item": "Any new strategy remains disabled until its research and validation gates are satisfied.",
+"status": "pending",
+"edition": "v5",
+"instr": "",
+"doneWhen": "",
+"note": ""
 }
 ]

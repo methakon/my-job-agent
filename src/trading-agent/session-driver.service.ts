@@ -198,7 +198,7 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		if (!hitWin && !hitLoss) return false;
 
 		try {
-			await this.trading.closeTrade(position.id, { exitPrice: price });
+			await this.trading.closeTrade(position.id, { exitPrice: price, exitTrigger: hitWin ? 'target' : 'stop' });
 			this.logger.log(`paper exit ${position.id} (${side} ${position.instrument} @ ${price}): ${hitWin ? 'TARGET-HIT' : 'STOP-HIT'}`);
 			return true;
 		} catch (error) {

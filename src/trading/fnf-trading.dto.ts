@@ -71,6 +71,10 @@ export class CloseTradeDto {
 
 	@IsOptional() @IsNumber() @Min(0)
 	cost?: number;
+
+	/** Why the position closed: target | stop | time | manual | flatten. */
+	@IsOptional() @IsString()
+	exitTrigger?: string;
 }
 
 export class IngestSnapshotDto {

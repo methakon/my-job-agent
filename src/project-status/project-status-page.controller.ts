@@ -48,9 +48,15 @@ export class ProjectStatusPageController {
 							(s) =>
 								`<form class="inline" method="post" action="/project-status/item/${id}/status"><input type="hidden" name="status" value="${s}"/><button class="mini${s === it.status ? ' active' : ''}" ${s === it.status ? 'disabled' : ''}>${esc((STATUS_META[s] ?? STATUS_META.pending).label.replace(/^[^ ]+ /, ''))}</button></form>`,
 						).join('');
+						const v5detail = it.instr || it.doneWhen
+							? `<div class="v5">
+${it.instr ? `<div class="v5-i"><b>Implementation:</b> ${esc(it.instr)}</div>` : ''}
+${it.doneWhen ? `<div class="v5-d"><b>Done when:</b> ${esc(it.doneWhen)}</div>` : ''}
+</div>`
+							: '';
 						return `<tr class="row-${esc(it.status)}">
   <td class="num">${it.item_order}</td>
-  <td>${esc(it.item)}</td>
+  <td><div>${esc(it.item)}</div>${v5detail}${it.note ? `<div class="note">📝 ${esc(it.note)}</div>` : ''}</td>
   <td class="nowrap">${buttons}</td>
   <td class="nowrap">${noteForm}</td>
 </tr>`;
@@ -115,6 +121,10 @@ form.noteform{display:flex;gap:6px}
 input[type=text]{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:4px 8px;font-size:12px;width:180px}
 input:focus{outline:none;border-color:var(--dim)}
 .row-done td{opacity:.55}
+.v5{margin-top:4px;font-size:12px;color:var(--dim);border-left:2px solid var(--line);padding-left:8px}
+.v5-i{margin:2px 0}
+.v5-d{margin:2px 0;color:var(--ok)}
+.note{margin-top:4px;font-size:12px;color:var(--warn);background:rgba(224,168,60,.07);border-radius:6px;padding:3px 8px;display:inline-block}
 .nowrap{white-space:nowrap}
 .footer{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px}
 .footer a{color:var(--warn)}

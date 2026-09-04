@@ -7,6 +7,8 @@ import { FnfMarketSnapshot } from './fnf-market-snapshot.entity';
 import { FnfDecayCalibration } from './fnf-decay-calibration.entity';
 import { FnfMarketSnapshotHistory } from './fnf-market-snapshot-history.entity';
 import { FnfOptionQuoteHistory } from './fnf-option-quote-history.entity';
+import { FnfTradeReflection } from './fnf-trade-reflection.entity';
+import { localGreeks } from './bsm-greeks';
 import { FnfOptionChainService } from './fnf-option-chain.service';
 import { OptionContract } from './option-chain-parser';
 import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto, SetDecayCalibrationDto } from './fnf-trading.dto';
@@ -120,6 +122,7 @@ export class FnfTradingService {
 		@InjectRepository(FnfDecayCalibration) private readonly calibrations: Repository<FnfDecayCalibration>,
 		@InjectRepository(FnfMarketSnapshotHistory) private readonly snapshotHistory: Repository<FnfMarketSnapshotHistory>,
 		@InjectRepository(FnfOptionQuoteHistory) private readonly quoteHistory: Repository<FnfOptionQuoteHistory>,
+		@InjectRepository(FnfTradeReflection) private readonly reflections: Repository<FnfTradeReflection>,
 		private readonly optionChain: FnfOptionChainService,
 		private readonly muhurta: AstroMuhurtaService,
 	) {
@@ -277,6 +280,13 @@ export class FnfTradingService {
 		trade.netPnl = netPnl;
 		trade.status = 'CLOSED';
 		trade.closedAt = asOf;
+		// Record why this position closed (target/stop/time/manual) so the
+		// Reflexion row can classify the outcome deterministically (T-08).
+		if (dto.exitTrigger) {
+			const dp = (typeof trade.decisionParams === 'string' && trade.decisionParams ? JSON.parse(trade.decisionParams) : {}) as Record<string, unknown>;
+			dp.exitTrigger = dto.exitTrigger;
+			trade.decisionParams = JSON.stringify(dp);
+		}
 		const saved = await this.trades.save(trade);
 
 		const portfolio = trade.portfolio;
@@ -297,7 +307,96 @@ export class FnfTradingService {
 		// Day-wise decay rectification from this outcome (fire-and-forget).
 		void this.rectifyDecay(portfolio.id).catch((e) => this.logger.warn(`decay rectify failed: ${e.message}`));
 
+		// Reflexion episodic memory (T-08 → v4 Gate 14): deterministic outcome
+		// classification + critique persisted for later decision injection.
+		void this.writeReflection(saved, newNetPnl)
+			.then(() => undefined)
+			.catch((e) => this.logger.warn(`reflection write failed: ${(e as Error).message}`));
+
 		return saved;
+	}
+
+	/** Deterministic Reflexion row for a closed trade (T-08). Never an LLM call —
+	 *  production rules stay deterministic; the critique is structured facts. */
+	private async writeReflection(trade: FnfTrade, portfolioNetPnl: number): Promise<void> {
+		// Resolve the true underlying token (contract registry first; fall back to
+		// symbol parsing for legacy index trades) so the signal-side injection
+		// (listReflections by underlying) round-trips.
+		let underlying = String(trade.instrument).replace(/^[A-Z]+:/, '').replace(/-INDEX$/, '').toUpperCase();
+		try {
+			const contract = await this.optionChain.findContractBySymbol(trade.instrument);
+			if (contract?.underlying) underlying = String(contract.underlying).toUpperCase();
+		} catch {
+			/* keep parsed fallback */
+		}
+		const side = (trade.side as string) || 'BUY';
+		const entryUnits = Number(trade.quantity) || 1;
+		const entryOutlay = entryUnits * Number(trade.entryPrice);
+		const net = Number(trade.netPnl) || 0;
+		const pnlPct = entryOutlay > 0 ? (net / entryOutlay) * 100 : 0;
+		const heldMs = trade.closedAt ? new Date(trade.closedAt).getTime() - new Date(trade.orderedAt).getTime() : 0;
+		const holdingMinutes = Math.max(0, Math.round(heldMs / 60_000));
+		// decisionParams is stored as a JSON string — parse it before reading exitTrigger.
+		let exitTrigger = 'manual';
+		try {
+			const dp = (typeof trade.decisionParams === 'string' && trade.decisionParams ? JSON.parse(trade.decisionParams) : trade.decisionParams ?? {}) as { exitTrigger?: string };
+			exitTrigger = String(dp.exitTrigger ?? 'manual');
+		} catch {
+			exitTrigger = 'manual';
+		}
+		const win = net > 0;
+		const outClass = win
+			? exitTrigger === 'target'
+				? 'WIN_TARGET'
+				: exitTrigger === 'time'
+					? 'WIN_TIME'
+					: 'WIN_MANUAL'
+			: exitTrigger === 'stop'
+				? 'LOSS_STOP'
+				: exitTrigger === 'time'
+					? 'TIME_EXIT'
+					: 'LOSS_MANUAL';
+		const failureTag = win ? '' : exitTrigger === 'stop' ? 'stopped-out' : exitTrigger === 'time' ? 'time-decay-exit' : 'manual-loss';
+		const critique =
+			`${underlying} ${side} closed ${exitTrigger}: entry ${trade.entryPrice} → exit ${trade.exitPrice}, ` +
+			`net ${net.toFixed(2)} (${pnlPct.toFixed(1)}% on ₹${entryOutlay.toFixed(0)} outlay), held ${holdingMinutes}m. ` +
+			(win
+				? `Thesis paid. Exit discipline worked${exitTrigger === 'time' ? ' (time-stop respected)' : ''}.`
+				: failureTag === 'stopped-out'
+					? 'Thesis failed before target — review strike distance, entry timing and direction quality; check decay calibration.'
+					: failureTag === 'time-decay-exit'
+						? 'Theta eroded the position before target — strike too close to ATM or holding too long for the DTE.'
+						: 'Closed manually at a loss — was the original thesis violated, or was this a discipline miss?');
+		const heuristic = win
+			? `Repeat ${underlying} ${side} setups that exit via ${exitTrigger} within ${holdingMinutes}m — they cleared decay and cost hurdles.`
+			: failureTag === 'stopped-out'
+				? `Do not re-enter ${underlying} ${side} while decayed confidence is below floor or immediately after a stopped-out loss.`
+				: failureTag === 'time-decay-exit'
+					? `Prefer strikes with ≥ 3-5 DTE and avoid holding ${underlying} options into theta burn without a plan.`
+					: `Define the exit BEFORE entry; a manual loss without a recorded reason is a process failure.`;
+		await this.reflections.save(
+			this.reflections.create({
+				tradeId: trade.id,
+				underlying,
+				strategyType: String(trade.algoSource ?? 'unknown'),
+				pnlRealized: net,
+				pnlPct,
+				holdingMinutes,
+				exitTrigger,
+				outcomeClass: outClass,
+				failureTag,
+				critique,
+				heuristic,
+			}),
+		);
+		this.logger.log(`reflection written for ${trade.id.slice(0, 8)}: ${outClass} ${net.toFixed(2)}`);
+		void portfolioNetPnl;
+	}
+
+	/** Latest Reflexion rows (optionally per underlying) for the UI / injection. */
+	async listReflections(underlying?: string, limit = 10): Promise<FnfTradeReflection[]> {
+		const where = underlying ? { underlying } : {};
+		return this.reflections.find({ where, order: { createdAt: 'DESC' }, take: Math.min(limit, 50) });
 	}
 
 	async listTrades(portfolioId?: string, limit = 100): Promise<FnfTrade[]> {
@@ -784,8 +883,39 @@ export class FnfTradingService {
 					continue;
 				}
 
-				// ── Phase 4 component scores (each 0..1, weighted below) ─────────
+				// ── T-09 local Greeks / IV + delta-band gate ─────────────────────
+				// Compute delta/IV locally from (spot, strike, DTE, premium) via BSM
+				// so candidates are scored on Greeks even when FYERS omits them, and
+				// cross-check provider-supplied delta for desynchronization.
 				const strike = Number(contract.strike);
+				const spotNum = Number(spot);
+				const rate = Number(process.env.FNO_RISK_FREE_RATE ?? 0.065);
+				const years = dte / 365;
+				const optType = (String(contract.optionType).toUpperCase() as 'CE' | 'PE');
+				const local = Number.isFinite(spotNum) && spotNum > 0 && years > 0
+					? localGreeks(premium, { spot: spotNum, strike, years, rate, q: 0 }, optType)
+					: null;
+				const localDelta = local ? local.delta : null;
+				const provDeltaRaw = Number(quote.delta);
+				const provDelta = Number.isFinite(provDeltaRaw) && Math.abs(provDeltaRaw) > 0 && Math.abs(provDeltaRaw) < 1 ? provDeltaRaw : null;
+				const deltaForGate = localDelta ?? provDelta;
+				// Guidebook actionable band: 0.10–0.40 |delta| (env-tunable). Rejects
+				// deep-OTM lottery strikes AND near-ATM contracts too rich for ₹5k.
+				const deltaMin = Number(process.env.FNO_CAND_DELTA_MIN ?? 0.1);
+				const deltaMax = Number(process.env.FNO_CAND_DELTA_MAX ?? 0.4);
+				if (deltaForGate !== null && (Math.abs(deltaForGate) < deltaMin || Math.abs(deltaForGate) > deltaMax)) {
+					rejected.push(`${sym}: |delta| ${Math.abs(deltaForGate).toFixed(3)} outside ${deltaMin}–${deltaMax} band`);
+					continue;
+				}
+				// Provider cross-check: flag material divergence between local and
+				// provider delta (desync warning, not a hard reject).
+				let greeksNote = '';
+				if (localDelta !== null && provDelta !== null && Math.abs(localDelta - provDelta) > 0.05) {
+					greeksNote = ` ⚠ provider delta ${provDelta.toFixed(2)} vs local ${localDelta.toFixed(2)} desync`;
+				}
+
+				// ── Phase 4 component scores (each 0..1, weighted below) ─────────
+				// (strike was declared in the T-09 block above)
 				// ATM-ness band widened to 6%: with a ₹5k cap only OTM contracts
 				// (≈1.5–5% from spot) are affordable, so the strategy term must still
 				// differentiate the nearest affordable strikes from the deep ones.
@@ -793,8 +923,10 @@ export class FnfTradingService {
 				const atmScore = Math.max(0, 1 - Math.abs(strike - spot) / spot / atmBandPct); // ATM=1; band away → 0
 				const expiryScore = dte >= 3 && dte <= 14 ? 1 : dte < 3 ? dte / 3 : Math.max(0, 1 - (dte - 14) / 30);
 				const oi = Number(quote.openInterest ?? 0);
-				const delta = Number(quote.delta);
-				const hasDelta = Number.isFinite(delta) && Math.abs(delta) > 0 && Math.abs(delta) < 1;
+				// T-09: prefer local delta when available (provider delta may be absent
+				// or stale); greeksScore rewards ATM-ish delta (≈0.5 absolute for long options).
+				const delta = (localDelta ?? provDelta) as number | null;
+				const hasDelta = delta !== null && Number.isFinite(delta) && Math.abs(delta) > 0 && Math.abs(delta) < 1;
 				const greeksScore = hasDelta ? 1 - Math.abs(Math.abs(delta) - 0.5) / 0.5 : 0.5; // ATM delta ≈ ±0.5
 				const reasons = [
 					`${dir} ${underlying} — ${reason}`,
@@ -802,7 +934,8 @@ export class FnfTradingService {
 					`premium ₹${premium.toFixed(2)} × ${lotSize} units × ${lots} lot(s) = ₹${contractValue.toFixed(0)}`,
 				];
 				if (spreadPct !== null) reasons.push(`spread ${(spreadPct * 100).toFixed(2)}%`);
-				if (hasDelta) reasons.push(`delta ${delta.toFixed(2)}`);
+				if (hasDelta) reasons.push(`delta ${delta.toFixed(2)}${greeksNote}`);
+				if (local) reasons.push(`local IV ${(local.iv * 100).toFixed(1)}% · theta ${local.theta.toFixed(2)}/d · vega ${local.vega.toFixed(2)}`);
 				const sameUndNudge = lastTradeUnderlying === underlying ? 1 : 0;
 				const costScore = headroom === Number.POSITIVE_INFINITY ? 0.5 : 1 - contractValue / headroom;
 
@@ -854,6 +987,21 @@ export class FnfTradingService {
 		}
 		reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (premium age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
 		if (astroMatch.shubh) reasons.push(`shubh muhurta ${astroMatch.label}`);
+
+		// T-08: inject recent Reflexion lessons for this underlying (fire-and-forget
+		// read; absence of reflections is fine) so the decision context carries
+		// learned heuristics into decisionParams. Reflections store the contract's
+		// underlying token (index symbol, e.g. NIFTY50-INDEX) — match on that.
+		try {
+			const lessons = await this.listReflections(bestUnderlying, 2);
+			if (lessons.length) {
+				for (const lsn of lessons) {
+					if (lsn.heuristic) reasons.push(`📌 lesson: ${lsn.heuristic}`);
+				}
+			}
+		} catch {
+			/* reflections unavailable → signal proceeds without lessons */
+		}
 
 		const target = premium * 1.5; // option-buyer premium target
 		const stopLoss = premium * 0.75; // ≈25% premium drop stop

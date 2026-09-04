@@ -36,6 +36,18 @@ export class ProjectChecklistItem {
 	@Column({ type: 'varchar', length: 500, default: '' })
 	note!: string;
 
+	/** v5 detailed edition — implementation instruction for this item. */
+	@Column({ type: 'text', nullable: true })
+	instr!: string | null;
+
+	/** v5 detailed edition — objective "Done when" condition. */
+	@Column({ type: 'text', nullable: true })
+	doneWhen!: string | null;
+
+	/** checklist edition the item text came from: v4 | v5 */
+	@Column({ type: 'varchar', length: 8, default: 'v4' })
+	edition!: string;
+
 	@CreateDateColumn()
 	createdAt!: Date;
 

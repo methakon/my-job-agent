@@ -57,6 +57,9 @@ export class ProjectStatusService implements OnModuleInit {
 					item: r.item,
 					status: r.status ?? 'pending',
 					note: r.note ?? '',
+					instr: r.instr ?? null,
+					doneWhen: r.doneWhen ?? null,
+					edition: r.edition ?? 'v5',
 				}),
 			);
 			inserted += 1;
@@ -129,4 +132,7 @@ interface SeedRow {
 	item: string;
 	status?: string;
 	note?: string;
+	instr?: string;
+	doneWhen?: string;
+	edition?: string;
 }

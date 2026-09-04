@@ -64,6 +64,13 @@ export class FnfTradingController {
 		return this.trading.listTrades(portfolioId, limit ? Number(limit) : 100);
 	}
 
+	// ── Reflexion memory (T-08) ─────────────────────────────────────────
+
+	@Get('reflections')
+	listReflections(@Query('underlying') underlying?: string, @Query('limit') limit?: string) {
+		return this.trading.listReflections(underlying || undefined, limit ? Number(limit) : 10);
+	}
+
 	@Get('summary')
 	async summary() {
 		const [portfolios, trades, learning] = await Promise.all([
