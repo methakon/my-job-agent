@@ -48,6 +48,9 @@ import { FnfMarketSnapshotHistory } from './trading/fnf-market-snapshot-history.
 import { FnfOptionQuoteHistory } from './trading/fnf-option-quote-history.entity';
 import { FnfOptionChainService } from './trading/fnf-option-chain.service';
 import { FnfOptionChainController } from './trading/fnf-option-chain.controller';
+import { ProjectChecklistItem } from './project-status/project-checklist-item.entity';
+import { ProjectStatusService } from './project-status/project-status.service';
+import { ProjectStatusPageController } from './project-status/project-status-page.controller';
 import { InterviewPrepController } from './interview/interview-prep.controller';
 import { InterviewPracticePageController } from './interview/interview-practice-page.controller';
 import { MailController } from './applications/mail.controller';
@@ -97,11 +100,11 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, ProjectChecklistItem]),
 		SideIncomeModule,
 		AuthModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController,
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController,
 		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
 		AppFallbackController], // MUST stay last: serves dashboard.html for unmatched GETs
 	providers: [
@@ -140,6 +143,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		FnoMarketDataService,
 		FnfOptionChainService,
 		MarketDataInspectionService,
+		ProjectStatusService,
 	],
 })
 export class AppModule {}
