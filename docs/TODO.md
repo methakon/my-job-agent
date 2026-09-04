@@ -1,7 +1,13 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-05 (goodbye)
+> Last updated: 2026-09-05 (resume session)
+
+## Resume session 2026-09-05 (continue → gates) — decision journal built
+- [x] **GATE 1 → 5/10**: `fnf_decision_journal` table + entity — one row per signal cycle (BUY AND NO TRADE), with decision ts, session phase, data-age, actionFamily, winner, algoSource, buildSha; detailJson persists ALL candidates + every rejection reason + direction summary. Fire-and-forget writes; GET /trading/journal; card on /option-trading. Items done: #1 decision time/phase/data-age, #4 candidates+rejections, #6 versions/SHA, #10 action family; #5 (fills) deferred to GATE 9.
+- [x] **GATE 7 → 2/10**: #4 independent Greeks/discrepancy (T-09) done; #9 no-'high-IV=sell' and #10 short-premium-deferred satisfied by construction (verified by grep, long-options-only desk).
+- [x] Regression suite still green after journal change (GATE-0 invariants intact).
+- NEXT (auto-resume 'continue'): G-14 (Reflexion post-trade critique → OBSERVATION/HYPOTHESIS classes), G-19 (observability: rejection reasons on dashboard), G-1 remaining journal items, G-7 IV-RV/skew surface (needs chain-wide IV data research first)
 
 ## Session 2026-09-05 (done) — decision engine, Reflexion/Greeks, v5 checklist, auth
 - [x] **GATES MIRRORED into agent_todo_log** — all 24 v4/v5 checklist gates now tracked as G-0…G-21, T-B, T-PROTO (status synced from project_checklist_items) so "continue" drives through them
