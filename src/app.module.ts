@@ -8,6 +8,8 @@ import { JobLead } from './leads/job-lead.entity';
 import { Application } from './applications/application.entity';
 import { LearningWeight } from './applications/learning-weight.entity';
 import { QuestionAnswer } from './applications/question-answer.entity';
+import { CvRegionFormat } from './applications/cv-region-format.entity';
+import { CvRegionFormatController } from './applications/cv-region-format.controller';
 import { ApplySetting } from './applications/apply-setting.entity';
 import { MailAccount } from './applications/mail-account.entity';
 import { StatusUpdate } from './applications/status-update.entity';
@@ -104,11 +106,11 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, ProjectChecklistItem]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, ProjectChecklistItem]),
 		SideIncomeModule,
 		AuthModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController,
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController,
 		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
 		AppFallbackController], // MUST stay last: serves dashboard.html for unmatched GETs
 	providers: [

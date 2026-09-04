@@ -41,11 +41,11 @@ export class CvRegionFormat {
 	dateFormat!: string;
 
 	/** typical length in pages, e.g. '1-2', '2-3'. */
-	@Column({ type: 'varchar', length: 20 })
+	@Column({ type: 'varchar', length: 24 })
 	lengthPages!: string;
 
 	/** paper size: 'US Letter' | 'A4'. */
-	@Column({ type: 'varchar', length: 12 })
+	@Column({ type: 'varchar', length: 24 })
 	paperSize!: string;
 
 	/** language expectation for the CV document. */
