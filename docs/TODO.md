@@ -1,7 +1,13 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-05 (auto-continue batch 2)
+> Last updated: 2026-09-05 (auto-continue batch 3)
+
+## Auto-continue batch 3 (2026-09-05) — feature engine + data-boundary reached
+- [x] **GATE 3 → 5/10**: FeatureEngineService live — session VWAP (tick-mean fallback for volumeless index ticks), Wilder ATR-14 (distinct-price ticks), ORB-5/15/30, gapPct/priorClose/openPrice, feature-health/missingness; reads live+history snapshot tables. Verified on real NIFTY 2026-09-04 (vwap 23942.48, atr 4.24, orb5 73.65, gap −0.268%, 11,582 bars). GET /trading/market/features/:instrument?day=; determinism + empty-day tests ALL PASS (2ba0b7c, 78b0ca2)
+- [x] J-10 dependency-parked (CV regional formats need user definitions — high-stakes, user has strong CV conventions)
+- **DATA BOUNDARY reached for the queue**: remaining G-3 items (OI-delta/PCR — FYERS quotes arrive with OI=0; relative-volume/breadth/impulse — only 2026-09-04 has a full tick day) + all downstream gates (G-4 gap engine, G-6 profile, G-8 labels) need multi-day tick history that starts accumulating Mon 2026-09-07. All parked with dependency notes per user rule.
+- Remaining queue = pending_user rows (pre-apply approvals J-01/J-02/J-16, ZEBRA send, broker creds T-06, finn.no J-13), blocked (Chrome-gated J-05/06/07/08/18), T-05 (closed-trade samples), J-09 (browser login-wall). Nothing code-actionable without user input or accumulated data.
 
 ## Auto-continue batch 2 (2026-09-05) — no-confirmation queue run
 - [x] **GATE 14 → 4/10**: failureFamily (signal/timing/execution) + reflectionClass (OBSERVATION→HYPOTHESIS@2→TESTED_RULE@3) + confirmations on fnf_trade_reflections — deterministic promotion, never from one trade (75dd2a4)
