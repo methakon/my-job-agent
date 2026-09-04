@@ -18,6 +18,9 @@ import { FnfOptionQuoteHistory } from '../trading/fnf-option-quote-history.entit
 import { FnfTradeReflection } from '../trading/fnf-trade-reflection.entity';
 import { FnfDecisionJournal } from '../trading/fnf-decision-journal.entity';
 import { FnfTradeReport } from '../trading/fnf-trade-report.entity';
+import { SandboxTick } from '../trading/sandbox-tick.entity';
+import { UpstoxSandboxProvider } from '../trading/upstox-sandbox.provider';
+import { UpstoxSandboxIngestionService } from '../trading/upstox-sandbox-ingestion.service';
 import { SessionDriverService } from './session-driver.service';
 
 /**
@@ -47,6 +50,8 @@ import { SessionDriverService } from './session-driver.service';
       FnfOptionQuoteHistory,
       FnfTradeReflection,
       FnfDecisionJournal,
+      FnfTradeReport,
+      SandboxTick,
     ]),
   ],
   providers: [
@@ -55,6 +60,8 @@ import { SessionDriverService } from './session-driver.service';
     FnfTradingService,
     FnoMarketDataService,
     SessionDriverService,
+    UpstoxSandboxProvider,
+    UpstoxSandboxIngestionService,
   ],
 })
 export class TradingAgentModule {}
