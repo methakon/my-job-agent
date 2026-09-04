@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between } from 'typeorm';
+import { Repository, Between, LessThan } from 'typeorm';
 import { FnfMarketSnapshot } from '../trading/fnf-market-snapshot.entity';
 import { FnfMarketSnapshotHistory } from '../trading/fnf-market-snapshot-history.entity';
 
@@ -102,17 +102,30 @@ export class FeatureEngineService {
 		return ist.getUTCHours() * 60 + ist.getUTCMinutes();
 	}
 
+	/** Prior session close for gap math: last stored tick strictly before the
+	 *  given day's 09:15 IST open (from live+history, any earlier day). */
+	private async priorClose(instrument: string, dayIso: string): Promise<number | null> {
+		const openTime = new Date(`${dayIso}T09:15:00.000Z`);
+		const live = await this.snaps.find({ where: { instrument, ts: LessThan(openTime) }, order: { ts: 'DESC' }, take: 1 }).catch(() => [] as FnfMarketSnapshot[]);
+		const past = await this.hist.find({ where: { instrument, ts: LessThan(openTime) }, order: { ts: 'DESC' }, take: 1 }).catch(() => [] as FnfMarketSnapshotHistory[]);
+		const cands = [...live, ...past].sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime());
+		return cands.length ? Number(cands[0].price) : null;
+	}
+
 	/** Full intraday feature set for an instrument on a day (default today IST). */
-	async featuresFor(instrument: string, dayIso?: string): Promise<IntradayFeatures> {
+	async featuresFor(instrument: string, dayIso?: string): Promise<IntradayFeatures & { gapPct: number | null; priorClose: number | null; openPrice: number | null }> {
 		const istNow = new Date(Date.now() + IST_OFFSET_MS);
 		const day = dayIso ?? istNow.toISOString().slice(0, 10);
 		const rows = await this.loadWindow(instrument, day);
 		if (!rows.length) {
-			return { instrument, day, asOfMin: 0, vwap: null, atr14: null, rangePct: null, orbs: { orb5: null, orb15: null, orb30: null }, barCount: 0 };
+			return { instrument, day, asOfMin: 0, vwap: null, atr14: null, rangePct: null, orbs: { orb5: null, orb15: null, orb30: null }, barCount: 0, gapPct: null, priorClose: null, openPrice: null };
 		}
 		const asOfMin = Math.max(0, this.minOfDay(rows[rows.length - 1].ts) - OPEN_MIN);
 		const prices = rows.map((r) => r.price);
 		const rangePct = prices.length > 1 ? ((Math.max(...prices) - Math.min(...prices)) / (prices[0] || 1)) * 100 : null;
+		const openPrice = rows[0]?.price ?? null;
+		const priorClose = await this.priorClose(instrument, day);
+		const gapPct = openPrice !== null && priorClose && priorClose > 0 ? ((openPrice - priorClose) / priorClose) * 100 : null;
 		return {
 			instrument,
 			day,
@@ -122,6 +135,9 @@ export class FeatureEngineService {
 			rangePct,
 			orbs: this.orbs(rows, asOfMin),
 			barCount: rows.length,
+			gapPct,
+			priorClose,
+			openPrice,
 		};
 	}
 
