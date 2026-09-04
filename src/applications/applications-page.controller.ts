@@ -350,7 +350,8 @@ function template(
 	    '<h2>' + data.label + ' - ' + (data.total||0) + ' application' + (data.total!==1?'s':'') + '</h2>' +
 	    (rows ? rows : '<div class="empty-day">no applications applied this day</div>') +
 	    paginate + '</div>';
-	  document.getElementById('dayBack').addEventListener('click', ()=>{ dayView.style.display='none'; });
+	  document.getElementById('dayBack').addEventListener('click', ()=>{ dayView.style.display='none'; if(dayAutoTimer){ clearInterval(dayAutoTimer); dayAutoTimer = null; } });
+	  startDayAutoRefresh(iso, data.page || page); // J-12
 
 	  document.querySelectorAll('.job-row').forEach(row => {
 	    row.addEventListener('click', ()=> loadDetail(row.dataset.id));
@@ -362,6 +363,19 @@ function template(
 	      loadDay(a.dataset.day, parseInt(a.dataset.page,10));
 	    });
 	  });
+	}
+
+	// J-12: while a portal apply runs, statuses change server-side — auto-refresh
+	// the open day view every 15s (stops when the view closes; never while a
+	// detail card is open so the user can read without the DOM being replaced).
+	var dayAutoTimer = null;
+	function startDayAutoRefresh(iso, page){
+	  if(dayAutoTimer) clearInterval(dayAutoTimer);
+	  dayAutoTimer = setInterval(function(){
+	    if(dayView.style.display === 'none'){ clearInterval(dayAutoTimer); dayAutoTimer = null; return; }
+	    if(document.querySelector('.detail-card') || document.querySelector('.job-detail')) return; // detail open — hold
+	    loadDay(iso, page);
+	  }, 15000);
 	}
 
 	async function loadDetail(id){
