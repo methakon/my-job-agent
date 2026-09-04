@@ -1,7 +1,15 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-04 (evening)
+> Last updated: 2026-09-04 (late)
+
+## Guidebook review (2026-09-04 late) — Hermes Trading Agent Guidebook (Google Doc)
+Reviewed the guidebook: quantized Hermes-3-8B options agent on OCI ARM64 (llama-server), Tradier/US-market
+iron-condor + credit-spread spec, Reflexion verbal RL episodic memory, py_vollib local Greeks validation,
+Pydantic risk gate, ₹2k-5k micro-live progression. NOT applicable to our NSE/FYERS desk as-is (Tradier/US, 
+short-premium — Gate 0 forbids in current desk). Transferable ideas queued → agent_todo_log: **T-08** Reflexion
+memory (Gate 14), **T-09** local Greeks/IV + delta-band filter (Gate 7/T-04b), **D-01** architecture decision
+LLM-supervisor vs XGBoost, **D-02** multi-leg defined-risk as separate future family.
 
 ## T-04 Option-chain desk + tick archival + envelope model (2026-09-04) — deployed Dhargent
 - [x] **User rule**: NIFTY50-INDEX/SENSEX are UNDERLYING/REFERENCE only; positions only on registered option contracts (CE/PE) with expiry/strike/lot; premium-based entry/P&L/sizing; hard safeguard against index positions. Commit `681dd32`.
