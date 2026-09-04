@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { sanitizeDeep } from './text-sanitize';
 import * as fs from 'fs';
 import * as path from 'path';
 // pdfkit ships as a callable function with .constructor typing quirks —
@@ -61,6 +62,11 @@ export class AtsCvBuilder {
 	private readonly logger = new Logger(AtsCvBuilder.name);
 
 	async build(input: TailoredCvInput): Promise<string> {
+		// J-14: strip control chars / unpaired surrogates on the WRITE path so
+		// dirty stored text can never break PDF rendering (deep-clean copy; the
+		// caller's object is left untouched).
+		const clean = sanitizeDeep({ ...input, workHistory: [...(input.workHistory ?? [])], matchedSkills: [...(input.matchedSkills ?? [])], allSkills: [...(input.allSkills ?? [])] });
+		input = clean;
 		const baseDir = path.join(process.cwd(), 'generated', 'cv');
 		// Date-wise folder (user request 2026-08-27): save each generated CV into a
 		// folder named DDMMYYYY, e.g. generated/cv/27082026/. Keep all generated CVs
