@@ -1,7 +1,20 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-03 (night)
+> Last updated: 2026-09-04 (evening)
+
+## T-04 Option-chain desk + tick archival + envelope model (2026-09-04) — deployed Dhargent
+- [x] **User rule**: NIFTY50-INDEX/SENSEX are UNDERLYING/REFERENCE only; positions only on registered option contracts (CE/PE) with expiry/strike/lot; premium-based entry/P&L/sizing; hard safeguard against index positions. Commit `681dd32`.
+- [x] **openTrade hard guard**: rejects any `*-INDEX` instrument ("reference only — the desk trades option contracts on the chain, never the index itself") and any symbol not in `fnf_option_contracts`. Quantity = LOTS × lotSize (NIFTY 65/BANKNIFTY 30/FINNIFTY 60/SENSEX 20); entry = premium/unit; premium outlay (units × premium) must fit ceiling; decisionParams stores contract meta (strike/expiry/CE-PE/lot/units).
+- [x] **closeTrade**: premium P&L `(exit−entry)×units`; round-trip cost = entry leg + exit leg at FYERS segment rates (options flat ₹20/order, STT 0.05% sell premium, NSE txn 0.03553%, stamp 0.003% buy, SEBI ₹10/cr, GST 18% on broker+txn+sebi); deployed releases entry outlay (not exit value).
+- [x] **calculateCost(notional, side, segment)**: true lower-of brokerage (old `Math.max` billed the larger charge — fixed); options vs futures rate sets.
+- [x] **generateSignals → option-atm-premium-v1**: tradable universe = registered contracts with live premium quotes; underlying SMA-20 only for direction + ATM strike (bullish→ATM CE, bearish→ATM PE); premium target ×1.5 / stop ×0.75; decay-adjusted.
+- [x] **Envelope affordability (user 2026-09-04)**: ₹5,000 base stays; ceiling auto-grows/shrinks by (profit − charges) after every close (`ceiling = max(0, capital + netPnl)`); entry outlay must fit headroom (capital+netPnl−deployed) else HOLD with reason — so when NIFTY's 1-lot (~₹13-26k at 26SEP premiums) doesn't fit, SENSEX or another affordable chain signals instead.
+- [x] **Session driver**: exits position-driven via `latestReferencePrice` (option quote for contracts / snapshot for legacy index positions) against stored target/stop — the 2 legacy index opens from T-03 remain managed; opens only from option signals.
+- [x] **Feed routing**: option-contract ticks → `ingestQuote` only (never `fnf_market_snapshots`); option symbols in `FNO_MARKET_DATA_SYMBOLS` auto-register at `onModuleInit` (constructor raced the DB); FNO_OPTION_CONTRACTS also upserted at boot. Live: 13 symbols subscribed (3 index + 10 NIFTY 26SEP contracts), 10 contracts in DB, real premiums landing.
+- [x] **Tick archival (user 2026-09-04)**: new `fnf_market_snapshots_history` / `fnf_option_quotes_history` (schema mirror + archivedAt, auto-created). `archiveTicksBefore(boundaryIst)` = INSERT…SELECT→history then DELETE from live (idempotent). Driver `maybeArchiveSessions` on every 10s tick: weekday ≥15:30 → archive ts < today 15:30 once; day rollover → archive ts < today 00:00. Verified live: 22,694 snapshots + 3 quotes archived at 18:23 boot; live tables today-only. Commit `4ffce1e`.
+- [x] **FYERS token refresh (2026-09-04)**: access token expired overnight (-15 at every reconnect); fresh auth-code exchange (user click) → new access+refresh persisted masked to local + Dhargent `.env`; agent restarted, FYERS primary restored 12:03 IST.
+- [x] **T-03 session outcome (Fri 2026-09-04, observe-only)**: driver opened 2 index-level paper BUYs at 09:15:02 (NIFTY50-INDEX @ 23910.90 target 24389/stop 23672; BANKNIFTY-INDEX @ 57492.65 target 58642/stop 56918) — these were pre-T-04 scope-drift (index, not option) per the user's correction; left to resolve naturally per user choice; neither hit target/stop; both still OPEN at 15:30 close; netPnl 0, no costs. Archived in agent_todo_log.
 
 ## UI acceptance pass round 2 (2026-09-03 night) — failed-page 500 + date-click + pre-apply failed cards
 - [x] **User report**: failed application page → `{"statusCode":500,"message":"Internal server error"}`; Applications & Tracking calendar date-clicks do nothing on first load; pre-apply page still dominated by FAILED cards with no job-listing link, no destination email shown, and hold/resume/approve buttons feeling dead.
