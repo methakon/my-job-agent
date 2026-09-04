@@ -8,6 +8,7 @@ import { FnfDecayCalibration } from './fnf-decay-calibration.entity';
 import { FnfMarketSnapshotHistory } from './fnf-market-snapshot-history.entity';
 import { FnfOptionQuoteHistory } from './fnf-option-quote-history.entity';
 import { FnfTradeReflection } from './fnf-trade-reflection.entity';
+import { FnfDecisionJournal } from './fnf-decision-journal.entity';
 import { localGreeks } from './bsm-greeks';
 import { FnfOptionChainService } from './fnf-option-chain.service';
 import { OptionContract } from './option-chain-parser';
@@ -123,6 +124,7 @@ export class FnfTradingService {
 		@InjectRepository(FnfMarketSnapshotHistory) private readonly snapshotHistory: Repository<FnfMarketSnapshotHistory>,
 		@InjectRepository(FnfOptionQuoteHistory) private readonly quoteHistory: Repository<FnfOptionQuoteHistory>,
 		@InjectRepository(FnfTradeReflection) private readonly reflections: Repository<FnfTradeReflection>,
+		@InjectRepository(FnfDecisionJournal) private readonly journal: Repository<FnfDecisionJournal>,
 		private readonly optionChain: FnfOptionChainService,
 		private readonly muhurta: AstroMuhurtaService,
 	) {
@@ -397,6 +399,71 @@ export class FnfTradingService {
 	async listReflections(underlying?: string, limit = 10): Promise<FnfTradeReflection[]> {
 		const where = underlying ? { underlying } : {};
 		return this.reflections.find({ where, order: { createdAt: 'DESC' }, take: Math.min(limit, 50) });
+	}
+
+	/** Latest decision-journal rows for the UI / audit (GATE 1). */
+	async listJournal(limit = 25): Promise<FnfDecisionJournal[]> {
+		return this.journal.find({ order: { ts: 'DESC' }, take: Math.min(limit, 200) });
+	}
+
+	/** Persist one decision cycle to the point-in-time journal (GATE 1).
+	 *  Fire-and-forget — journal write must never block the signal path. */
+	private journalDecision(opts: {
+		portfolioId?: string;
+		asOf: Date;
+		actionFamily: 'BUY' | 'NO TRADE' | 'ERROR';
+		winnerSymbol?: string;
+		algoSource: string;
+		candidates: { symbol: string; premium: number; contractValue: number; spreadPct: number | null; delta: number | null; score: number }[];
+		rejected: string[];
+		directionSummary: Record<string, string>;
+		reasons?: string[];
+	}): void {
+		void (async () => {
+			try {
+				// max data age across quotes used (best-effort from ts fields)
+				let maxAgeMin = 0;
+				for (const r of opts.rejected) {
+					const m = r.match(/stale quote \(([\d.]+)m\)/);
+					if (m) maxAgeMin = Math.max(maxAgeMin, Number(m[1]));
+				}
+				const phase = this.currentSessionPhase(opts.asOf);
+				await this.journal.save(
+					this.journal.create({
+						ts: opts.asOf,
+						portfolioId: opts.portfolioId ?? null,
+						sessionPhase: phase,
+						dataAgeMin: maxAgeMin,
+						actionFamily: opts.actionFamily,
+						winnerSymbol: opts.winnerSymbol ?? '',
+						algoSource: opts.algoSource,
+						buildSha: process.env.BUILD_SHA || (process.env.npm_package_version ? `v${process.env.npm_package_version}` : ''),
+						detailJson: JSON.stringify({
+							direction: opts.directionSummary,
+							candidates: opts.candidates,
+							rejectedCount: opts.rejected.length,
+							rejected: opts.rejected.slice(0, 60),
+							reasons: opts.reasons ?? [],
+						}),
+					}),
+				);
+			} catch (e) {
+				this.logger.warn(`decision journal write failed: ${(e as Error).message}`);
+			}
+		})();
+	}
+
+	/** Session phase label for the journal: pre-open / open / post-close / closed. */
+	private currentSessionPhase(asOf: Date): string {
+		// IST-naive (same convention as market snapshots)
+		const ist = new Date(asOf.getTime() + (5 * 60 + 30) * 60 * 1000);
+		const day = ist.getUTCDay();
+		if (day === 0 || day === 6) return 'holiday';
+		const mins = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+		if (mins < 9 * 60 + 15) return 'pre-open';
+		if (mins <= 15 * 60 + 30) return 'open';
+		if (mins <= 18 * 60) return 'post-close';
+		return 'closed';
 	}
 
 	async listTrades(portfolioId?: string, limit = 100): Promise<FnfTrade[]> {
@@ -964,8 +1031,31 @@ export class FnfTradingService {
 		}
 
 		// ── Phase 5: pick the single best eligible contract (NO TRADE if none) ─
+		// Decision-journal context (GATE 1): every candidate + rejection is
+		// persisted regardless of outcome, so NO TRADE is auditable too.
+		const journalCandidates = candidates.map((c) => ({
+			symbol: c.contract.symbol,
+			premium: c.premium,
+			contractValue: c.contractValue,
+			spreadPct: c.spreadPct,
+			delta: null, // filled by winner path below when available
+			score: c.score,
+		}));
+		const directionSummary: Record<string, string> = {};
+		for (const [u, d] of direction) {
+			directionSummary[u] = d?.dir ? `${d.dir} (conf ${d.conf})` : 'range/none';
+		}
 		if (!candidates.length) {
 			this.logger.debug(`candidate ranking: no eligible contract — ${rejected.length ? rejected.join('; ') : 'no directional candidates'}`);
+			this.journalDecision({
+				portfolioId,
+				asOf,
+				actionFamily: 'NO TRADE',
+				algoSource: 'option-candidate-rank-v1',
+				candidates: [],
+				rejected,
+				directionSummary,
+			});
 			return [];
 		}
 		candidates.sort((a, b) => b.score - a.score);
@@ -1005,6 +1095,24 @@ export class FnfTradingService {
 
 		const target = premium * 1.5; // option-buyer premium target
 		const stopLoss = premium * 0.75; // ≈25% premium drop stop
+
+		// GATE 1: journal the BUY decision with the winner + all runners-up.
+		const deltaMatch = best.reasons.join(' ').match(/delta (-?[\d.]+)/);
+		const winnerSummary = journalCandidates.map((c) =>
+			c.symbol === best.contract.symbol ? { ...c, delta: deltaMatch ? Number(deltaMatch[1]) : null } : c,
+		);
+		this.journalDecision({
+			portfolioId,
+			asOf,
+			actionFamily: 'BUY',
+			winnerSymbol: best.contract.symbol,
+			algoSource: 'option-candidate-rank-v1',
+			candidates: winnerSummary,
+			rejected,
+			directionSummary,
+			reasons,
+		});
+
 		return [{
 			instrument: best.contract.symbol,
 			algoSource: 'option-candidate-rank-v1',

@@ -29,7 +29,7 @@ export class OptionTradingPageController {
 
   @Get()
   async page(@Res() res: Response) {
-    const [portfolios, trades, market, signals, learning, astro, calibrations] = await Promise.all([
+    const [portfolios, trades, market, signals, learning, astro, calibrations, journal] = await Promise.all([
       this.trading.listPortfolios(),
       this.trading.listTrades(undefined, 200),
       this.trading.marketTable(),
@@ -37,6 +37,7 @@ export class OptionTradingPageController {
       this.trading.learningSummary(),
       this.trading.astroMatch(),
       this.trading.listCalibrations(),
+      this.trading.listJournal(12),
     ]);
 
     const portfolio = portfolios[0] ?? null;
@@ -113,6 +114,14 @@ export class OptionTradingPageController {
       : `<tr><td colspan="10" class="dim">No trades yet. The option planner below does not write trades.</td></tr>`;
 
     const learningHtml = `<div class="kv"><div><span>Closed trades</span><b>${learning.total}</b></div><div><span>Win rate</span><b>${learning.winRate}%</b></div><div><span>Net P&amp;L</span><b class="${learning.netPnl >= 0 ? 'ok' : 'bad'}">₹ ${fmt(learning.netPnl)}</b></div><div><span>Winning trades</span><b>${learning.winners}</b></div></div>`;
+    const journalRows = journal.length
+      ? journal.map((j) => {
+          let detail = '';
+          try { const d = JSON.parse(j.detailJson); detail = `${d.rejectedCount ?? 0} rejected · ${(d.rejected ?? []).slice(0, 2).join(' | ')}`; } catch { detail = ''; }
+          return `<tr class="${j.actionFamily === 'BUY' ? 'ok' : 'dim'}"><td class="mini">${esc(String(j.ts).slice(0, 16).replace('T', ' '))}</td><td>${esc(j.sessionPhase)}</td><td><b>${esc(j.actionFamily)}</b></td><td>${esc(j.winnerSymbol)}</td><td>${esc(j.algoSource)}</td><td>${esc(j.buildSha || '')}</td><td class="mini">${esc(detail.slice(0, 130))}</td></tr>`;
+        })
+      : `<tr><td colspan="7" class="empty">No decision cycles recorded yet — journal fills on every signal evaluation (incl. NO TRADE).</td></tr>`;
+    const journalHtml = `<section class="card"><div class="card-title">📖 Point-in-time decision journal (v5 Gate 1)</div><table class="mini"><tr><th>Decision time</th><th>Phase</th><th>Action</th><th>Winner</th><th>Algo</th><th>Build</th><th>Rejections</th></tr>${journalRows}</table><div class="hint">Every signal-evaluation cycle is journaled — BUY, HOLD and NO TRADE with candidates + rejection reasons, data age and session phase, so any decision can be audited (GET /trading/journal).</div></section>`;
 
     res.send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>my-job-agent — F&amp;O Options</title>
 <style>
@@ -128,6 +137,7 @@ ${portfolioHtml}
 <section class="card"><div class="card-title">🤖 Shared prediction engine — raw → decay-adjusted confidence</div><table><tr><th>Underlying</th><th>Action</th><th>Price</th><th>Target</th><th>Stop-loss</th><th>Confidence</th><th>Gates</th><th>Reasons</th></tr>${signalRows}</table></section>
 <section class="card"><div class="card-title">⏳ Day-wise decay calibration — inherited from FNF</div><table class="mini"><tr><th>Weekday</th><th>Rate</th><th>Entry window</th><th>Samples</th><th>Last rectified</th></tr>${decayRows}</table><div class="hint">The same self-rectifying decay model, timing window, confidence floor, Friday guard, and astro gate apply to option signals.</div></section>
 <section class="card"><div class="card-title">📒 Shared trade ledger / P&amp;L</div><table><tr><th>Opened</th><th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Cost</th><th>Net P&amp;L</th><th>Status</th><th>Decision context</th></tr>${tradeRows}</table></section>
+${journalHtml}
 <section class="card"><div class="card-title">🧱 Option implementation status</div><div class="grid2"><div><b class="ok">Page live</b><p class="hint">Contract planner, safety boundary, inherited controls, market feed, signals, decay, learning, and ledger are rendered from the application services.</p></div><div><b class="warn">Backend still gated</b><p class="hint">TODO: real option-chain feed, contract metadata/expiry, Greeks, margin and lot-size validation, option-specific paper ledger, costs, and end-to-end tests.</p></div></div></section>
 <div class="footer"><a href="/">← dashboard</a> · <a href="/fnf-trading">FNF trading</a> · <a href="/applications-page">applications</a> · <a href="/docs">swagger</a><br>F&amp;O options page is paper-only and reuses the existing guarded FNF trading read models.</div>
 <script>

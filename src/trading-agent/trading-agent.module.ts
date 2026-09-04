@@ -16,6 +16,7 @@ import { FnfOptionQuote } from '../trading/fnf-option-quote.entity';
 import { FnfMarketSnapshotHistory } from '../trading/fnf-market-snapshot-history.entity';
 import { FnfOptionQuoteHistory } from '../trading/fnf-option-quote-history.entity';
 import { FnfTradeReflection } from '../trading/fnf-trade-reflection.entity';
+import { FnfDecisionJournal } from '../trading/fnf-decision-journal.entity';
 import { SessionDriverService } from './session-driver.service';
 
 /**
@@ -44,6 +45,7 @@ import { SessionDriverService } from './session-driver.service';
       FnfMarketSnapshotHistory,
       FnfOptionQuoteHistory,
       FnfTradeReflection,
+      FnfDecisionJournal,
     ]),
   ],
   providers: [

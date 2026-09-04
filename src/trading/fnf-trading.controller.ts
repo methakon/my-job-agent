@@ -71,6 +71,13 @@ export class FnfTradingController {
 		return this.trading.listReflections(underlying || undefined, limit ? Number(limit) : 10);
 	}
 
+	// ── Decision journal (GATE 1) ───────────────────────────────────────
+
+	@Get('journal')
+	listJournal(@Query('limit') limit?: string) {
+		return this.trading.listJournal(limit ? Number(limit) : 25);
+	}
+
 	@Get('summary')
 	async summary() {
 		const [portfolios, trades, learning] = await Promise.all([
