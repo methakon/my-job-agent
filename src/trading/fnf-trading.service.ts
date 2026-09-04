@@ -5,6 +5,8 @@ import { FnfPortfolio } from './fnf-portfolio.entity';
 import { FnfTrade } from './fnf-trade.entity';
 import { FnfMarketSnapshot } from './fnf-market-snapshot.entity';
 import { FnfDecayCalibration } from './fnf-decay-calibration.entity';
+import { FnfMarketSnapshotHistory } from './fnf-market-snapshot-history.entity';
+import { FnfOptionQuoteHistory } from './fnf-option-quote-history.entity';
 import { FnfOptionChainService } from './fnf-option-chain.service';
 import { OptionContract } from './option-chain-parser';
 import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto, SetDecayCalibrationDto } from './fnf-trading.dto';
@@ -116,6 +118,8 @@ export class FnfTradingService {
 		@InjectRepository(FnfTrade) private readonly trades: Repository<FnfTrade>,
 		@InjectRepository(FnfMarketSnapshot) private readonly snapshots: Repository<FnfMarketSnapshot>,
 		@InjectRepository(FnfDecayCalibration) private readonly calibrations: Repository<FnfDecayCalibration>,
+		@InjectRepository(FnfMarketSnapshotHistory) private readonly snapshotHistory: Repository<FnfMarketSnapshotHistory>,
+		@InjectRepository(FnfOptionQuoteHistory) private readonly quoteHistory: Repository<FnfOptionQuoteHistory>,
 		private readonly optionChain: FnfOptionChainService,
 		private readonly muhurta: AstroMuhurtaService,
 	) {
@@ -276,10 +280,16 @@ export class FnfTradingService {
 		const saved = await this.trades.save(trade);
 
 		const portfolio = trade.portfolio;
+		// Envelope model (user directive 2026-09-03/04): ₹5,000 base stored in the
+		// DB; after every close the stored envelope (ceiling) auto-grows/shrinks by
+		// (gross P&L − charges) = netPnl, so future sessions can deploy the gains.
+		const newNetPnl = Number(portfolio.netPnl) + netPnl;
+		const newCeiling = Math.max(0, Number(portfolio.capital) + newNetPnl);
 		await this.portfolios.update(portfolio.id, {
 			// release the premium outlay committed at entry (entry × units), not exit value
 			deployed: Math.max(0, Number(portfolio.deployed) - qty * entry),
-			netPnl: Number(portfolio.netPnl) + netPnl,
+			netPnl: newNetPnl,
+			ceiling: newCeiling,
 			totalCost: Number(portfolio.totalCost) + cost,
 		});
 		this.logger.log(`trade closed ${id}: gross ${grossPnl.toFixed(2)} cost ${cost.toFixed(2)} net ${netPnl.toFixed(2)}`);
@@ -680,6 +690,18 @@ export class FnfTradingService {
 			}
 
 			const premium = quote.ltp;
+			// Envelope affordability (user directive 2026-09-04): the account starts at
+			// ₹5,000 and grows by (profit − charges); a 1-lot entry must fit the current
+			// headroom (capital + netPnl − deployed). If this underlying's ATM 1-lot
+			// outlay doesn't fit, emit HOLD so a cheaper chain (e.g. SENSEX) can signal
+			// instead — never force an unaffordable strike just to stay in the trade.
+			const lotSize = Number(atm.lotSize) || 1;
+			// Match the session driver's position size: FNO_PAPER_QTY lots (default 1).
+			const lots = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
+			const entryOutlay = premium * lotSize * lots;
+			const headroom = portfolio
+				? (Number(portfolio.capital) + Number(portfolio.netPnl)) - Number(portfolio.deployed)
+				: Number.POSITIVE_INFINITY;
 			// Option-buyer target/stop on the PREMIUM (not index points): 50% upside
 			// target, 25% premium drop stop (reference: option stops ≈ 25-30% of premium).
 			const target = premium * 1.5;
@@ -687,28 +709,21 @@ export class FnfTradingService {
 
 			const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(rawConfidence, cal, quote.ts, asOf);
 			const reasons = [...baseReasons];
-			const action: AlgoSignal['action'] = 'BUY'; // long option only — max loss = premium
+			let action: AlgoSignal['action'] = 'BUY'; // long option only — max loss = premium
 			if (decayed < DECAY_DEFAULTS.confidenceFloor) {
 				reasons.push(`signal decayed below floor (premium age ${ageHours.toFixed(1)}h → conf ${decayed.toFixed(0)})`);
-				signals.push({
-					instrument: atm.symbol,
-					algoSource: 'option-atm-premium-v1',
-					action: 'HOLD',
-					price: premium,
-					target,
-					stopLoss,
-					confidence: rawConfidence,
-					decayedConfidence: Math.round(decayed),
-					decay: { rate, ageHours, timingFactor, weekday: todayWd, windowStartHour: Number(cal.windowStartHour), windowEndHour: Number(cal.windowEndHour), lastRectifiedAt: cal.lastRectifiedAt },
-					scenarios: [],
-					astroMatch,
-					fridayBlocked,
-					reasons,
-				});
-				continue;
+				action = 'HOLD';
+			} else if (headroom < entryOutlay) {
+				// Not affordable: HOLD this underlying's signal. The session driver will
+				// then open whatever affordable chain signal exists (SENSEX etc.).
+				reasons.push(
+					`1-lot outlay ₹${entryOutlay.toFixed(0)} (premium ₹${premium.toFixed(2)} × ${lotSize} units) exceeds headroom ₹${headroom.toFixed(2)} — holding ${underlying}; cheaper chain may signal`,
+				);
+				action = 'HOLD';
+			} else {
+				reasons.push(`ATM ${atm.optionType} strike ${atm.strike} (${nearExpiry}) — spot ${spot.toFixed(2)}`);
+				reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (premium age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
 			}
-			reasons.push(`ATM ${atm.optionType} strike ${atm.strike} (${nearExpiry}) — spot ${spot.toFixed(2)}`);
-			reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (premium age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
 
 			signals.push({
 				instrument: atm.symbol,
@@ -720,11 +735,13 @@ export class FnfTradingService {
 				confidence: rawConfidence,
 				decayedConfidence: Math.round(decayed),
 				decay: { rate, ageHours, timingFactor, weekday: todayWd, windowStartHour: Number(cal.windowStartHour), windowEndHour: Number(cal.windowEndHour), lastRectifiedAt: cal.lastRectifiedAt },
-				scenarios: [
-					{ name: 'bull', probability: action === 'BUY' ? 45 : 30, target: premium * 1.5 },
-					{ name: 'base', probability: 30, target: premium * 1.1 },
-					{ name: 'bear', probability: 25, target: premium * 0.6 },
-				],
+				scenarios: action === 'HOLD'
+					? []
+					: [
+						{ name: 'bull', probability: 45, target: premium * 1.5 },
+						{ name: 'base', probability: 30, target: premium * 1.1 },
+						{ name: 'bear', probability: 25, target: premium * 0.6 },
+					],
 				astroMatch,
 				fridayBlocked,
 				reasons,
@@ -746,5 +763,48 @@ export class FnfTradingService {
 	async purgeOldSnapshots(before: Date): Promise<number> {
 		const res = await this.snapshots.delete({ ts: LessThanOrEqual(before) });
 		return res.affected ?? 0;
+	}
+
+	/**
+	 * Session rollover archive: move every tick recorded BEFORE the given IST
+	 * boundary out of the live "today" tables into the history tables, then
+	 * delete them from live. Live tables therefore only ever hold the current
+	 * session's ticks; each finished session's ticks accumulate in history.
+	 * Boundary is an IST-naive 'YYYY-MM-DD HH:MM:SS' string compared against the
+	 * IST-naive ts columns. Idempotent: run any number of times.
+	 */
+	async archiveTicksBefore(boundaryIst: string): Promise<{ snapshots: number; quotes: number }> {
+		const snapshots = await this.snapshots.manager.query(
+			`INSERT INTO fnf_market_snapshots_history
+				 (id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt)
+			 SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, NOW()
+			 FROM fnf_market_snapshots WHERE ts < ?`,
+			[boundaryIst],
+		);
+		const delSnap = await this.snapshots.manager.query(
+			'DELETE FROM fnf_market_snapshots WHERE ts < ?',
+			[boundaryIst],
+		);
+		const quotes = await this.quoteHistory.manager.query(
+			`INSERT INTO fnf_option_quotes_history
+				 (id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
+				  openInterest, impliedVolatility, delta, gamma, theta, vega, provider, ts, createdAt, archivedAt)
+			 SELECT id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
+				  openInterest, impliedVolatility, delta, gamma, theta, vega, provider, ts, createdAt, NOW()
+			 FROM fnf_option_quotes WHERE ts < ?`,
+			[boundaryIst],
+		);
+		const delQuotes = await this.quoteHistory.manager.query(
+			'DELETE FROM fnf_option_quotes WHERE ts < ?',
+			[boundaryIst],
+		);
+		const moved = {
+			snapshots: Number(delSnap?.affectedRows ?? delSnap?.affected ?? 0),
+			quotes: Number(delQuotes?.affectedRows ?? delQuotes?.affected ?? 0),
+		};
+		if (moved.snapshots || moved.quotes) {
+			this.logger.log(`tick archive @ ${boundaryIst}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) moved to history`);
+		}
+		return moved;
 	}
 }

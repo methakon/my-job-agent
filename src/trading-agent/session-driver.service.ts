@@ -29,10 +29,50 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 	private lastWarnAt = 0;
 	private lastArmedLog = 0;
 	private lastSessionDate = '';
+	private lastSessionArchiveDate = '';
+	private lastDayArchiveDate = '';
 
 	constructor(private readonly trading: FnfTradingService) {
 		this.intervalMs = Math.max(5_000, Number(process.env.FNO_SESSION_DRIVER_MS ?? 10_000));
 		this.paperQty = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
+	}
+
+	private istDateKey(now: Date): string {
+		const ist = new Date(now.getTime() + IST_OFFSET_MS);
+		return `${ist.getUTCFullYear()}-${String(ist.getUTCMonth() + 1).padStart(2, '0')}-${String(ist.getUTCDate()).padStart(2, '0')}`;
+	}
+
+	/**
+	 * Session tick archival (user directive 2026-09-04): today's ticks live in
+	 * fnf_market_snapshots / fnf_option_quotes; each finished session's ticks are
+	 * moved to the *_history tables and the live tables cleaned. Two idempotent
+	 * passes run on the 10s tick:
+	 *   1. Session close — first weekday tick at/after 15:30 archives that day's
+	 *      session ticks (ts < today 15:30) once per IST date.
+	 *   2. Day rollover — first tick of a new IST date archives any stragglers
+	 *      (ts < today 00:00) so a live table never mixes two days.
+	 */
+	private async maybeArchiveSessions(now: Date): Promise<void> {
+		try {
+			const { dow, minutes } = this.istParts(now);
+			const today = this.istDateKey(now);
+			if (dow >= 1 && dow <= 5 && minutes >= this.sessionEndMin && this.lastSessionArchiveDate !== today) {
+				this.lastSessionArchiveDate = today;
+				const moved = await this.trading.archiveTicksBefore(`${today} 15:30:00`);
+				if (moved.snapshots || moved.quotes) {
+					this.logger.log(`session archive ${today}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) → history`);
+				}
+			}
+			if (this.lastDayArchiveDate !== today) {
+				this.lastDayArchiveDate = today;
+				const moved = await this.trading.archiveTicksBefore(`${today} 00:00:00`);
+				if (moved.snapshots || moved.quotes) {
+					this.logger.log(`day-rollover archive ${today}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) → history`);
+				}
+			}
+		} catch (error) {
+			this.throttledWarn(`tick archive failed: ${(error as Error).message}`);
+		}
 	}
 
 	onModuleInit(): void {
@@ -77,6 +117,8 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 
 	private async runOnce(): Promise<void> {
 		const now = new Date();
+		// Tick archival runs unconditionally (even with no portfolio / out of session).
+		await this.maybeArchiveSessions(now);
 		const portfolios = (await this.trading.listPortfolios()).filter((p) => p.autoTradeEnabled);
 		if (!portfolios.length) {
 			const ts = Date.now();

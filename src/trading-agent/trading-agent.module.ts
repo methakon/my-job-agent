@@ -13,6 +13,8 @@ import { FnfMarketSnapshot } from '../trading/fnf-market-snapshot.entity';
 import { FnfDecayCalibration } from '../trading/fnf-decay-calibration.entity';
 import { FnfOptionContract } from '../trading/fnf-option-contract.entity';
 import { FnfOptionQuote } from '../trading/fnf-option-quote.entity';
+import { FnfMarketSnapshotHistory } from '../trading/fnf-market-snapshot-history.entity';
+import { FnfOptionQuoteHistory } from '../trading/fnf-option-quote-history.entity';
 import { SessionDriverService } from './session-driver.service';
 
 /**
@@ -38,6 +40,8 @@ import { SessionDriverService } from './session-driver.service';
       FnfDecayCalibration,
       FnfOptionContract,
       FnfOptionQuote,
+      FnfMarketSnapshotHistory,
+      FnfOptionQuoteHistory,
     ]),
   ],
   providers: [
