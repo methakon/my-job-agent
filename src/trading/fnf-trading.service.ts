@@ -589,21 +589,35 @@ export class FnfTradingService {
 		return null;
 	}
 
-	/** Nearest expiry (YYYY-MM-DD) among registered contracts of one underlying. */
-	private nearestExpiry(contracts: { expiry: string }[]): string | null {
-		const expiries = contracts.map((c) => String(c.expiry)).filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(e)).sort();
-		return expiries[0] ?? null;
-	}
 
 	/**
-	 * Generate signals on REGISTERED OPTION CONTRACTS (CE/PE) using their live
-	 * premium quotes. The underlying index is used ONLY to decide direction and
-	 * the ATM strike — it is never the traded instrument. Bullish underlying
-	 * momentum → long ATM CE; bearish → long ATM PE. Entry price = premium;
-	 * target/stop are premium percentages (option-buyer stop ≈ 25% premium drop).
-	 * Everything stays decay-adjusted; below the floor → HOLD. Friday honored.
+	 * Candidate-ranking DECISION ENGINE (user architecture 2026-09-04).
+	 *
+	 * 1. Direction: the strategy computes per-underlying bias from index SMA-20 /
+	 *    momentum (bullish → CE candidates, bearish → PE candidates). Range-bound
+	 *    underlyings contribute no candidates.
+	 * 2. Candidate build: every REGISTERED contract (any underlying × expiry ×
+	 *    strike) matching the direction's option type with a live premium quote is
+	 *    a candidate carrying premium, lot size, contract value, liquidity
+	 *    (volume/OI), bid/ask spread, Greeks and ATM-ness (distance from spot).
+	 * 3. Capital filter: contract value = premium × lotSize × lots must fit the
+	 *    available headroom (capital + netPnl − deployed); anything over is
+	 *    REJECTED as unaffordable. ₹5,000 is a capital constraint, NOT an
+	 *    instrument-selection rule.
+	 * 4. Mandatory quality gates: minimum liquidity, maximum bid/ask spread,
+	 *    non-stale quote, expiry ahead, decayed confidence ≥ floor.
+	 * 5. Score the affordable survivors across the whole universe and emit the
+	 *    single best contract. Same-underlying OTM is a scored candidate, not a
+	 *    hard fallback; SENSEX/BANKNIFTY/FINNIFTY compete on equal footing.
+	 * 6. No candidate clearing all gates → NO TRADE (empty result) — never the
+	 *    forced next-cheapest.
+	 *
+	 * Weights are env-tunable: FNO_CAND_W_STRATEGY (default 40), FNO_CAND_W_LIQ
+	 * (25), FNO_CAND_W_SPREAD (20), FNO_CAND_W_EXPIRY (15), FNO_CAND_W_GREEKS
+	 * (10), FNO_CAND_W_SAMEUND (5, continuity nudge only), FNO_CAND_W_COST (5,
+	 * prefers lower capital at risk).
 	 */
-	async generateSignals(portfolioId?: string, asOf: Date = new Date()): Promise<AlgoSignal[]> {
+		async generateSignals(portfolioId?: string, asOf: Date = new Date()): Promise<AlgoSignal[]> {
 		const portfolio = portfolioId ? await this.getPortfolio(portfolioId) : (await this.listPortfolios())[0] ?? null;
 		const isFriday = asOf.getDay() === 5;
 		const fridayBlocked = isFriday && !(portfolio?.fridayTradingEnabled);
@@ -611,15 +625,18 @@ export class FnfTradingService {
 		const todayWd = asOf.getDay();
 		const cal = await this.getCalibration(todayWd, portfolio?.id);
 
-		// The tradable universe = registered option contracts, not index snapshots.
+		// Registered universe = all contracts on record (not just index snapshots).
 		const contracts = await this.optionChain.listAllContracts();
-		const latest = await this.optionChain.findChain({ latestOnly: true, limit: 1000 });
-		const quoteBySymbol = new Map<string, { ltp: number; ts: Date }>();
+		if (!contracts.length) return []; // nothing registered → no option candidates
+		const contractBySymbol = new Map(contracts.map((c) => [c.symbol, c]));
+
+		// Live quotes: latest premium per contract symbol (all registered contracts).
+		const latest = await this.optionChain.findChain({ latestOnly: true, limit: 2000 });
+		const quoteBySymbol = new Map<string, (typeof latest.rows)[number]>();
 		for (const q of latest.rows) {
 			const ltp = Number(q.ltp);
-			if (Number.isFinite(ltp) && ltp > 0) quoteBySymbol.set(q.contractSymbol, { ltp, ts: new Date(q.ts) });
+			if (Number.isFinite(ltp) && ltp > 0) quoteBySymbol.set(q.contractSymbol, q);
 		}
-		if (!contracts.length) return []; // nothing registered → no option signals
 
 		const window = await this.muhurta.nextWindow(asOf, 24);
 		const shubh = (window?.score ?? 0) >= SHUBH_SCORE_MIN;
@@ -629,16 +646,35 @@ export class FnfTradingService {
 			label: window ? this.muhurta.describeNext(asOf) : 'no muhurta window found in next 24h',
 		};
 
-		const signals: AlgoSignal[] = [];
-		// group registered contracts by underlying token
+		// ── Scoring weights (env-tunable) ──────────────────────────────────────
+		const W = {
+			strategy: Number(process.env.FNO_CAND_W_STRATEGY ?? 40),
+			liquidity: Number(process.env.FNO_CAND_W_LIQ ?? 25),
+			spread: Number(process.env.FNO_CAND_W_SPREAD ?? 20),
+			expiry: Number(process.env.FNO_CAND_W_EXPIRY ?? 15),
+			greeks: Number(process.env.FNO_CAND_W_GREEKS ?? 10),
+			sameUnderlying: Number(process.env.FNO_CAND_W_SAMEUND ?? 5),
+			cost: Number(process.env.FNO_CAND_W_COST ?? 5),
+		};
+		const maxSpreadPct = Number(process.env.FNO_CAND_MAX_SPREAD_PCT ?? 0.15); // 15%
+		const minVolume = Number(process.env.FNO_CAND_MIN_VOLUME ?? 0); // 0 = liquidity gate off unless quoted volume
+		const staleMinutes = Number(process.env.FNO_CAND_STALE_MIN ?? 5);
+		const lots = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1)); // match driver position size
+		const headroom = portfolio
+			? (Number(portfolio.capital) + Number(portfolio.netPnl)) - Number(portfolio.deployed)
+			: Number.POSITIVE_INFINITY;
+		const maxDte = Number(process.env.FNO_CAND_MAX_DTE ?? 45);
+
+		// ── Phase 1: per-underlying direction from index snapshots ─────────────
+		// underlying token (upper) → { spot, direction: 'CE' | 'PE' | null }
 		const byUnderlying = new Map<string, typeof contracts>();
 		for (const c of contracts) {
 			const key = String(c.underlying || '').toUpperCase();
 			if (!byUnderlying.has(key)) byUnderlying.set(key, []);
 			byUnderlying.get(key)!.push(c);
 		}
-
-		for (const [underlying, group] of byUnderlying) {
+		const direction = new Map<string, { spot: number; dir: 'CE' | 'PE' | null; reason: string; conf: number }>();
+		for (const [underlying] of byUnderlying) {
 			const indexInstrument = this.indexInstrumentFor(underlying);
 			if (!indexInstrument) continue;
 			const rows = await this.snapshots.find({
@@ -646,108 +682,200 @@ export class FnfTradingService {
 				order: { ts: 'DESC' },
 				take: 30,
 			});
-			if (rows.length < 5) continue; // not enough underlying data for direction
-
+			if (rows.length < 5) continue;
 			const prices = rows.map((r) => Number(r.price)).reverse();
 			const spot = prices[prices.length - 1];
 			const sma = prices.reduce((a, b) => a + b, 0) / prices.length;
 			const smaShort = prices.slice(-5).reduce((a, b) => a + b, 0) / 5;
 			const momentum = (spot / prices[prices.length - 6]) - 1;
-
 			const bullish = spot > sma && smaShort > sma;
 			const bearish = spot < sma && smaShort < sma;
-			const baseReasons: string[] = [
-				bullish ? 'underlying above SMA-20 with rising 5-bar mean' : bearish ? 'underlying below SMA-20 with falling 5-bar mean' : 'underlying oscillating around SMA-20',
-			];
-			if (Math.abs(momentum) > 0.002) baseReasons.push(`5-bar momentum ${(momentum * 100).toFixed(2)}%`);
-			if (astroMatch.shubh) baseReasons.push(`shubh muhurta ${astroMatch.label}`);
-			else baseReasons.push('no shubh muhurta window in next 24h');
-
-			// Raw model confidence (pre-decay) from the underlying's deviation.
-			const rawConfidence = Math.min(85, 40 + Math.round(Math.abs(spot - sma) / sma * 1000) + (astroMatch.shubh ? 15 : 0));
-
-			// ATM strike = the registered strike closest to the current spot.
-			const nearExpiry = this.nearestExpiry(group);
-			const expiryGroup = nearExpiry ? group.filter((c) => String(c.expiry) === nearExpiry) : group;
-			if (!expiryGroup.length) continue;
-
-			// Strategy picks the option type by direction; strike selection = ATM.
-			const desiredType = bullish ? 'CE' : bearish ? 'PE' : null;
-			if (!desiredType) {
-				// Range-bound underlying: no directional option entry (theta is a headwind).
-				this.logger.debug(`no option signal for ${underlying}: underlying range-bound`);
-				continue;
-			}
-			const sideGroup = expiryGroup.filter((c) => String(c.optionType).toUpperCase() === desiredType);
-			if (!sideGroup.length) continue;
-			const atm = sideGroup.reduce((best, c) =>
-				Math.abs(Number(c.strike) - spot) < Math.abs(Number(best.strike) - spot) ? c : best,
-			);
-			const quote = quoteBySymbol.get(atm.symbol);
-			if (!quote) {
-				this.logger.debug(`no live premium yet for ${atm.symbol} — no signal`);
-				continue;
-			}
-
-			const premium = quote.ltp;
-			// Envelope affordability (user directive 2026-09-04): the account starts at
-			// ₹5,000 and grows by (profit − charges); a 1-lot entry must fit the current
-			// headroom (capital + netPnl − deployed). If this underlying's ATM 1-lot
-			// outlay doesn't fit, emit HOLD so a cheaper chain (e.g. SENSEX) can signal
-			// instead — never force an unaffordable strike just to stay in the trade.
-			const lotSize = Number(atm.lotSize) || 1;
-			// Match the session driver's position size: FNO_PAPER_QTY lots (default 1).
-			const lots = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
-			const entryOutlay = premium * lotSize * lots;
-			const headroom = portfolio
-				? (Number(portfolio.capital) + Number(portfolio.netPnl)) - Number(portfolio.deployed)
-				: Number.POSITIVE_INFINITY;
-			// Option-buyer target/stop on the PREMIUM (not index points): 50% upside
-			// target, 25% premium drop stop (reference: option stops ≈ 25-30% of premium).
-			const target = premium * 1.5;
-			const stopLoss = premium * 0.75;
-
-			const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(rawConfidence, cal, quote.ts, asOf);
-			const reasons = [...baseReasons];
-			let action: AlgoSignal['action'] = 'BUY'; // long option only — max loss = premium
-			if (decayed < DECAY_DEFAULTS.confidenceFloor) {
-				reasons.push(`signal decayed below floor (premium age ${ageHours.toFixed(1)}h → conf ${decayed.toFixed(0)})`);
-				action = 'HOLD';
-			} else if (headroom < entryOutlay) {
-				// Not affordable: HOLD this underlying's signal. The session driver will
-				// then open whatever affordable chain signal exists (SENSEX etc.).
-				reasons.push(
-					`1-lot outlay ₹${entryOutlay.toFixed(0)} (premium ₹${premium.toFixed(2)} × ${lotSize} units) exceeds headroom ₹${headroom.toFixed(2)} — holding ${underlying}; cheaper chain may signal`,
-				);
-				action = 'HOLD';
-			} else {
-				reasons.push(`ATM ${atm.optionType} strike ${atm.strike} (${nearExpiry}) — spot ${spot.toFixed(2)}`);
-				reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (premium age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
-			}
-
-			signals.push({
-				instrument: atm.symbol,
-				algoSource: 'option-atm-premium-v1',
-				action,
-				price: premium,
-				target,
-				stopLoss,
-				confidence: rawConfidence,
-				decayedConfidence: Math.round(decayed),
-				decay: { rate, ageHours, timingFactor, weekday: todayWd, windowStartHour: Number(cal.windowStartHour), windowEndHour: Number(cal.windowEndHour), lastRectifiedAt: cal.lastRectifiedAt },
-				scenarios: action === 'HOLD'
-					? []
-					: [
-						{ name: 'bull', probability: 45, target: premium * 1.5 },
-						{ name: 'base', probability: 30, target: premium * 1.1 },
-						{ name: 'bear', probability: 25, target: premium * 0.6 },
-					],
-				astroMatch,
-				fridayBlocked,
-				reasons,
+			const rawConfidence = Math.min(85, 40 + Math.round(Math.abs(spot - sma) / sma * 1000) + (shubh ? 15 : 0));
+			direction.set(underlying, {
+				spot,
+				dir: bullish ? 'CE' : bearish ? 'PE' : null,
+				reason: bullish
+					? 'underlying above SMA-20 with rising 5-bar mean (bullish)'
+					: bearish
+						? 'underlying below SMA-20 with falling 5-bar mean (bearish)'
+						: 'underlying oscillating around SMA-20 (range-bound)',
+				conf: rawConfidence,
 			});
 		}
-		return signals;
+
+		// Same-underlying continuity: underlying of the most recent trade (any state)
+		// on this portfolio — a small scoring nudge only, never a rule.
+		let lastTradeUnderlying = '';
+		if (portfolioId) {
+			const lastTrades = await this.trades.find({ where: { portfolio: { id: portfolioId } }, order: { orderedAt: 'DESC' }, take: 1 });
+			const last = lastTrades[0];
+			if (last) {
+				const lastContract = contractBySymbol.get(last.instrument);
+				if (lastContract) lastTradeUnderlying = String(lastContract.underlying || '').toUpperCase();
+				else {
+					// legacy index trade — derive from symbol so continuity still applies
+					const t = last.instrument.replace(/^[A-Z]+:/, '').replace(/-INDEX$/, '').toUpperCase();
+					lastTradeUnderlying = t.startsWith('NIFTY50') ? 'NIFTY50-INDEX' : t;
+				}
+			}
+		}
+
+		// ── Phases 2–4: build candidates across the whole registered universe ──
+		interface Candidate {
+			contract: typeof contracts[number];
+			quote: (typeof latest.rows)[number];
+			premium: number;
+			contractValue: number;
+			spreadPct: number | null;
+			atmScore: number; // 1 = ATM, → 0 as strike drifts from spot
+			expiryScore: number;
+			greeksScore: number;
+			score: number;
+			reasons: string[];
+		}
+		const candidates: Candidate[] = [];
+		const rejected: string[] = [];
+		const now = asOf.getTime();
+		const nowIst = new Date(now + (5 * 60 + 30) * 60 * 1000);
+
+		for (const [underlying, group] of byUnderlying) {
+			const dirInfo = direction.get(underlying);
+			if (!dirInfo || !dirInfo.dir) continue; // no snapshot data or range-bound → no candidates
+			const { spot, dir, reason, conf } = dirInfo;
+			for (const contract of group) {
+				const sym = contract.symbol;
+				if (String(contract.optionType).toUpperCase() !== dir) continue; // CE when bullish, PE when bearish
+				const quote = quoteBySymbol.get(sym);
+				if (!quote) { rejected.push(`${sym}: no live premium quote`); continue; }
+				const premium = Number(quote.ltp);
+				if (!Number.isFinite(premium) || premium <= 0) { rejected.push(`${sym}: invalid premium`); continue; }
+				const quoteAgeMin = Math.max(0, (now - new Date(quote.ts).getTime()) / 60_000);
+				if (quoteAgeMin > staleMinutes) { rejected.push(`${sym}: stale quote (${quoteAgeMin.toFixed(1)}m)`); continue; }
+				const lotSize = Number(contract.lotSize) || 1;
+				const contractValue = premium * lotSize * lots;
+
+				// ── Phase 3 gates ──────────────────────────────────────────────
+				// Capital filter: ₹5,000 is a per-position cap, not an instrument rule.
+				if (contractValue > headroom) {
+					rejected.push(`${sym}: unaffordable — contract value ₹${contractValue.toFixed(0)} > headroom ₹${headroom.toFixed(0)}`);
+					continue;
+				}
+				// Expiry sanity: must be a future expiry within max DTE.
+				const expiry = new Date(String(contract.expiry).slice(0, 10) + 'T00:00:00.000Z');
+				const dte = Math.max(0, Math.round((expiry.getTime() - nowIst.getTime()) / 86_400_000));
+				if (dte < 1) { rejected.push(`${sym}: expiry ${String(contract.expiry).slice(0, 10)} is today or past`); continue; }
+				if (dte > maxDte) { rejected.push(`${sym}: expiry ${dte} DTE beyond max ${maxDte}`); continue; }
+				// Liquidity: volume floor (0 = disabled unless a positive requirement set).
+				const volume = Number(quote.volume ?? 0);
+				if (minVolume > 0 && volume < minVolume) { rejected.push(`${sym}: volume ${volume} < ${minVolume}`); continue; }
+				// Spread sanity: skip illiquid wide-spread contracts.
+				const bid = Number(quote.bid);
+				const ask = Number(quote.ask);
+				const hasTwoWay = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask >= bid;
+				const spreadPct = hasTwoWay ? (ask - bid) / ((ask + bid) / 2) : null;
+				if (spreadPct !== null && spreadPct > maxSpreadPct) {
+					rejected.push(`${sym}: spread ${(spreadPct * 100).toFixed(1)}% > ${(maxSpreadPct * 100).toFixed(0)}% cap`);
+					continue;
+				}
+				// Decay gate: stale-data confidence must clear the floor.
+				const { decayed } = this.decayConfidence(conf, cal, new Date(quote.ts), asOf);
+				if (decayed < DECAY_DEFAULTS.confidenceFloor) {
+					rejected.push(`${sym}: decayed confidence ${decayed.toFixed(0)} below floor`);
+					continue;
+				}
+
+				// ── Phase 4 component scores (each 0..1, weighted below) ─────────
+				const strike = Number(contract.strike);
+				// ATM-ness band widened to 6%: with a ₹5k cap only OTM contracts
+				// (≈1.5–5% from spot) are affordable, so the strategy term must still
+				// differentiate the nearest affordable strikes from the deep ones.
+				const atmBandPct = Number(process.env.FNO_CAND_ATM_BAND_PCT ?? 0.06);
+				const atmScore = Math.max(0, 1 - Math.abs(strike - spot) / spot / atmBandPct); // ATM=1; band away → 0
+				const expiryScore = dte >= 3 && dte <= 14 ? 1 : dte < 3 ? dte / 3 : Math.max(0, 1 - (dte - 14) / 30);
+				const oi = Number(quote.openInterest ?? 0);
+				const delta = Number(quote.delta);
+				const hasDelta = Number.isFinite(delta) && Math.abs(delta) > 0 && Math.abs(delta) < 1;
+				const greeksScore = hasDelta ? 1 - Math.abs(Math.abs(delta) - 0.5) / 0.5 : 0.5; // ATM delta ≈ ±0.5
+				const reasons = [
+					`${dir} ${underlying} — ${reason}`,
+					`strike ${strike} (spot ${spot.toFixed(2)}; ${(Math.abs(strike - spot) / spot * 100).toFixed(2)}% from ATM)`,
+					`premium ₹${premium.toFixed(2)} × ${lotSize} units × ${lots} lot(s) = ₹${contractValue.toFixed(0)}`,
+				];
+				if (spreadPct !== null) reasons.push(`spread ${(spreadPct * 100).toFixed(2)}%`);
+				if (hasDelta) reasons.push(`delta ${delta.toFixed(2)}`);
+				const sameUndNudge = lastTradeUnderlying === underlying ? 1 : 0;
+				const costScore = headroom === Number.POSITIVE_INFINITY ? 0.5 : 1 - contractValue / headroom;
+
+				const score =
+					W.strategy * atmScore +
+					W.liquidity * Math.min(1, volume / 100) + // percentile-ish within 100+ contracts
+					W.spread * (spreadPct === null ? 0.5 : Math.max(0, 1 - spreadPct / maxSpreadPct)) +
+					W.expiry * expiryScore +
+					W.greeks * greeksScore +
+					W.sameUnderlying * sameUndNudge +
+					W.cost * costScore;
+
+				candidates.push({
+					contract,
+					quote,
+					premium,
+					contractValue,
+					spreadPct,
+					atmScore,
+					expiryScore,
+					greeksScore,
+					score,
+					reasons,
+				});
+			}
+		}
+
+		// ── Phase 5: pick the single best eligible contract (NO TRADE if none) ─
+		if (!candidates.length) {
+			this.logger.debug(`candidate ranking: no eligible contract — ${rejected.length ? rejected.join('; ') : 'no directional candidates'}`);
+			return [];
+		}
+		candidates.sort((a, b) => b.score - a.score);
+		const best = candidates[0];
+		// Confidence source: the direction info of the winner's underlying (raw SMA confidence).
+		const bestUnderlying = String(best.contract.underlying || '').toUpperCase();
+		const bestRawConf = (direction.get(bestUnderlying)?.conf) ?? 55;
+		const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(
+			bestRawConf,
+			cal,
+			new Date(best.quote.ts),
+			asOf,
+		);
+		const premium = best.premium;
+		const reasons = [...best.reasons];
+		reasons.push(`ranked #1 of ${candidates.length} affordable candidate(s) with score ${best.score.toFixed(1)}`);
+		if (candidates.length > 1) {
+			reasons.push(`next best: ${candidates[1].contract.symbol} (${candidates[1].score.toFixed(1)})`);
+		}
+		reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (premium age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
+		if (astroMatch.shubh) reasons.push(`shubh muhurta ${astroMatch.label}`);
+
+		const target = premium * 1.5; // option-buyer premium target
+		const stopLoss = premium * 0.75; // ≈25% premium drop stop
+		return [{
+			instrument: best.contract.symbol,
+			algoSource: 'option-candidate-rank-v1',
+			action: 'BUY',
+			price: premium,
+			target,
+			stopLoss,
+			confidence: Math.round(direction.get(String(best.contract.underlying || '').toUpperCase())?.conf ?? 55),
+			decayedConfidence: Math.round(decayed),
+			decay: { rate, ageHours, timingFactor, weekday: todayWd, windowStartHour: Number(cal.windowStartHour), windowEndHour: Number(cal.windowEndHour), lastRectifiedAt: cal.lastRectifiedAt },
+			scenarios: [
+				{ name: 'bull', probability: 45, target: premium * 1.5 },
+				{ name: 'base', probability: 30, target: premium * 1.1 },
+				{ name: 'bear', probability: 25, target: premium * 0.6 },
+			],
+			astroMatch,
+			fridayBlocked,
+			reasons,
+		}];
 	}
 
 	/** Convenience: does today's muhurta engine see a shubh window? */
