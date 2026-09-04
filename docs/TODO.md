@@ -1,7 +1,14 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-05 (resume session)
+> Last updated: 2026-09-05 (auto-continue batch 2)
+
+## Auto-continue batch 2 (2026-09-05) — no-confirmation queue run
+- [x] **GATE 14 → 4/10**: failureFamily (signal/timing/execution) + reflectionClass (OBSERVATION→HYPOTHESIS@2→TESTED_RULE@3) + confirmations on fnf_trade_reflections — deterministic promotion, never from one trade (75dd2a4)
+- [x] **GATE 19 → 4/10**: feed-health/capital/candidate-rejections/NO-TRADE items done via existing dashboards + journal card; #4-9 parked on GATE 3/7/9/15/16 deps
+- [x] T-04 + candidate-ranking → done (delivered across earlier work); T-05 (needs closed-trade samples) + T-06 (needs broker creds) dependency-parked
+- [x] **J-14** unicode sanitizer on CV write path (e36ce86); **I-02** tunnel systemd verified already-enabled+linger (stale row); **J-19** Move-to-Success endpoint+button (bd2113e); **J-11** Quick-Questions page (d5910de); **J-12** day-list 15s auto-refresh (9d7ba04)
+- NEXT: J-10 (CV geo templates) still pending; G-2+ research gates wait on absent data (NSE pre-open/L2) or prior gates; 9 pending_user rows await user actions (pre-apply approvals, ZEBRA send, broker creds)
 
 ## Resume session 2026-09-05 (continue → gates) — decision journal built
 - [x] **GATE 1 → 5/10**: `fnf_decision_journal` table + entity — one row per signal cycle (BUY AND NO TRADE), with decision ts, session phase, data-age, actionFamily, winner, algoSource, buildSha; detailJson persists ALL candidates + every rejection reason + direction summary. Fire-and-forget writes; GET /trading/journal; card on /option-trading. Items done: #1 decision time/phase/data-age, #4 candidates+rejections, #6 versions/SHA, #10 action family; #5 (fills) deferred to GATE 9.
