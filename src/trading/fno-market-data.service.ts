@@ -122,7 +122,75 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+
+  /** Auto-register option symbols listed in FNO_MARKET_DATA_SYMBOLS so their
+   *  ticks route to the option-quote store (never to index snapshots). Runs at
+   *  module init when the DB connection is guaranteed (constructor-time saves
+   *  race the async TypeORM connection). */
+  private autoRegisterOptionSymbols(symbols: string[]): void {
+    // Auto-register option symbols listed in FNO_MARKET_DATA_SYMBOLS so their
+    // ticks route to the option-quote store (never to index snapshots). Pattern:
+    // NSE:NIFTY<DDMMM><STRIKE><CE|PE> or BSE:SENSEX<DDMMM><STRIKE><CE|PE>.
+    const optionSymbolPattern = /^(NSE|BSE):([A-Z0-9]+)(\d{2}[A-Z]{3})(\d+)(CE|PE)$/;
+    const MONTHS: Record<string, string> = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
+    const expiryOf = (ddmmy: string, optionType: string): string | null => {
+      // FYERS expiry code DDMMM (e.g. 26SEP). Year inferred: if the date has already
+      // passed this year, assume next year.
+      const day = Number(ddmmy.slice(0, 2));
+      const mon = MONTHS[ddmmy.slice(2, 5)];
+      if (!mon) return null;
+      const now = new Date();
+      let year = now.getUTCFullYear();
+      if (now.getUTCMonth() + 1 > Number(mon) || (now.getUTCMonth() + 1 === Number(mon) && now.getUTCDate() > day)) year += 1;
+      const iso = `${year}-${mon}-${String(day).padStart(2, '0')}`;
+      const d = new Date(iso + 'T00:00:00.000Z');
+      return Number.isNaN(d.getTime()) ? null : iso;
+    };
+    for (const sym of symbols) {
+      const m = optionSymbolPattern.exec(sym);
+      if (!m || this.optionContracts.has(sym)) continue;
+      const underlying = m[1] === 'BSE' && m[2].includes('SENSEX') ? 'SENSEX' : m[2];
+      const expiry = expiryOf(m[3], m[5]);
+      if (!expiry) continue;
+      const strike = Number(m[4]);
+      // Lot sizes (NSE/BSE circulars, effective Jan 2026): NIFTY 65, BANKNIFTY 30,
+      // FINNIFTY 60, SENSEX 20. Env FNO_OPTION_LOT_SIZE overrides for one symbol set.
+      const token = m[2].toUpperCase();
+      const DEFAULT_LOT: Record<string, number> = { NIFTY: 65, NIFTYBANK: 30, NIFTYFIN: 60, SENSEX: 20 };
+      const lotSize = Number(process.env.FNO_OPTION_LOT_SIZE ?? 0)
+        || DEFAULT_LOT[token]
+        || (m[1] === 'BSE' ? 20 : 65);
+      const contract = {
+        symbol: sym,
+        underlying,
+        expiry,
+        strike,
+        optionType: m[5] as 'CE' | 'PE',
+        lotSize,
+        tickSize: 0.05,
+      };
+      this.optionContracts.set(sym, contract);
+      void this.optionChain.upsertContract(contract).catch((e: unknown) => {
+        this.logger.warn(`option contract auto-register failed for ${sym}: ${(e as Error).message}`);
+      });
+    }
+  }
+
   onModuleInit(): void {
+    // Register option contracts first (works even when the feed is disabled —
+    // the engine needs the tradable universe regardless of live streaming).
+    const optionSymbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    this.autoRegisterOptionSymbols(optionSymbols);
+    // Also persist contracts declared explicitly via FNO_OPTION_CONTRACTS.
+    for (const contract of this.optionChain.configuredContracts()) {
+      if (!this.optionContracts.has(contract.symbol)) this.optionContracts.set(contract.symbol, contract);
+      void this.optionChain.upsertContract(contract).catch((e: unknown) => {
+        this.logger.warn(`configured option contract upsert failed for ${contract.symbol}: ${(e as Error).message}`);
+      });
+    }
     if (!this.statusValue.enabled) {
       this.statusValue.lastMessage = this.statusValue.provider === 'yahoo'
         ? 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure YAHOO_FINANCE_SYMBOLS'
@@ -265,6 +333,8 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
           this.statusValue.lastError = `option quote persistence failed: ${this.safeMessage(error)}`;
           this.logger.warn(this.statusValue.lastError);
         });
+        // Option-contract ticks are premium data — they never become index snapshots.
+        continue;
       }
       const now = Date.now();
       const last = this.lastPersistedAt.get(tick.instrument) ?? 0;

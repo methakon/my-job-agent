@@ -5,6 +5,8 @@ import { FnfPortfolio } from './fnf-portfolio.entity';
 import { FnfTrade } from './fnf-trade.entity';
 import { FnfMarketSnapshot } from './fnf-market-snapshot.entity';
 import { FnfDecayCalibration } from './fnf-decay-calibration.entity';
+import { FnfOptionChainService } from './fnf-option-chain.service';
+import { OptionContract } from './option-chain-parser';
 import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto, SetDecayCalibrationDto } from './fnf-trading.dto';
 import { AstroMuhurtaService } from '../astro/astro-muhurta.service';
 
@@ -54,16 +56,39 @@ export interface AlgoSignal {
 	reasons: string[];
 }
 
-/** Indian discount-broker cost model (Zerodha-style). */
+/**
+ * FYERS per-segment cost model (official FYERS charges KB, verified 2026-09-04).
+ * Brokerage is charged per executed order — each leg (open AND close) incurs it.
+ *  - Futures:  lower of 0.03% × turnover or ₹20
+ *  - Options:  flat ₹20 per executed order (premium turnover basis)
+ * Statutory: STT sell-side only (futures 0.01%, options 0.05% of premium);
+ * NSE txn (futures 0.00183%, options 0.03553% of premium); stamp duty buy-side
+ * (futures 0.002%, options 0.003%); SEBI ₹10/crore; GST 18% on (brokerage + txn + SEBI).
+ */
 const COST_RATES = {
-	brokeragePct: 0.0003, // 0.03% or ₹20 min, whichever lower
-	brokerageMin: 20,
-	sttSellPct: 0.00025, // 0.025% on sell side
-	exchangeTxnPct: 0.0000275, // NSE 0.00275%
+	future: {
+		brokeragePct: 0.0003, // 0.03% × turnover
+		brokerageFlat: 20, // …or ₹20 flat, whichever is LOWER
+		sttSellPct: 0.0001, // 0.01% sell side
+		exchangeTxnPct: 0.0000183, // NSE 0.00183%
+		stampBuyPct: 0.00002, // 0.002% buy side
+	},
+	option: {
+		brokeragePct: 0, // options: flat fee, no percentage leg
+		brokerageFlat: 20, // ₹20 per executed order
+		sttSellPct: 0.0005, // 0.05% of premium, sell side
+		exchangeTxnPct: 0.0003553, // NSE 0.03553% of premium
+		stampBuyPct: 0.00003, // 0.003% of premium, buy side
+	},
 	gstPct: 0.18,
 	sebiPct: 0.000001, // ₹10 per crore
-	stampBuyPct: 0.00015, // 0.015% on buy side
 };
+
+export type CostSegment = 'future' | 'option';
+
+/** Classify a FYERS instrument symbol into its cost segment. */
+export const segmentOfInstrument = (instrument: string): CostSegment =>
+	/(CE|PE)$/i.test(instrument) ? 'option' : 'future';
 
 export const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -91,6 +116,7 @@ export class FnfTradingService {
 		@InjectRepository(FnfTrade) private readonly trades: Repository<FnfTrade>,
 		@InjectRepository(FnfMarketSnapshot) private readonly snapshots: Repository<FnfMarketSnapshot>,
 		@InjectRepository(FnfDecayCalibration) private readonly calibrations: Repository<FnfDecayCalibration>,
+		private readonly optionChain: FnfOptionChainService,
 		private readonly muhurta: AstroMuhurtaService,
 	) {
 		void this.ensureCalibrations().catch((e) => this.logger.warn(`calibration seed failed: ${e.message}`));
@@ -143,11 +169,16 @@ export class FnfTradingService {
 
 	// ── Trades ───────────────────────────────────────────────────────────
 
-	/** Open a position. Enforces: portfolio exists, capital headroom, and the
-	 *  Friday block (no new positions on Friday unless explicitly enabled). */
+	/** Open a position. HARD RULE: the trading engine only opens positions on
+	 *  registered option contracts (CE/PE). Index/underlying symbols (e.g.
+	 *  NSE:NIFTY50-INDEX, NSE:NIFTYBANK-INDEX, SENSEX) are REFERENCE-ONLY and are
+	 *  rejected here — the desk never trades an index level directly. Entry price
+	 *  is the option PREMIUM per unit; quantity is in LOTS and is multiplied by
+	 *  the contract lot size; the premium outlay (premium × units) is what must
+	 *  fit the portfolio ceiling. Enforces: contract registered, portfolio exists,
+	 *  capital headroom, and the Friday block. */
 	async openTrade(dto: CreateTradeDto, asOf: Date = new Date()): Promise<FnfTrade> {
 		const portfolio = await this.getPortfolio(dto.portfolioId);
-		const notional = dto.quantity * dto.entryPrice;
 		const isFriday = asOf.getDay() === 5;
 		if (isFriday && !portfolio.fridayTradingEnabled) {
 			throw new BadRequestException(
@@ -155,49 +186,85 @@ export class FnfTradingService {
 			);
 		}
 
-		const headroom = (Number(portfolio.ceiling) || Number(portfolio.capital)) - Number(portfolio.deployed);
-		if (notional > headroom) {
+		// --- Hard safeguard: only registered option contracts are tradable. ---
+		if (/-INDEX$/i.test(dto.instrument)) {
 			throw new BadRequestException(
-				`notional ${notional} exceeds available headroom ${headroom.toFixed(2)} (ceiling ${portfolio.ceiling} − deployed ${portfolio.deployed})`,
+				`instrument ${dto.instrument} is an index/underlying — reference only. The desk trades option contracts (CE/PE) on the chain around it, never the index itself.`,
+			);
+		}
+		const contract = await this.optionChain.findContractBySymbol(dto.instrument);
+		if (!contract) {
+			throw new BadRequestException(
+				`instrument ${dto.instrument} is not a registered option contract. Register the CE/PE contract (expiry/strike/lot size) before trading it.`,
+			);
+		}
+		const lotSize = Number(contract.lotSize) || 1;
+		const units = Math.round(dto.quantity) * lotSize; // quantity is in LOTS
+		const premium = Number(dto.entryPrice);
+		const outlay = units * premium; // premium outlay = max loss for a long option
+		const headroom = (Number(portfolio.ceiling) || Number(portfolio.capital)) - Number(portfolio.deployed);
+		if (outlay > headroom) {
+			throw new BadRequestException(
+				`premium outlay ${outlay.toFixed(2)} (${dto.quantity} lot(s) × ${lotSize} units × ₹${premium.toFixed(2)}) exceeds available headroom ${headroom.toFixed(2)} (ceiling ${portfolio.ceiling} − deployed ${portfolio.deployed})`,
 			);
 		}
 
+		const contractMeta = {
+			symbol: contract.symbol,
+			underlying: contract.underlying,
+			expiry: contract.expiry,
+			strike: Number(contract.strike),
+			optionType: contract.optionType,
+			lotSize,
+			units,
+		};
 		const trade = await this.trades.save(this.trades.create({
 			portfolio,
 			instrument: dto.instrument,
 			side: dto.side,
-			quantity: dto.quantity,
-			entryPrice: dto.entryPrice,
+			quantity: units, // stored in units (lots × lot size)
+			entryPrice: premium, // premium per unit
 			algoSource: dto.algoSource ?? undefined,
-			decisionParams: dto.decisionParams ?? undefined,
+			decisionParams: dto.decisionParams
+				? JSON.stringify({ ...JSON.parse(dto.decisionParams), contract: contractMeta })
+				: JSON.stringify({ contract: contractMeta }),
 			status: 'OPEN',
 		}));
 
 		await this.portfolios.update(portfolio.id, {
-			deployed: Number(portfolio.deployed) + notional,
+			deployed: Number(portfolio.deployed) + outlay,
 		});
-		this.logger.log(`trade opened ${dto.side} ${dto.quantity}x ${dto.instrument} @ ${dto.entryPrice} (${notional.toFixed(2)})`);
+		this.logger.log(`option ${dto.side} ${dto.quantity} lot(s) ${dto.instrument} @ ₹${premium.toFixed(2)}/unit (${units} units, outlay ${outlay.toFixed(2)})`);
 		return trade;
 	}
 
-	/** Close a position: compute gross/net P&L + cost, update portfolio,
-	 *  then rectify the decay calibration day-wise from this outcome. */
+	/** Close a position: compute gross/net P&L + round-trip cost from the option
+	 *  premiums, update portfolio, then rectify the decay calibration day-wise
+	 *  from this outcome. */
 	async closeTrade(id: string, dto: CloseTradeDto, asOf: Date = new Date()): Promise<FnfTrade> {
 		const trade = await this.trades.findOne({ where: { id }, relations: { portfolio: true } });
 		if (!trade) throw new NotFoundException(`trade ${id} not found`);
 		if (trade.status !== 'OPEN') throw new BadRequestException(`trade ${id} already ${trade.status}`);
 
-		const qty = Number(trade.quantity);
-		const entry = Number(trade.entryPrice);
-		const exit = dto.exitPrice;
+		const qty = Number(trade.quantity); // units (lots × lot size)
+		const entry = Number(trade.entryPrice); // premium per unit at entry
+		const exit = dto.exitPrice; // premium per unit at exit
 		const side = trade.side as 'BUY' | 'SELL';
-		const notional = qty * exit;
+		const segment = segmentOfInstrument(trade.instrument);
 
-		// gross P&L: BUY → (exit − entry) × qty ; SELL (short) → (entry − exit) × qty
+		// gross P&L in PREMIUM terms: BUY (long option) → (exit − entry) × units ;
+		// SELL (short option) → (entry − exit) × units. Never index-point math.
 		const grossPnl = side === 'BUY' ? (exit - entry) * qty : (entry - exit) * qty;
 
-		// cost: caller-provided override, else the standard model on the exit leg
-		const cost = dto.cost ?? this.calculateCost(notional, side).total;
+		// Round-trip cost = entry leg + exit leg (each executed order is charged;
+		// FYERS options flat ₹20/order; statutory on each leg's premium turnover).
+		// Caller may override with an exact cost.
+		const entryTurnover = qty * entry;
+		const exitTurnover = qty * exit;
+		const cost = dto.cost ?? (
+			this.calculateCost(entryTurnover, 'BUY', segment).total +
+			this.calculateCost(exitTurnover, side === 'SELL' ? 'SELL' : 'BUY', segment).total
+		);
 		const netPnl = grossPnl - cost;
 
 		trade.exitPrice = exit;
@@ -210,7 +277,8 @@ export class FnfTradingService {
 
 		const portfolio = trade.portfolio;
 		await this.portfolios.update(portfolio.id, {
-			deployed: Math.max(0, Number(portfolio.deployed) - notional),
+			// release the premium outlay committed at entry (entry × units), not exit value
+			deployed: Math.max(0, Number(portfolio.deployed) - qty * entry),
 			netPnl: Number(portfolio.netPnl) + netPnl,
 			totalCost: Number(portfolio.totalCost) + cost,
 		});
@@ -225,6 +293,23 @@ export class FnfTradingService {
 	async listTrades(portfolioId?: string, limit = 100): Promise<FnfTrade[]> {
 		const where = portfolioId ? { portfolio: { id: portfolioId } } : {};
 		return this.trades.find({ where, order: { orderedAt: 'DESC' }, take: limit });
+	}
+
+	/** Current tradeable price for one instrument:
+	 *  - index/underlying (-INDEX) → latest market snapshot price
+	 *  - option contract → latest registered premium quote (ltp)
+	 *  Returns null when nothing usable is on record. Used by the session driver
+	 *  to manage exits position-by-position (price source = the position itself). */
+	async latestReferencePrice(instrument: string): Promise<number | null> {
+		if (!instrument) return null;
+		if (/-INDEX$/i.test(instrument)) {
+			const rows = await this.snapshots.find({ where: { instrument }, order: { ts: 'DESC' }, take: 1 });
+			const p = rows[0] ? Number(rows[0].price) : NaN;
+			return Number.isFinite(p) && p > 0 ? p : null;
+		}
+		const quote = await this.optionChain.findChain({ symbol: instrument, latestOnly: true, limit: 1 });
+		const ltp = quote.rows[0] ? Number(quote.rows[0].ltp) : NaN;
+		return Number.isFinite(ltp) && ltp > 0 ? ltp : null;
 	}
 
 	/** Self-learning summary: per-algoSource win rate + totals over closed trades. */
@@ -333,14 +418,25 @@ export class FnfTradingService {
 
 	// ── Cost calculator ──────────────────────────────────────────────────
 
-	/** Indian discount-broker cost model for one executed order. */
-	calculateCost(notional: number, side: 'BUY' | 'SELL'): CostBreakdown {
-		const r = COST_RATES;
-		const brokerage = Math.min(Math.max(r.brokeragePct * notional, r.brokerageMin), notional);
+	/**
+ * FYERS cost model for ONE executed order leg, segmented by instrument class.
+ * For options, turnover = premium × units; for futures, turnover = price × qty.
+ * Brokerage rule (FYERS): futures = lower of 0.03%×turnover or ₹20; options = flat ₹20.
+ */
+	calculateCost(notional: number, side: 'BUY' | 'SELL', segment: CostSegment = segmentOfInstrument('')): CostBreakdown {
+		const r = COST_RATES[segment] ?? COST_RATES.future;
+		const gstPct = COST_RATES.gstPct;
+		const sebiPct = COST_RATES.sebiPct;
+		// TRUE lower-of rule: percentage×turnover vs flat fee — the flat fee wins only
+		// when it is the smaller charge (the old max() implementation billed the larger).
+		const brokerage = r.brokeragePct > 0
+			? Math.min(Math.max(r.brokeragePct * notional, 0), r.brokerageFlat)
+			: Math.min(r.brokerageFlat, Math.max(notional, 0));
 		const stt = side === 'SELL' ? r.sttSellPct * notional : 0;
 		const exchangeTxn = r.exchangeTxnPct * notional;
-		const gst = r.gstPct * (brokerage + exchangeTxn);
-		const sebi = r.sebiPct * notional;
+		const sebi = sebiPct * notional;
+		// GST applies to brokerage + exchange txn + SEBI (taxable services); not STT/stamp.
+		const gst = gstPct * (brokerage + exchangeTxn + sebi);
 		const stamp = side === 'BUY' ? r.stampBuyPct * notional : 0;
 		const total = brokerage + stt + exchangeTxn + gst + sebi + stamp;
 		return { notional, brokerage, stt, exchangeTxn, gst, sebi, stamp, total };
@@ -471,26 +567,50 @@ export class FnfTradingService {
 		return updated;
 	}
 
-	// ── Algo signals (decay-aware) ───────────────────────────────────────
+	// ── Algo signals (decay-aware, option-contract only) ───────────────────
 
-	/** Generate BUY/SELL/HOLD signals per instrument from the latest snapshots.
-	 *  SMA-20 mean-reversion + momentum; scenario tree; astro match from the
-	 *  live muhurta engine; Friday block honored. Every prediction is
-	 *  decay-adjusted (exponential rate + weekday timing window) — stale data
-	 *  or off-window time degrades confidence, and below the floor → HOLD. */
+	/** Map an option contract's underlying token to the index/underlying snapshot
+	 *  instrument used for direction + ATM determination. */
+	private indexInstrumentFor(underlying: string): string | null {
+		const t = underlying.toUpperCase().replace(/[^A-Z0-9]/g, '');
+		if (t.startsWith('NIFTY50') || t === 'NIFTY') return 'NSE:NIFTY50-INDEX';
+		if (t.startsWith('NIFTYBANK') || t === 'BANKNIFTY') return 'NSE:NIFTYBANK-INDEX';
+		if (t.startsWith('SENSEX')) return 'BSE:SENSEX-INDEX';
+		return null;
+	}
+
+	/** Nearest expiry (YYYY-MM-DD) among registered contracts of one underlying. */
+	private nearestExpiry(contracts: { expiry: string }[]): string | null {
+		const expiries = contracts.map((c) => String(c.expiry)).filter((e) => /^\d{4}-\d{2}-\d{2}$/.test(e)).sort();
+		return expiries[0] ?? null;
+	}
+
+	/**
+	 * Generate signals on REGISTERED OPTION CONTRACTS (CE/PE) using their live
+	 * premium quotes. The underlying index is used ONLY to decide direction and
+	 * the ATM strike — it is never the traded instrument. Bullish underlying
+	 * momentum → long ATM CE; bearish → long ATM PE. Entry price = premium;
+	 * target/stop are premium percentages (option-buyer stop ≈ 25% premium drop).
+	 * Everything stays decay-adjusted; below the floor → HOLD. Friday honored.
+	 */
 	async generateSignals(portfolioId?: string, asOf: Date = new Date()): Promise<AlgoSignal[]> {
 		const portfolio = portfolioId ? await this.getPortfolio(portfolioId) : (await this.listPortfolios())[0] ?? null;
 		const isFriday = asOf.getDay() === 5;
 		const fridayBlocked = isFriday && !(portfolio?.fridayTradingEnabled);
 
-		// Day-wise decay calibration for the evaluation timestamp.
 		const todayWd = asOf.getDay();
 		const cal = await this.getCalibration(todayWd, portfolio?.id);
 
-		const instruments = await this.snapshots
-			.createQueryBuilder('s')
-			.select('DISTINCT s.instrument', 'instrument')
-			.getRawMany<{ instrument: string }>();
+		// The tradable universe = registered option contracts, not index snapshots.
+		const contracts = await this.optionChain.listAllContracts();
+		const latest = await this.optionChain.findChain({ latestOnly: true, limit: 1000 });
+		const quoteBySymbol = new Map<string, { ltp: number; ts: Date }>();
+		for (const q of latest.rows) {
+			const ltp = Number(q.ltp);
+			if (Number.isFinite(ltp) && ltp > 0) quoteBySymbol.set(q.contractSymbol, { ltp, ts: new Date(q.ts) });
+		}
+		if (!contracts.length) return []; // nothing registered → no option signals
+
 		const window = await this.muhurta.nextWindow(asOf, 24);
 		const shubh = (window?.score ?? 0) >= SHUBH_SCORE_MIN;
 		const astroMatch = {
@@ -500,68 +620,110 @@ export class FnfTradingService {
 		};
 
 		const signals: AlgoSignal[] = [];
-		for (const { instrument } of instruments) {
+		// group registered contracts by underlying token
+		const byUnderlying = new Map<string, typeof contracts>();
+		for (const c of contracts) {
+			const key = String(c.underlying || '').toUpperCase();
+			if (!byUnderlying.has(key)) byUnderlying.set(key, []);
+			byUnderlying.get(key)!.push(c);
+		}
+
+		for (const [underlying, group] of byUnderlying) {
+			const indexInstrument = this.indexInstrumentFor(underlying);
+			if (!indexInstrument) continue;
 			const rows = await this.snapshots.find({
-				where: { instrument, ts: LessThanOrEqual(asOf) },
+				where: { instrument: indexInstrument, ts: LessThanOrEqual(asOf) },
 				order: { ts: 'DESC' },
 				take: 30,
 			});
-			if (rows.length < 5) continue; // not enough data for a signal
+			if (rows.length < 5) continue; // not enough underlying data for direction
+
 			const prices = rows.map((r) => Number(r.price)).reverse();
-			const last = prices[prices.length - 1];
+			const spot = prices[prices.length - 1];
 			const sma = prices.reduce((a, b) => a + b, 0) / prices.length;
 			const smaShort = prices.slice(-5).reduce((a, b) => a + b, 0) / 5;
-			const momentum = (last / prices[prices.length - 6]) - 1; // 5-bar momentum
+			const momentum = (spot / prices[prices.length - 6]) - 1;
 
-			let action: AlgoSignal['action'] = 'HOLD';
-			const reasons: string[] = [];
-			if (last > sma && smaShort > sma) { action = 'BUY'; reasons.push('price above SMA-20 with rising 5-bar mean'); }
-			else if (last < sma && smaShort < sma) { action = 'SELL'; reasons.push('price below SMA-20 with falling 5-bar mean'); }
-			else reasons.push('price oscillating around SMA-20 — range-bound');
-			if (Math.abs(momentum) > 0.02) reasons.push(`5-bar momentum ${(momentum * 100).toFixed(1)}%`);
-			if (astroMatch.shubh) reasons.push(`shubh muhurta ${astroMatch.label}`);
-			else reasons.push('no shubh muhurta window in next 24h');
+			const bullish = spot > sma && smaShort > sma;
+			const bearish = spot < sma && smaShort < sma;
+			const baseReasons: string[] = [
+				bullish ? 'underlying above SMA-20 with rising 5-bar mean' : bearish ? 'underlying below SMA-20 with falling 5-bar mean' : 'underlying oscillating around SMA-20',
+			];
+			if (Math.abs(momentum) > 0.002) baseReasons.push(`5-bar momentum ${(momentum * 100).toFixed(2)}%`);
+			if (astroMatch.shubh) baseReasons.push(`shubh muhurta ${astroMatch.label}`);
+			else baseReasons.push('no shubh muhurta window in next 24h');
 
-			// Raw model confidence (pre-decay).
-			const confidence = Math.min(85, 40 + Math.round(Math.abs(last - sma) / sma * 1000) + (astroMatch.shubh ? 15 : 0));
+			// Raw model confidence (pre-decay) from the underlying's deviation.
+			const rawConfidence = Math.min(85, 40 + Math.round(Math.abs(spot - sma) / sma * 1000) + (astroMatch.shubh ? 15 : 0));
 
-			// ★ Decay: always predict considering decay (rate + day-wise timing).
-			const latestTs = rows[0].ts;
-			const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(confidence, cal, latestTs, asOf);
+			// ATM strike = the registered strike closest to the current spot.
+			const nearExpiry = this.nearestExpiry(group);
+			const expiryGroup = nearExpiry ? group.filter((c) => String(c.expiry) === nearExpiry) : group;
+			if (!expiryGroup.length) continue;
 
-			// Below the floor the signal has decayed past usable edge → HOLD.
-			if (decayed < DECAY_DEFAULTS.confidenceFloor) {
-				action = 'HOLD';
-				reasons.push(`signal decayed below floor (age ${ageHours.toFixed(1)}h × rate ${rate.toFixed(3)} → conf ${decayed.toFixed(0)})`);
-			} else {
-				reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
+			// Strategy picks the option type by direction; strike selection = ATM.
+			const desiredType = bullish ? 'CE' : bearish ? 'PE' : null;
+			if (!desiredType) {
+				// Range-bound underlying: no directional option entry (theta is a headwind).
+				this.logger.debug(`no option signal for ${underlying}: underlying range-bound`);
+				continue;
+			}
+			const sideGroup = expiryGroup.filter((c) => String(c.optionType).toUpperCase() === desiredType);
+			if (!sideGroup.length) continue;
+			const atm = sideGroup.reduce((best, c) =>
+				Math.abs(Number(c.strike) - spot) < Math.abs(Number(best.strike) - spot) ? c : best,
+			);
+			const quote = quoteBySymbol.get(atm.symbol);
+			if (!quote) {
+				this.logger.debug(`no live premium yet for ${atm.symbol} — no signal`);
+				continue;
 			}
 
-			const target = last * (action === 'BUY' ? 1.02 : action === 'SELL' ? 0.98 : 1);
-			const stopLoss = action === 'BUY' ? last * 0.99 : action === 'SELL' ? last * 1.01 : last;
+			const premium = quote.ltp;
+			// Option-buyer target/stop on the PREMIUM (not index points): 50% upside
+			// target, 25% premium drop stop (reference: option stops ≈ 25-30% of premium).
+			const target = premium * 1.5;
+			const stopLoss = premium * 0.75;
+
+			const { decayed, rate, ageHours, timingFactor } = this.decayConfidence(rawConfidence, cal, quote.ts, asOf);
+			const reasons = [...baseReasons];
+			const action: AlgoSignal['action'] = 'BUY'; // long option only — max loss = premium
+			if (decayed < DECAY_DEFAULTS.confidenceFloor) {
+				reasons.push(`signal decayed below floor (premium age ${ageHours.toFixed(1)}h → conf ${decayed.toFixed(0)})`);
+				signals.push({
+					instrument: atm.symbol,
+					algoSource: 'option-atm-premium-v1',
+					action: 'HOLD',
+					price: premium,
+					target,
+					stopLoss,
+					confidence: rawConfidence,
+					decayedConfidence: Math.round(decayed),
+					decay: { rate, ageHours, timingFactor, weekday: todayWd, windowStartHour: Number(cal.windowStartHour), windowEndHour: Number(cal.windowEndHour), lastRectifiedAt: cal.lastRectifiedAt },
+					scenarios: [],
+					astroMatch,
+					fridayBlocked,
+					reasons,
+				});
+				continue;
+			}
+			reasons.push(`ATM ${atm.optionType} strike ${atm.strike} (${nearExpiry}) — spot ${spot.toFixed(2)}`);
+			reasons.push(`decay-adjusted confidence ${decayed.toFixed(0)} (premium age ${ageHours.toFixed(1)}h, rate ${rate.toFixed(3)}, ${timingFactor === 1 ? 'in window' : 'off window ×0.85'})`);
 
 			signals.push({
-				instrument,
-				algoSource: 'sma-mean-reversion-v1',
+				instrument: atm.symbol,
+				algoSource: 'option-atm-premium-v1',
 				action,
-				price: last,
+				price: premium,
 				target,
 				stopLoss,
-				confidence,
+				confidence: rawConfidence,
 				decayedConfidence: Math.round(decayed),
-				decay: {
-					rate,
-					ageHours,
-					timingFactor,
-					weekday: todayWd,
-					windowStartHour: Number(cal.windowStartHour),
-					windowEndHour: Number(cal.windowEndHour),
-					lastRectifiedAt: cal.lastRectifiedAt,
-				},
+				decay: { rate, ageHours, timingFactor, weekday: todayWd, windowStartHour: Number(cal.windowStartHour), windowEndHour: Number(cal.windowEndHour), lastRectifiedAt: cal.lastRectifiedAt },
 				scenarios: [
-					{ name: 'bull', probability: action === 'BUY' ? 55 : 30, target: last * 1.02 },
-					{ name: 'base', probability: 25, target: last },
-					{ name: 'bear', probability: action === 'SELL' ? 45 : 25, target: last * 0.98 },
+					{ name: 'bull', probability: action === 'BUY' ? 45 : 30, target: premium * 1.5 },
+					{ name: 'base', probability: 30, target: premium * 1.1 },
+					{ name: 'bear', probability: 25, target: premium * 0.6 },
 				],
 				astroMatch,
 				fridayBlocked,

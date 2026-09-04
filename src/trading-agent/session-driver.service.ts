@@ -37,7 +37,7 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 
 	onModuleInit(): void {
 		this.logger.log(
-			`session driver armed: IST Mon-Fri 09:15-15:30, tick ${this.intervalMs}ms, paper qty ${this.paperQty} (autoTrade portfolios only)`,
+			`session driver armed: IST Mon-Fri 09:15-15:30, tick ${this.intervalMs}ms, paper qty ${this.paperQty} LOT(S) of the ATM option (autoTrade portfolios only)`,
 		);
 		void this.cycle();
 		this.timer = setInterval(() => void this.cycle(), this.intervalMs);
@@ -108,18 +108,22 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		for (const portfolio of portfolios) {
 			try {
 				await this.trading.ensureCalibrations(portfolio.id);
-				const signals = await this.trading.generateSignals(portfolio.id);
-				if (!signals.length) continue;
 				const openTrades = (await this.trading.listTrades(portfolio.id, 500)).filter((t) => t.status === 'OPEN');
-				let opens = 0;
+				// Exits are position-driven: each open position is checked against its
+				// own live price source (option premium quote for contracts, market
+				// snapshot for legacy index positions) and its stored target/stop.
 				let exits = 0;
+				for (const position of openTrades) {
+					if (await this.manageExit(position)) exits += 1;
+				}
+				// Opens only from option-contract signals (the engine never emits an
+				// index instrument anymore; openTrade additionally hard-rejects any).
+				const signals = await this.trading.generateSignals(portfolio.id);
+				let opens = 0;
 				for (const signal of signals) {
-					const position = openTrades.find((t) => t.instrument === signal.instrument);
-					if (position) {
-						if (await this.manageExit(position, signal)) exits += 1;
-					} else if (signal.action !== 'HOLD') {
-						if (await this.maybeOpen(portfolio, signal)) opens += 1;
-					}
+					if (signal.action === 'HOLD') continue;
+					const alreadyOpen = openTrades.some((t) => t.instrument === signal.instrument);
+					if (!alreadyOpen && await this.maybeOpen(portfolio, signal)) opens += 1;
 				}
 				if (opens || exits) {
 					this.logger.log(`session cycle ${portfolio.label}: ${opens} open(s), ${exits} exit(s) across ${signals.length} signal(s)`);
@@ -130,19 +134,21 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		}
 	}
 
-	/** Close an open position when the latest price touches target or stop-loss. */
-	private async manageExit(position: Trade, signal: Signal): Promise<boolean> {
-		const price = Number(signal.price);
-		if (!Number.isFinite(price) || price <= 0) return false;
-		let decision: { target?: number; stopLoss?: number } = {};
+	/** Close an open position when its own live price touches the stored
+	 *  target or stop-loss. Price source resolves by instrument: option premium
+	 *  quote for contracts, market snapshot for legacy index positions. */
+	private async manageExit(position: Trade): Promise<boolean> {
+		const price = await this.trading.latestReferencePrice(position.instrument);
+		if (price === null || !Number.isFinite(price) || price <= 0) return false;
+		let decision: { target?: number; stopLoss?: number; contract?: unknown } = {};
 		try {
-			decision = position.decisionParams ? (JSON.parse(position.decisionParams) as { target?: number; stopLoss?: number }) : {};
+			decision = position.decisionParams ? (JSON.parse(position.decisionParams) as { target?: number; stopLoss?: number; contract?: unknown }) : {};
 		} catch {
 			decision = {};
 		}
-		const target = Number(decision.target ?? signal.target);
-		const stop = Number(decision.stopLoss ?? signal.stopLoss);
-		if (!Number.isFinite(target) || !Number.isFinite(stop)) return false;
+		const target = Number(decision.target);
+		const stop = Number(decision.stopLoss);
+		if (!Number.isFinite(target) || !Number.isFinite(stop) || target <= 0 || stop <= 0) return false;
 
 		const side = position.side as 'BUY' | 'SELL';
 		const hitWin = side === 'BUY' ? price >= target : price <= target;
@@ -203,7 +209,7 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 				new Date(),
 			);
 			this.logger.log(
-				`paper open ${signal.action} ${this.paperQty}x ${signal.instrument} @ ${price} (conf ${signal.decayedConfidence}, ${signal.algoSource})`,
+				`paper open ${signal.action} ${this.paperQty} lot(s) ${signal.instrument} @ premium ${price} (conf ${signal.decayedConfidence}, ${signal.algoSource})`,
 			);
 			return true;
 		} catch (error) {

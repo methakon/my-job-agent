@@ -78,6 +78,16 @@ export class FnfOptionChainService {
     return this.quotes.save(this.quotes.create(quote));
   }
 
+  async findContractBySymbol(symbol: string): Promise<FnfOptionContract | null> {
+    if (!symbol?.trim()) return null;
+    return this.contracts.findOne({ where: { symbol: symbol.trim() } });
+  }
+
+  /** All registered contracts (used by the signal engine as the tradable universe). */
+  async listAllContracts(): Promise<FnfOptionContract[]> {
+    return this.contracts.find({ order: { underlying: 'ASC', expiry: 'ASC', strike: 'ASC' } });
+  }
+
   async listContracts(query: Record<string, string | undefined> = {}): Promise<FnfOptionContract[]> {
     const parsed = this.parseQuery(query);
     const builder = this.contracts.createQueryBuilder('c').orderBy('c.underlying', 'ASC').addOrderBy('c.expiry', 'ASC').addOrderBy('c.strike', 'ASC').take(parsed.limit);

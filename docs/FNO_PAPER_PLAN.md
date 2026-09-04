@@ -15,7 +15,7 @@ Status: paper-only; no live orders. Yahoo is used only for experimental underlyi
 
 ### Account model & redeposit rule (user directive 2026-09-03)
 
-- Paper trading starts with a **₹5,000 deposit** (portfolio `sandbox-live`: capital = 5000.00; ceiling = 100000.00 — a notional headroom cap so one qty-1 index position (~₹25k–₹82k notional) can always open while runaway stacking stays capped).
+- Paper trading starts with a **₹5,000 envelope** (portfolio `sandbox-live`: capital = 5000.00; ceiling = 5000.00 — the ceiling is the deposit amount itself, no notional headroom inflation; user directive 2026-09-03, ceiling corrected from a wrongly-applied 100000.00 on 2026-09-04). Trades must fit the ₹5,000 envelope (option-chain premium scope), not open qty-1 index positions whose notional (₹25k–₹82k) exceeds it.
 - On losses, the desk **keeps trading in the next session with the remaining balance** (deposit + net realized P&L − open-trade risk). There is no arbitrary freeze on drawdown and no imaginary money — the account behaves like a real brokerage balance.
 - The user **redeposits at their own discretion** (a top-up raises portfolio capital). Until the redeposit arrives, the desk trades only what remains.
 - Only when the remaining balance is truly exhausted (≤ ₹0) does the desk hold new opens and log **"paper account depleted … holding new opens until user redeposits"** — encoded in the session driver (2026-09-03) as the `effectiveBalance = capital + netPnl ≤ 0` guard.
