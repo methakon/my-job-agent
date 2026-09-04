@@ -7,7 +7,22 @@ self-improves from outcomes.
 
 ## Resume rule
 When the user opens Hermes in this folder (`~/projects/my-job-agent`) and says
-**"continue"**, read this file's TODO and the docs below, then resume work.
+**"continue"**, resume in this order (no confirmation loop, no re-asking):
+1. **DB to-do log** (`agent_todo_log` table in MySQL `myjob_agent`) — THE operative
+   task queue. Columns: `id`, `todo_id` (e.g. T-04, J-09, D-02, I-02), `title`,
+   `status`, `detail`, `updated_at`. Statuses: `pending` < `in_progress` <
+   `done`; also `pending_user` (blocked awaiting the user) and `blocked`.
+   Start the first unfinished row in id order (`in_progress` first, then
+   `pending`); `pending_user`/`blocked` are skipped (surface them to the user,
+   don't work them). Query it read-only via:
+   `cd ~/projects/my-job-agent && set -a && . ./.env && set +a && MYSQL_PWD="$MYSQL_PASSWORD" mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" myjob_agent -e "SELECT id,todo_id,status,LEFT(title,80) FROM agent_todo_log ORDER BY id;"`
+2. **Project checklist** (`project_checklist_items` table — the Hermes F&O
+   v4/v5 validated gates, visible at `/project-status`). As work progresses,
+   ALWAYS update each item's `status` (pending/in_progress/done) AND write a
+   `note` (what was done, issues hit, how solved) — never leave an item done
+   without a note.
+3. Then this file's Progress + `docs/TODO.md` for context; start the first
+   unfinished item.
 On goodbye: update Progress + TODO here, commit on `dev`, `pull --rebase`,
 push `origin/dev` — never skip even on interrupt.
 
@@ -139,6 +154,9 @@ push `origin/dev` — never skip even on interrupt.
 - **Paper account model aligned to ₹5,000 envelope + redeposit rule (2026-09-03)** — user directive: paper trading starts with ₹5,000 in balance; losses and service charges reduce it; if money is lost the desk continues with the REMAINING balance (after service-charge deduction) in the next session until the user redeposits. Portfolio `sandbox-live` corrected from ₹10L to capital ₹5,000 / ceiling ₹1L (notional headroom for one qty-1 index position). Session driver gained the depletion guard: `effectiveBalance = capital + netPnl ≤ 0` ⇒ hold new opens + log "awaiting redeposit" (no freeze on drawdown, no imaginary money). T-03 **rescheduled to Fri 2026-09-04 09:15 IST** (backlog said 09-05 = Saturday, NSE closed) — first autonomous paper session on the ₹5,000 envelope; observation only, no code changes during the session.
 
 ## TODO next session (in order)
+> **AUTHORITATIVE queue = `agent_todo_log` DB table (see Resume rule step 1).**
+> The list below is historical context; on "continue" start from the DB log
+> (first `in_progress`/`pending` by id), NOT from this numbered list.
 0. **Cloudflare credential roles corrected + zone verified + .gitignore cleaned (2026-09-03)** — both creds had been stored with swapped labels from an earlier session: the value now under `CLOUDFLARE_API_KEY` authenticates only as a Bearer token → it's the API Token, and the value now under `CLOUDFLARE_API_TOKEN` authenticates with `X-Auth-Key` + email → it's the Global API Key. Relabeled `.env`, verified zone `berhampore.in` (ID `a79c56ccfc82f14300ef8ff6102cbd1a`) against the corrected creds, cleaned `.gitignore`. Committed + pulled `--rebase` + pushed to `origin/dev`.
 0. **SESSION_SECRET placeholder still in .env — replace with random secret** (security-report follow-up, user OK still pending).
 0. ~~**Google OAuth login — finish E2E**~~ — **SUPERSEDED 2026-09-02**: Google login removed per user directive; replaced by the operator-password model (see "Operator-password auth model" above). No Google Cloud Console work needed.
