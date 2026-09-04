@@ -3,6 +3,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import * as express from 'express';
 import session from 'express-session';
+import { MysqlSessionStore } from './session/mysql-session.store';
 import * as path from 'path';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -60,6 +61,9 @@ async function bootstrap() {
     session({
       name: process.env.SESSION_NAME || 'MYJOB_SESSION',
       secret: process.env.SESSION_SECRET || 'CHANGE_ME_IN_PRODUCTION_USE_A_REAL_RANDOM_SECRET',
+      // J-04: MySQL-backed store so sessions survive pm2 restarts (MemoryStore
+      // died with the process, forcing re-login after every deploy).
+      store: process.env.SESSION_STORE !== 'memory' ? new MysqlSessionStore() : undefined,
       resave: false,
       saveUninitialized: false,
       cookie: {
