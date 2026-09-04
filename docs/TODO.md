@@ -3,6 +3,16 @@
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
 > Last updated: 2026-09-04 (late)
 
+## Decisions resolved (2026-09-05)
+- **D-01 DECIDED (user)**: XGBoost/LightGBM first — target-architecture diagram is the primary
+  trade-decider path; desk collects structured labels (Gate 1 journal + Gate 8 dataset);
+  LLM/Reflexion stays post-trade critique only (T-08 extension). Gate 12 proceeds on this basis.
+- **D-02 SPEC WRITTEN**: `docs/D02_MULTI_LEG_DEFINED_RISK_SPEC.md` — IC/credit-spread family spec
+  (topologies, 7 hard invariants, SPAN margin reality, exit matrix, risk tables, P0→P3 promotion gate).
+  Implementation still blocked: ₹5k envelope cannot margin NSE spreads + T-06 broker wiring.
+- **T-08 / T-09 IMPLEMENTED** (ffff85c): Reflexion episodic memory + local BSM Greeks/IV + |delta| band
+  gate; v5 detailed checklist (instr + doneWhen) merged into DB + /project-status page.
+
 ## Guidebook review (2026-09-04 late) — Hermes Trading Agent Guidebook (Google Doc)
 Reviewed + MAPPED to the v4 checklist (no guidebook copy kept). Verdict: the guidebook is an implementation-detail
 source for items that ALREADY exist in the validated v4 checklist — almost nothing is new at gate level:
