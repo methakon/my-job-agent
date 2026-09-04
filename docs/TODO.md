@@ -4,6 +4,9 @@
 > Last updated: 2026-09-05 (goodbye)
 
 ## Session 2026-09-05 (done) — decision engine, Reflexion/Greeks, v5 checklist, auth
+- [x] **GATES MIRRORED into agent_todo_log** — all 24 v4/v5 checklist gates now tracked as G-0…G-21, T-B, T-PROTO (status synced from project_checklist_items) so "continue" drives through them
+- [x] **GATE 0 COMPLETE (9/9)** — regression suite `scripts/gate0-regression.test.js` ALL PASS: option-only guard (index 400), unregistered contract (400), NO TRADE when nothing qualifies, envelope ceiling=capital+netPnl, BSM Greeks textbook. Suite caught a real bug: FNO_CAND_STALE_MIN=6000 leaked into pm2 env → stale-quote BUY after hours; fixed (pm2 delete + fresh start), freshness gate now covered
+- [x] GATE 1 progress: contract/strike/expiry/lot/DTE persistence item → done (decisionParams on fnf_trades); 2/10 done, decision-timestamp item in progress
 - [x] Decision engine `option-candidate-rank-v1` deployed (universe → ₹5k filter → gates → score → best/NO TRADE); 32-contract NIFTY+BANKNIFTY universe; legacy index positions closed (ceiling ₹4,799.26)
 - [x] /project-status page (DB-driven, v4 → **v5 detailed edition** 224 items incl FINAL EXECUTION PROTOCOL) with status + per-item notes
 - [x] **T-08** Reflexion memory (fnf_trade_reflections) + **T-09** local BSM Greeks/IV + |delta| band → both done
