@@ -1,7 +1,13 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-05 (decision batch — user directives)
+> Last updated: 2026-09-05 (session close — Upstox isolation done, EPIC queued)
+
+## Session close (2026-09-05 late)
+- [x] **Upstox Sandbox isolation (spec v2) COMPLETE** — 13/13 isolation tests + FYERS regression PASS (83d0f3f → c9a1bc7); see docs/UPSTOX_SANDBOX.md
+- [ ] **EPIC-P1 queued (in_progress)**: Option Chain Market Prediction & Profit Engine (spec paste_3, §1–36). Phase 1 audit done; Phase 2 (feature pipeline + OBSERVATION engine) next
+- [x] Decision batch + daily DB backups (see PROJECT_PROMPT.md Progress 2026-09-05 late)
+- NEXT: EPIC-P1 Phase 2 (auto-continue); J-17 TinyFish (approved); Chrome-gated J-05/06/07/08/18 (approved); FYERS Monday auth-code before 09:15 IST
 
 ## Decision batch (2026-09-05) — 6 user directives executed
 - [x] **I-01 pm2 startup persistence**: user-level systemd unit `~/.config/systemd/user/pm2.service` (Type=forking + RemainAfterExit, no User= line — 216/GROUP pitfall in user manager); enabled+active, apps resurrect from dump; no sudo needed (5ec78f8)

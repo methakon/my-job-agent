@@ -153,6 +153,30 @@ push `origin/dev` — never skip even on interrupt.
 
 - **Paper account model aligned to ₹5,000 envelope + redeposit rule (2026-09-03)** — user directive: paper trading starts with ₹5,000 in balance; losses and service charges reduce it; if money is lost the desk continues with the REMAINING balance (after service-charge deduction) in the next session until the user redeposits. Portfolio `sandbox-live` corrected from ₹10L to capital ₹5,000 / ceiling ₹1L (notional headroom for one qty-1 index position). Session driver gained the depletion guard: `effectiveBalance = capital + netPnl ≤ 0` ⇒ hold new opens + log "awaiting redeposit" (no freeze on drawdown, no imaginary money). T-03 **rescheduled to Fri 2026-09-04 09:15 IST** (backlog said 09-05 = Saturday, NSE closed) — first autonomous paper session on the ₹5,000 envelope; observation only, no code changes during the session.
 
+## Progress (2026-09-05 late) — Upstox Sandbox isolation + decision batch + backups
+- **Upstox Sandbox isolation COMPLETE** (task spec v2, docs/UPSTOX_SANDBOX.md): mode columns
+  `on_real_data`/`execution_provider`/`execution_mode` on fnf_trades/portfolios/decision_journal/
+  reflections/reports (defaults 1/FYERS/REAL preserve FYERS; migrated; indexes); separate
+  `sandbox_ticks` table (19 cols) + async non-blocking UpstoxSandboxIngestionService; fail-closed
+  UpstoxSandboxProvider (SANDBOX-only host, REAL-mode refused, disabled without creds);
+  real-only filters at learningSummary/rectifyDecay/listTrades/listPortfolios + /trades/sandbox +
+  /portfolios/sandbox endpoints; UPSTOX_SANDBOX_* env keys unset, UPSTOX_SANDBOX_ENABLED=false;
+  tests scripts/upstox-isolation.test.js spec-v2 A–L + FYERS regression ALL PASS (13/13); deployed
+  Dhargent (crash-loop fixed: TradingAgentModule forFeature was missing FnfTradeReport/SandboxTick).
+  Commits 83d0f3f → c9a1bc7.
+- **EPIC queued (EPIC-P1, in_progress)**: Option Chain Market Prediction & Profit Engine
+  (spec paste_3, §1–36). PHASE 1 audit DONE: chain = 32 registered contracts / 1 expiry (26SEP) /
+  near-ATM band only; FYERS OI always 0 → OI walls/PCR_OI/change-OI DATA-GATED (health-flag, never
+  fabricate); Greeks/IV provider-empty → use local BSM (bsm-greeks.ts); underlying snapshots rich
+  (VWAP/ATR/ORB/gap live). PHASE 2 next: feature pipeline + OBSERVATION-mode engine.
+- **Decision batch**: I-01 pm2 user-systemd unit (enabled, resurrect on boot); J-10 cv_region_formats
+  DB (32 researched rows/6 continents + /cv-formats API); J-04 MySQL sessions (survive restart);
+  T-07 trade-report outbox → Telegram (poller cron f8e233b96d27 every 2min market hours,
+  WhatsApp-ready); daily DB backup script myjob_db_backup.sh + crons (pre-open 08:55 / post-close
+  15:45 IST Mon–Fri) → ~/projects/my-job-agent/backups/ then removed from server.
+- Gate-3 feature engine live (VWAP/ATR/ORB/gapPct on real ticks, 5/10); Gate-14 4/10 (failure
+  families + evidence classes); Gate-19 4/10; T-04/candidate-ranking/I-02/J-14/J-19/J-11/J-12 done.
+
 ## TODO next session (in order)
 > **AUTHORITATIVE queue = `agent_todo_log` DB table (see Resume rule step 1).**
 > The list below is historical context; on "continue" start from the DB log
