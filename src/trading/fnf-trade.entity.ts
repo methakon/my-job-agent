@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, Index } from 'typeorm';
 import { FnfPortfolio } from './fnf-portfolio.entity';
 
 export enum TradeSide { BUY = 'BUY', SELL = 'SELL' }
@@ -6,6 +6,8 @@ export enum TradeStatus { OPEN = 'OPEN', CLOSED = 'CLOSED', CANCELLED = 'CANCELL
 
 /** One position the agent took. Every field the user asked for is tracked here. */
 @Entity('fnf_trades')
+@Index('idx_trades_mode', ['onRealData', 'executionProvider', 'executionMode'])
+@Index('idx_trades_status_mode', ['status', 'onRealData'])
 export class FnfTrade {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -63,6 +65,18 @@ export class FnfTrade {
    *  Stored as JSON so the page can render the full decision context. */
   @Column({ type: 'text', nullable: true })
   decisionParams: string;
+
+  /** Execution environment: true = real/FYERS pipeline; false = isolated sandbox/paper (Upstox). */
+  @Column({ type: 'boolean', default: true })
+  onRealData: boolean;
+
+  /** Broker/provider that executed: FYERS (real pipeline) or UPSTOX (sandbox only). */
+  @Column({ type: 'varchar', length: 16, default: 'FYERS' })
+  executionProvider: string;
+
+  /** Execution mode: REAL (FYERS pipeline) or SANDBOX (Upstox paper). */
+  @Column({ type: 'varchar', length: 16, default: 'REAL' })
+  executionMode: string;
 
   /** Timestamp the order was placed. */
   @CreateDateColumn()

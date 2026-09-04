@@ -45,6 +45,9 @@ import { MarketDataInspectionController } from './trading/market-data-inspection
 import { MarketDataPageController } from './trading/market-data-page.controller';
 import { MarketDataInspectionService } from './trading/market-data-inspection.service';
 import { FeatureEngineService } from './trading/feature-engine.service';
+import { UpstoxSandboxProvider } from './trading/upstox-sandbox.provider';
+import { SandboxTick } from './trading/sandbox-tick.entity';
+import { UpstoxSandboxIngestionService } from './trading/upstox-sandbox-ingestion.service';
 import { FnfOptionContract } from './trading/fnf-option-contract.entity';
 import { FnfOptionQuote } from './trading/fnf-option-quote.entity';
 import { FnfMarketSnapshotHistory } from './trading/fnf-market-snapshot-history.entity';
@@ -107,7 +110,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, ProjectChecklistItem]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, SandboxTick, ProjectChecklistItem]),
 		SideIncomeModule,
 		AuthModule,
 	],
@@ -151,6 +154,8 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		FnfOptionChainService,
 		MarketDataInspectionService,
 		FeatureEngineService,
+		UpstoxSandboxProvider,
+		UpstoxSandboxIngestionService,
 		ProjectStatusService,
 	],
 })

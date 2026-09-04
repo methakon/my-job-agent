@@ -199,7 +199,7 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 
 		try {
 			await this.trading.closeTrade(position.id, { exitPrice: price, exitTrigger: hitWin ? 'target' : 'stop' });
-			this.logger.log(`paper exit ${position.id} (${side} ${position.instrument} @ ${price}): ${hitWin ? 'TARGET-HIT' : 'STOP-HIT'}`);
+			this.logger.log(`[FYERS][REAL] paper exit ${position.id} (${side} ${position.instrument} @ ${price}): ${hitWin ? 'TARGET-HIT' : 'STOP-HIT'}`);
 			return true;
 		} catch (error) {
 			this.throttledWarn(`exit failed for ${position.id}: ${(error as Error).message}`);

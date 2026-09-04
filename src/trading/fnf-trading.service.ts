@@ -135,7 +135,10 @@ export class FnfTradingService {
 
 	// ── Portfolio ────────────────────────────────────────────────────────
 
-	async listPortfolios(): Promise<FnfPortfolio[]> {
+	/** Real envelopes (on_real_data=1) by default — sandbox portfolios are only
+	 *  returned when realOnly=false (explicit isolation; Upstox task). */
+	async listPortfolios(realOnly = true): Promise<FnfPortfolio[]> {
+		if (realOnly) return this.portfolios.find({ where: { onRealData: true }, order: { createdAt: 'ASC' } });
 		return this.portfolios.find({ order: { createdAt: 'ASC' } });
 	}
 
@@ -154,6 +157,11 @@ export class FnfTradingService {
 			autoTradeEnabled: dto.autoTradeEnabled ?? false,
 			fridayTradingEnabled: dto.fridayTradingEnabled ?? false,
 			brokerConfig: dto.brokerConfig ?? undefined,
+			// Isolation (Upstox task): sandbox envelopes are created explicitly
+			// with on_real_data=false + provider/mode; defaults preserve FYERS.
+			onRealData: dto.onRealData ?? true,
+			executionProvider: dto.executionProvider ?? 'FYERS',
+			executionMode: dto.executionMode ?? 'REAL',
 		}));
 	}
 
@@ -245,7 +253,7 @@ export class FnfTradingService {
 		await this.portfolios.update(portfolio.id, {
 			deployed: Number(portfolio.deployed) + outlay,
 		});
-		this.logger.log(`option ${dto.side} ${dto.quantity} lot(s) ${dto.instrument} @ ₹${premium.toFixed(2)}/unit (${units} units, outlay ${outlay.toFixed(2)})`);
+		this.logger.log(`[FYERS][REAL] option ${dto.side} ${dto.quantity} lot(s) ${dto.instrument} @ ₹${premium.toFixed(2)}/unit (${units} units, outlay ${outlay.toFixed(2)})`);
 		void this.queueTradeReport({
 			kind: 'OPEN',
 			occurredAt: asOf,
@@ -318,7 +326,7 @@ export class FnfTradingService {
 			ceiling: newCeiling,
 			totalCost: Number(portfolio.totalCost) + cost,
 		});
-		this.logger.log(`trade closed ${id}: gross ${grossPnl.toFixed(2)} cost ${cost.toFixed(2)} net ${netPnl.toFixed(2)}`);
+		this.logger.log(`[FYERS][REAL] trade closed ${id}: gross ${grossPnl.toFixed(2)} cost ${cost.toFixed(2)} net ${netPnl.toFixed(2)}`);
 
 		// Day-wise decay rectification from this outcome (fire-and-forget).
 		void this.rectifyDecay(portfolio.id).catch((e) => this.logger.warn(`decay rectify failed: ${e.message}`));
@@ -450,7 +458,7 @@ export class FnfTradingService {
 				heuristic,
 			}),
 		);
-		this.logger.log(`reflection written for ${trade.id.slice(0, 8)}: ${outClass} ${net.toFixed(2)} [${reflectionClass} x${confirmations}]`);
+		this.logger.log(`[FYERS][REAL] reflection written for ${trade.id.slice(0, 8)}: ${outClass} ${net.toFixed(2)} [${reflectionClass} x${confirmations}]`);
 		void portfolioNetPnl;
 	}
 
@@ -548,8 +556,13 @@ export class FnfTradingService {
 		return 'closed';
 	}
 
-	async listTrades(portfolioId?: string, limit = 100): Promise<FnfTrade[]> {
-		const where = portfolioId ? { portfolio: { id: portfolioId } } : {};
+	/** Ledger of trades. realOnly=true (default) returns only on_real_data=1
+	 *  (FYERS real pipeline) rows; realOnly=false returns only SANDBOX rows
+	 *  (on_real_data=0) — the two environments are never mixed in one result. */
+	async listTrades(portfolioId?: string, limit = 100, realOnly = true): Promise<FnfTrade[]> {
+		const where = portfolioId
+			? { portfolio: { id: portfolioId }, onRealData: realOnly }
+			: { onRealData: realOnly };
 		return this.trades.find({ where, order: { orderedAt: 'DESC' }, take: limit });
 	}
 
@@ -570,9 +583,10 @@ export class FnfTradingService {
 		return Number.isFinite(ltp) && ltp > 0 ? ltp : null;
 	}
 
-	/** Self-learning summary: per-algoSource win rate + totals over closed trades. */
+	/** Self-learning summary: per-algoSource win rate + totals over closed trades.
+	 *  REAL performance only (on_real_data=1) — sandbox rows are never mixed in. */
 	async learningSummary(): Promise<{ total: number; winners: number; winRate: number; netPnl: number; byAlgo: Record<string, { count: number; wins: number; winRate: number; netPnl: number }> }> {
-		const closed = await this.trades.find({ where: { status: 'CLOSED' } });
+		const closed = await this.trades.find({ where: { status: 'CLOSED', onRealData: true } });
 		const byAlgo: Record<string, { count: number; wins: number; winRate: number; netPnl: number }> = {};
 		let winners = 0;
 		let netPnl = 0;
@@ -769,11 +783,13 @@ export class FnfTradingService {
 	}
 
 	/** Day-wise rectification of decay value + timing windows from closed
-	 *  trade outcomes. Winners → decay too harsh? ease it; losers → decay
-	 *  too slow? tighten it. Window edges drift toward winning entry hours. */
+	 *  trade outcomes (REAL pipeline only — on_real_data=1; sandbox outcomes
+	 *  must never steer the real decay model). Winners → decay too harsh? ease
+	 *  it; losers → decay too slow? tighten it. Window edges drift toward
+	 *  winning entry hours. */
 	async rectifyDecay(portfolioId?: string): Promise<FnfDecayCalibration[]> {
 		await this.ensureCalibrations(portfolioId);
-		const closed = await this.trades.find({ where: { status: 'CLOSED' }, order: { closedAt: 'ASC' } });
+		const closed = await this.trades.find({ where: { status: 'CLOSED', onRealData: true }, order: { closedAt: 'ASC' } });
 		const updated: FnfDecayCalibration[] = [];
 
 		for (let wd = 0; wd <= 6; wd++) {

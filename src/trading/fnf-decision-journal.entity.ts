@@ -7,6 +7,7 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
 @Entity('fnf_decision_journal')
 @Index('idx_journal_ts', ['ts'])
 @Index('idx_journal_action', ['actionFamily', 'ts'])
+@Index('idx_journal_mode', ['onRealData', 'executionProvider'])
 export class FnfDecisionJournal {
 	@PrimaryGeneratedColumn('uuid')
 	id!: string;
@@ -47,6 +48,18 @@ export class FnfDecisionJournal {
 	 *  rejected:[reason...], reasons:[...], directionMap } */
 	@Column({ type: 'longtext' })
 	detailJson!: string;
+
+	/** true = FYERS real pipeline; false = isolated sandbox/paper (Upstox). */
+	@Column({ type: 'boolean', default: true })
+	onRealData!: boolean;
+
+	/** FYERS (real) | UPSTOX (sandbox). */
+	@Column({ type: 'varchar', length: 16, default: 'FYERS' })
+	executionProvider!: string;
+
+	/** REAL (FYERS pipeline) | SANDBOX (Upstox paper). */
+	@Column({ type: 'varchar', length: 16, default: 'REAL' })
+	executionMode!: string;
 
 	@CreateDateColumn()
 	createdAt!: Date;

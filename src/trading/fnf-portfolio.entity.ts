@@ -38,6 +38,18 @@ export class FnfPortfolio {
   @Column({ type: 'boolean', default: false })
   fridayTradingEnabled: boolean;
 
+  /** Execution environment: true = real/FYERS pipeline; false = isolated sandbox (Upstox). */
+  @Column({ type: 'boolean', default: true })
+  onRealData: boolean;
+
+  /** Broker/provider of this envelope: FYERS (real) or UPSTOX (sandbox). */
+  @Column({ type: 'varchar', length: 16, default: 'FYERS' })
+  executionProvider: string;
+
+  /** Execution mode: REAL (FYERS pipeline) or SANDBOX (Upstox paper). */
+  @Column({ type: 'varchar', length: 16, default: 'REAL' })
+  executionMode: string;
+
   /** Broker connection slots: {"zerodha": {...}, "angelOne": {...}}.
    *  Credentials encrypted when real broker wiring lands (TODO item 5). */
   @Column({ type: 'text', nullable: true })

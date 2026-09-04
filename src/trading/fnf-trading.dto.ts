@@ -18,6 +18,16 @@ export class CreatePortfolioDto {
 
 	@IsOptional() @IsString()
 	brokerConfig?: string;
+
+	/** Isolation (Upstox task): false → sandbox envelope; provider/mode explicit. */
+	@IsOptional() @IsBoolean()
+	onRealData?: boolean;
+
+	@IsOptional() @IsString()
+	executionProvider?: string;
+
+	@IsOptional() @IsString()
+	executionMode?: string;
 }
 
 export class UpdatePortfolioDto {

@@ -67,6 +67,14 @@ export class FnfTradeReflection {
 	@Column({ type: 'text' })
 	heuristic!: string;
 
+	/** true = FYERS real pipeline; false = sandbox (Upstox). */
+	@Column({ type: 'boolean', default: true })
+	onRealData!: boolean;
+
+	/** FYERS (real) | UPSTOX (sandbox). */
+	@Column({ type: 'varchar', length: 16, default: 'FYERS' })
+	executionProvider!: string;
+
 	@CreateDateColumn()
 	createdAt!: Date;
 }

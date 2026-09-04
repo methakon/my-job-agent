@@ -19,7 +19,13 @@ export class FnfTradingController {
 
 	@Get('portfolios')
 	listPortfolios() {
-		return this.trading.listPortfolios();
+		return this.trading.listPortfolios(); // real-only by default (isolation)
+	}
+
+	/** Isolation (Upstox task): sandbox envelopes (on_real_data=false). */
+	@Get('portfolios/sandbox')
+	listSandboxPortfolios() {
+		return this.trading.listPortfolios(false);
 	}
 
 	@Post('portfolios')
@@ -62,6 +68,12 @@ export class FnfTradingController {
 	@Get('trades')
 	listTrades(@Query('portfolioId') portfolioId?: string, @Query('limit') limit?: string) {
 		return this.trading.listTrades(portfolioId, limit ? Number(limit) : 100);
+	}
+
+	/** Isolation (Upstox task): sandbox/paper trades — explicit, provider-aware. */
+	@Get('trades/sandbox')
+	listSandboxTrades(@Query('portfolioId') portfolioId?: string, @Query('limit') limit?: string) {
+		return this.trading.listTrades(portfolioId, limit ? Number(limit) : 100, false);
 	}
 
 	// ── Reflexion memory (T-08) ─────────────────────────────────────────
