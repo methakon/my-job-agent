@@ -1,7 +1,15 @@
 # my-job-agent — TODO / Progress Tracker
 
 > Updated with every session. ✅ done · 🔄 in progress · ⬜ pending · 🚫 blocked on user
-> Last updated: 2026-09-04 (late)
+> Last updated: 2026-09-05 (goodbye)
+
+## Session 2026-09-05 (done) — decision engine, Reflexion/Greeks, v5 checklist, auth
+- [x] Decision engine `option-candidate-rank-v1` deployed (universe → ₹5k filter → gates → score → best/NO TRADE); 32-contract NIFTY+BANKNIFTY universe; legacy index positions closed (ceiling ₹4,799.26)
+- [x] /project-status page (DB-driven, v4 → **v5 detailed edition** 224 items incl FINAL EXECUTION PROTOCOL) with status + per-item notes
+- [x] **T-08** Reflexion memory (fnf_trade_reflections) + **T-09** local BSM Greeks/IV + |delta| band → both done
+- [x] Guidebook mapped to v4/v5 gates; **D-01 decided** (XGBoost first), **D-02 spec** → docs/D02_MULTI_LEG_DEFINED_RISK_SPEC.md
+- [x] Auth: portal password out of .env → AES-encrypted portal_users DB row (ENCRYPTION_KEY); login/change/forgot DB-first; git history purged of old plaintext (backup /tmp/myjob-agent-backup-20260905-0110.bundle)
+- NEXT (auto-resume 'continue'): Gate-0 regression tests item (in_progress), T-04 follow-on Greeks/bid-ask journal fields (Gate 1), observability surfacing (Gate 19 #3), FYERS/MySQL secret purge from git history (awaiting user "purge all"), D-02 P0 paper harness
 
 ## Decisions resolved (2026-09-05)
 - **D-01 DECIDED (user)**: XGBoost/LightGBM first — target-architecture diagram is the primary

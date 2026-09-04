@@ -80,6 +80,33 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-05) — decision engine, Reflexion/Greeks, v5 checklist, auth hardening
+- **Candidate-ranking DECISION ENGINE live** (`option-candidate-rank-v1`, f7bce35): universe-wide
+  candidates → ₹5k capital filter (NOT instrument rule) → gates (stale/spread/volume/decay) →
+  weighted score (strategy fit/liquidity/spread/expiry/Greeks/same-underlying nudge/cost) →
+  best affordable or NO TRADE. Universe widened to 32 contracts NIFTY+BANKNIFTY 26SEP (eb9cca0).
+- **2 legacy index positions closed** (scope-drift cleanup): phantom ₹81k deployed released;
+  net −₹200.74 absorbed; ceiling auto-shrunk to ₹4,799.26; deployed ₹0 — desk starts clean.
+- **/project-status DB-driven page** (6b061cb): project_checklist_items table, 22 gates + priority
+  order seeded; status toggles + per-item notes; **upgraded to v5 detailed edition** (1a983ed):
+  224 rows incl FINAL EXECUTION PROTOCOL group, per-item Implementation + Done-when, notes inline.
+- **T-08 Reflexion episodic memory** (1a983ed): fnf_trade_reflections written on every close —
+  deterministic outcome class (WIN_TARGET/LOSS_STOP/TIME_EXIT/LOSS_MANUAL) + critique + heuristic;
+  exitTrigger flows from driver; recent lessons injected into next signal reasons.
+- **T-09 local Greeks/IV** (1a983ed): bsm-greeks.ts (BSM IV solver + delta/gamma/theta/vega,
+  validated vs textbook); candidates scored on local delta when provider omits it; |delta|
+  0.10–0.40 band gate; provider-vs-local desync flagged.
+- **Guidebook (Google Doc) reviewed + mapped to v4/v5 gates** — only 2 additive items existed
+  (T-08, D-02); recorded in docs/TODO.md. **D-01 DECIDED (user)**: XGBoost first, Reflexion =
+  post-trade critique. **D-02 spec written**: docs/D02_MULTI_LEG_DEFINED_RISK_SPEC.md (IC/credit
+  spread family; blocked on margin + broker).
+- **Auth hardening (8265919)**: portal password REMOVED from .env — now AES-256-CBC encrypted in
+  portal_users DB row (bapay.9@gmail.com / Swarna Sekhar Dhar + birth/astro profile) under
+  ENCRYPTION_KEY; login/change-password/forgot-password DB-first with env legacy fallback;
+  change-password strips .env. **Git history purged** of the old plaintext password
+  (filter-repo rewrite; full backup at /tmp/myjob-agent-backup-20260905-0110.bundle).
+- Status PDF reports in docs/ (OPTION_DESK_STATUS + MY_JOB_AGENT_PROJECT_STATUS, 2026-09-04).
+
 ## Progress (2026-09-04)
 - **T-04 Option-chain desk — index is underlying/reference ONLY; positions are CE/PE contracts (deployed Dhargent, commits `681dd32` + `4ffce1e`)** — user rule: NIFTY50-INDEX/SENSEX determine which option-chain contracts to trade; the desk never opens a position on the index itself. `openTrade` hard guard rejects any `*-INDEX` instrument and any symbol not registered in `fnf_option_contracts`; quantity = LOTS × lotSize (NIFTY 65/BANKNIFTY 30/FINNIFTY 60/SENSEX 20); entry = premium/unit; premium outlay (units × premium) must fit the envelope; contract meta (strike/expiry/CE-PE/lot/units) persisted in decisionParams. `closeTrade` computes premium P&L `(exit−entry)×units` and round-trip FYERS segment costs (options flat ₹20/order per leg, STT 0.05% sell premium, NSE txn 0.03553%, stamp 0.003% buy, SEBI ₹10/cr, GST 18% on broker+txn+sebi) — the old `Math.max` brokerage bug (billed the larger of pct/flat) fixed to a true lower-of. `generateSignals` now runs `option-atm-premium-v1` over registered contracts with live premium quotes: underlying SMA-20 decides direction → ATM CE (bullish) / ATM PE (bearish), premium target ×1.5 / stop ×0.75, decay-adjusted; the underlying index is never the signal instrument. Feed routes option-contract ticks to `fnf_option_quotes` only (never `fnf_market_snapshots`) and auto-registers option symbols from `FNO_MARKET_DATA_SYMBOLS` at `onModuleInit`. Session driver exits are position-driven via `latestReferencePrice` (quote for contracts, snapshot for legacy index positions) against stored target/stop, so the 2 legacy T-03 index opens remain managed. Live NIFTY 26SEP chain (10 contracts, strikes 23,850–24,050 CE/PE) registered; FYERS subscribed to 13 symbols; real premiums verified landing.
 - **Envelope model (2026-09-04, user directive — corrected wording)** — ₹5,000 is the per-position CAPITAL CONSTRAINT, not an instrument-selection rule. Account starts at ₹5,000 (stored in the DB); after every close the stored ceiling auto-grows/shrinks by net P&L (`ceiling = max(0, capital + netPnl)` = profit − charges). The signal engine builds candidates across the entire registered option universe (underlying × expiry × strike × CE/PE × premium × lot size × contract value × liquidity/OI/volume × bid/ask × Greeks × ATM-ness), rejects every candidate whose `premium × lotSize × lots > available headroom` (capital + netPnl − deployed), then ranks the affordable survivors by strategy suitability and risk (strike/expiry quality, liquidity, spread, Greeks). Same-underlying OTM is a legitimate candidate scored on merit — not a hard fallback; SENSEX/BANKNIFTY/FINNIFTY are other candidates allowed to win on score. If nothing clears strategy + liquidity + risk + affordability → NO TRADE (never force the next-cheapest). NIFTY ATM 26SEP is ₹13–26k/lot today so it is typically filtered out; the desk trades whichever affordable candidate scores best, and holds (no trade) when none exists.
