@@ -4,12 +4,21 @@
 > Last updated: 2026-09-04 (late)
 
 ## Guidebook review (2026-09-04 late) — Hermes Trading Agent Guidebook (Google Doc)
-Reviewed the guidebook: quantized Hermes-3-8B options agent on OCI ARM64 (llama-server), Tradier/US-market
-iron-condor + credit-spread spec, Reflexion verbal RL episodic memory, py_vollib local Greeks validation,
-Pydantic risk gate, ₹2k-5k micro-live progression. NOT applicable to our NSE/FYERS desk as-is (Tradier/US, 
-short-premium — Gate 0 forbids in current desk). Transferable ideas queued → agent_todo_log: **T-08** Reflexion
-memory (Gate 14), **T-09** local Greeks/IV + delta-band filter (Gate 7/T-04b), **D-01** architecture decision
-LLM-supervisor vs XGBoost, **D-02** multi-leg defined-risk as separate future family.
+Reviewed + MAPPED to the v4 checklist (no guidebook copy kept). Verdict: the guidebook is an implementation-detail
+source for items that ALREADY exist in the validated v4 checklist — almost nothing is new at gate level:
+- py_vollib local Greeks/IV cross-check → v4 GATE 7 #4 "Compute independent delta/gamma/theta/vega and discrepancy flags"
+- Reflexion verbal RL + post-trade critiques → v4 GATE 14 (whole gate) + GATE 21 #9
+- Pydantic deterministic risk gate, per-trade/aggregate % caps → v4 GATE 16 #2 (independent risk engine)
+- Telemetry dashboard → v4 GATE 19 (whole gate)
+- DPO/LoRA after dataset → v4 GATE 18 #6
+- Chain delta-band compression → v4 GATE 3 #8 + GATE 7 #4
+- PAPER/SHADOW/MICRO-LIVE progression → v4 GATE 16 #9 + GATE 20 (whole gate)
+- Credit spreads / IC as future family → v4 GATE 0 #9 (explicitly deferred family)
+NOT covered by v4 gates (only 2, both already queued in agent_todo_log):
+- **T-08** Reflexion episodic-memory store table (v4 Gate 14 has the discipline, not the schema/impl)
+- **D-02** Multi-leg defined-risk spec: 4/2-leg topology, credit ≥20% of width, 50% TP / 200% SL / gamma window
+Also queued: **T-09** local Greeks/IV validation impl (maps GATE 7 #4), **D-01** architecture decision LLM-supervisor
+vs XGBoost (guidebook verbal-RL pattern vs our target architecture — decide before Gate 12).
 
 ## T-04 Option-chain desk + tick archival + envelope model (2026-09-04) — deployed Dhargent
 - [x] **User rule**: NIFTY50-INDEX/SENSEX are UNDERLYING/REFERENCE only; positions only on registered option contracts (CE/PE) with expiry/strike/lot; premium-based entry/P&L/sizing; hard safeguard against index positions. Commit `681dd32`.
