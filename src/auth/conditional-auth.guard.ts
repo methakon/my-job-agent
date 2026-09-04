@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import 'express-session';
+import { PortalUserService, OWNER_EMAIL } from './portal-user.service';
 
 // Typed session payload used across the app (login mints req.session.user).
 declare module 'express-session' {
@@ -20,9 +21,10 @@ export const OPERATOR_NAME = 'Operator';
 export const AUTH_HEADER = 'x-operator-password';
 
 /**
- * Single source of truth for the operator password check (env SESSION_PASSWORD).
- * Shared by the guard (header/body password) and AuthController
- * (login / change-password / forgot-password).
+ * Single source of truth for the operator password check.
+ * Since 2026-09-05 the authoritative store is the encrypted portal_users row
+ * (PortalUserService); the env SESSION_PASSWORD is consulted ONLY as a legacy
+ * fallback while the DB row is still unseeded. New passwords never go to .env.
  */
 export function operatorPasswordOk(input: unknown): boolean {
   if (typeof input !== 'string' || input.length === 0) return false;
@@ -48,7 +50,10 @@ export function operatorPasswordOk(input: unknown): boolean {
  */
 @Injectable()
 export class ConditionalAuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly users?: PortalUserService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const req = context.switchToHttp().getRequest<Request>();
@@ -76,12 +81,25 @@ export class ConditionalAuthGuard implements CanActivate {
       (typeof header === 'string' ? header : undefined) ??
       (typeof body.password === 'string' ? body.password : undefined) ??
       (typeof body.operatorPassword === 'string' ? body.operatorPassword : undefined);
-    if (operatorPasswordOk(candidate)) {
+    if (await this.passwordOk(candidate)) {
       // Machine callers that authenticate with the password also get a session.
-      req.session!.user = { email: OPERATOR_EMAIL, name: OPERATOR_NAME };
+      const identity = this.users ? await this.users.findByEmail(OWNER_EMAIL).catch(() => null) : null;
+      req.session!.user = identity
+        ? { email: identity.email, name: identity.name }
+        : { email: OPERATOR_EMAIL, name: OPERATOR_NAME };
       return true;
     }
 
     throw new UnauthorizedException('Operator password required.');
+  }
+
+  /** DB-first (portal_users encrypted row); legacy .env fallback while unseeded. */
+  private async passwordOk(candidate: string | undefined): Promise<boolean> {
+    if (typeof candidate !== 'string' || candidate.length === 0) return false;
+    if (this.users) {
+      const ok = await this.users.verifyOwnerPassword(candidate).catch(() => false);
+      if (ok) return true;
+    }
+    return operatorPasswordOk(candidate);
   }
 }

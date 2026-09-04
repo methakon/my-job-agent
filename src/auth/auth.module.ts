@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConditionalAuthGuard } from './conditional-auth.guard';
+import { EncryptionService } from './encryption.service';
+import { PortalUser } from './portal-user.entity';
+import { PortalUserService } from './portal-user.service';
 
 /**
  * Auth wiring:
@@ -10,12 +14,22 @@ import { ConditionalAuthGuard } from './conditional-auth.guard';
  *    password, or the route is marked @BypassAuth / @AllowIps (3rd-party
  *    callbacks, webhooks, server-to-server endpoints, the login shell).
  *
+ *  - PortalUserService + EncryptionService: encrypted operator identity vault
+ *    (portal_users row, AES under ENCRYPTION_KEY). Exported so AuthController
+ *    (AppModule) can verify login / change password against the DB row.
+ *
  * NOTE: AuthController intentionally lives in AppModule.controllers, directly
  * before AppFallbackController — Nest registers a module's own controllers
  * before imported modules' controllers, so an '*' fallback declared in an
  * imported module would otherwise swallow the /auth/* routes.
  */
 @Module({
-  providers: [{ provide: APP_GUARD, useClass: ConditionalAuthGuard }],
+  imports: [TypeOrmModule.forFeature([PortalUser])],
+  providers: [
+    EncryptionService,
+    PortalUserService,
+    { provide: APP_GUARD, useClass: ConditionalAuthGuard },
+  ],
+  exports: [EncryptionService, PortalUserService, TypeOrmModule],
 })
 export class AuthModule {}
