@@ -376,6 +376,33 @@ export class FnfTradingService {
 				: failureTag === 'time-decay-exit'
 					? `Prefer strikes with ≥ 3-5 DTE and avoid holding ${underlying} options into theta burn without a plan.`
 					: `Define the exit BEFORE entry; a manual loss without a recorded reason is a process failure.`;
+		// Gate 14 #1: map the outcome to a failure family (deterministic).
+		let failureFamily = 'none';
+		if (!win) {
+			if (exitTrigger === 'stop') failureFamily = 'signal'; // thesis failed before target
+			else if (exitTrigger === 'time') failureFamily = 'timing'; // theta/time erosion
+			else failureFamily = 'execution'; // manual close without reason
+		} else if (exitTrigger === 'time') {
+			failureFamily = 'timing';
+		}
+		// Gate 14 #5/#7/#8: evidence-class the heuristic. Identical heuristic text
+		// from a prior reflection → increment confirmations and promote the CLASS
+		// (OBSERVATION → HYPOTHESIS at 2 → TESTED_RULE at 3). Never promote from a
+		// single trade; a later contradictory loss would need explicit rejection.
+		let reflectionClass = 'OBSERVATION';
+		let confirmations = 1;
+		try {
+			const prior = await this.reflections
+				.find({ where: { underlying, heuristic }, order: { createdAt: 'DESC' }, take: 1 })
+				.catch(() => [] as FnfTradeReflection[]);
+			if (prior[0]) {
+				confirmations = (prior[0].confirmations ?? 1) + 1;
+				reflectionClass =
+					confirmations >= 3 ? 'TESTED_RULE' : confirmations >= 2 ? 'HYPOTHESIS' : 'OBSERVATION';
+			}
+		} catch {
+			/* promotion lookup failure → keep OBSERVATION/1 */
+		}
 		await this.reflections.save(
 			this.reflections.create({
 				tradeId: trade.id,
@@ -387,11 +414,14 @@ export class FnfTradingService {
 				exitTrigger,
 				outcomeClass: outClass,
 				failureTag,
+				failureFamily,
+				reflectionClass,
+				confirmations,
 				critique,
 				heuristic,
 			}),
 		);
-		this.logger.log(`reflection written for ${trade.id.slice(0, 8)}: ${outClass} ${net.toFixed(2)}`);
+		this.logger.log(`reflection written for ${trade.id.slice(0, 8)}: ${outClass} ${net.toFixed(2)} [${reflectionClass} x${confirmations}]`);
 		void portfolioNetPnl;
 	}
 

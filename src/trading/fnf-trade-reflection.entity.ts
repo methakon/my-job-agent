@@ -44,6 +44,21 @@ export class FnfTradeReflection {
 	@Column({ type: 'varchar', length: 60, default: '' })
 	failureTag!: string;
 
+	/** v4/v5 Gate 14 #1 failure family: signal | regime | execution | liquidity |
+	 *  data | model | timing | event | risk-veto | none */
+	@Column({ type: 'varchar', length: 16, default: 'none' })
+	failureFamily!: string;
+
+	/** v4/v5 Gate 14 #5 evidence class. Single-trade critiques start as
+	 *  OBSERVATION; promotion to HYPOTHESIS → TESTED_RULE requires repeated
+	 *  out-of-sample confirmation (#7/#8) — never auto-promoted from one trade. */
+	@Column({ type: 'varchar', length: 20, default: 'OBSERVATION' })
+	reflectionClass!: string;
+
+	/** number of confirming observations behind this heuristic (promotion gate). */
+	@Column({ type: 'int', default: 1 })
+	confirmations!: number;
+
 	/** structured verbal critique composed from outcome facts. */
 	@Column({ type: 'text' })
 	critique!: string;
