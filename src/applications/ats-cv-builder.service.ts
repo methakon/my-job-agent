@@ -47,6 +47,41 @@ export interface TailoredCvInput {
 	jobTitle: string;
 	jobCompany: string;
 	jobDescription?: string | null;
+	/** Employer location (lead.location) — drives regional CV framing (J-10). */
+	jobLocation?: string | null;
+}
+
+/** J-10: employer-region taxonomy for CV framing (researched 2026-09-05).
+ *  us | eu | india | global — 'global' = remote-first / no region signal. */
+export type CvRegion = 'us' | 'eu' | 'india' | 'global';
+
+const US_HINTS = /\b(US|USA|U\.S\.|United States|New York|NYC|San Francisco|California|CA,? \d|Texas|Chicago|Austin|Seattle|Boston|Remote \(US\)|US only|US time zones?)\b/i;
+const EU_HINTS = /\b(EU|Europe|European|UK|United Kingdom|London|Berlin|Amsterdam|Paris|Dublin|Norway|Oslo|Sweden|Stockholm|Denmark|Finland|Germany|Netherlands|CET|EET)\b/i;
+const IN_HINTS = /\b(India|Bengaluru|Bangalore|Mumbai|Delhi|Gurgaon|Pune|Hyderabad|Chennai|Kolkata|Noida|IST)\b/i;
+
+/** Deterministic region inference from a job-location string. */
+export function detectRegion(location: string | null | undefined): CvRegion {
+	const loc = String(location ?? '');
+	if (!loc.trim() || /^remote$/i.test(loc.trim())) return 'global';
+	if (US_HINTS.test(loc)) return 'us';
+	if (EU_HINTS.test(loc)) return 'eu';
+	if (IN_HINTS.test(loc)) return 'india';
+	return 'global';
+}
+
+/** J-10: availability / notice-period framing, region-conditional.
+ *  - immediate (0 / Immediate / <=15d): universal selling point → "Available immediately"
+ *  - 30-90d: keep "Notice period: X days" ONLY for India roles (Indian convention,
+ *    searched for on Naukri); OMIT for US/EU/global — US research flags long
+ *    notice as a dealbreaker for remote-US startups; EU does not use the term.
+ */
+export function availabilityLine(region: CvRegion, noticePeriod: string | null | undefined): string | null {
+	const np = String(noticePeriod ?? '').trim().toLowerCase();
+	if (!np || np === '0' || np === 'immediate') return 'Available immediately.';
+	const days = parseInt(np, 10);
+	if (!Number.isNaN(days) && days <= 15) return 'Available immediately.';
+	if (region === 'india') return `Notice period: ${np} days.`;
+	return null; // non-immediate + non-India → omit entirely
 }
 
 /**
@@ -91,6 +126,8 @@ export class AtsCvBuilder {
 		doc.pipe(out);
 
 		const p = input.profile;
+		const region = detectRegion(input.jobLocation); // J-10
+		const avail = availabilityLine(region, p.noticePeriod); // J-10
 
 		// Header
 		doc.font('Helvetica-Bold').fontSize(18).text(String(p.name ?? ''), { align: 'left' });
