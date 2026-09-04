@@ -17,6 +17,7 @@ import { FnfMarketSnapshotHistory } from '../trading/fnf-market-snapshot-history
 import { FnfOptionQuoteHistory } from '../trading/fnf-option-quote-history.entity';
 import { FnfTradeReflection } from '../trading/fnf-trade-reflection.entity';
 import { FnfDecisionJournal } from '../trading/fnf-decision-journal.entity';
+import { FnfTradeReport } from '../trading/fnf-trade-report.entity';
 import { SessionDriverService } from './session-driver.service';
 
 /**

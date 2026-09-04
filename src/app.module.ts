@@ -51,6 +51,7 @@ import { FnfMarketSnapshotHistory } from './trading/fnf-market-snapshot-history.
 import { FnfOptionQuoteHistory } from './trading/fnf-option-quote-history.entity';
 import { FnfTradeReflection } from './trading/fnf-trade-reflection.entity';
 import { FnfDecisionJournal } from './trading/fnf-decision-journal.entity';
+import { FnfTradeReport } from './trading/fnf-trade-report.entity';
 import { FnfOptionChainService } from './trading/fnf-option-chain.service';
 import { FnfOptionChainController } from './trading/fnf-option-chain.controller';
 import { ProjectChecklistItem } from './project-status/project-checklist-item.entity';
@@ -106,7 +107,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, ProjectChecklistItem]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, ProjectChecklistItem]),
 		SideIncomeModule,
 		AuthModule,
 	],

@@ -78,6 +78,18 @@ export class FnfTradingController {
 		return this.trading.listJournal(limit ? Number(limit) : 25);
 	}
 
+	// ── Trade-report outbox (T-07) ───────────────────────────────────────
+
+	@Get('reports/pending')
+	pendingReports(@Query('limit') limit?: string) {
+		return this.trading.pendingTradeReports(limit ? Number(limit) : 20);
+	}
+
+	@Post('reports/:id/sent')
+	markReportSent(@Param('id') id: string) {
+		return this.trading.markTradeReportSent(id);
+	}
+
 	@Get('summary')
 	async summary() {
 		const [portfolios, trades, learning] = await Promise.all([

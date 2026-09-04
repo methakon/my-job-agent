@@ -9,6 +9,7 @@ import { FnfMarketSnapshotHistory } from './fnf-market-snapshot-history.entity';
 import { FnfOptionQuoteHistory } from './fnf-option-quote-history.entity';
 import { FnfTradeReflection } from './fnf-trade-reflection.entity';
 import { FnfDecisionJournal } from './fnf-decision-journal.entity';
+import { FnfTradeReport } from './fnf-trade-report.entity';
 import { localGreeks } from './bsm-greeks';
 import { FnfOptionChainService } from './fnf-option-chain.service';
 import { OptionContract } from './option-chain-parser';
@@ -125,6 +126,7 @@ export class FnfTradingService {
 		@InjectRepository(FnfOptionQuoteHistory) private readonly quoteHistory: Repository<FnfOptionQuoteHistory>,
 		@InjectRepository(FnfTradeReflection) private readonly reflections: Repository<FnfTradeReflection>,
 		@InjectRepository(FnfDecisionJournal) private readonly journal: Repository<FnfDecisionJournal>,
+		@InjectRepository(FnfTradeReport) private readonly tradeReports: Repository<FnfTradeReport>,
 		private readonly optionChain: FnfOptionChainService,
 		private readonly muhurta: AstroMuhurtaService,
 	) {
@@ -244,6 +246,18 @@ export class FnfTradingService {
 			deployed: Number(portfolio.deployed) + outlay,
 		});
 		this.logger.log(`option ${dto.side} ${dto.quantity} lot(s) ${dto.instrument} @ ₹${premium.toFixed(2)}/unit (${units} units, outlay ${outlay.toFixed(2)})`);
+		void this.queueTradeReport({
+			kind: 'OPEN',
+			occurredAt: asOf,
+			instrument: dto.instrument,
+			side: dto.side,
+			status: 'OPEN',
+			price: premium,
+			quantity: units,
+			netPnl: null,
+			ceiling: Number(portfolio.ceiling ?? portfolio.capital),
+			message: `🟢 OPEN ${dto.side} ${dto.quantity} lot(s) ${dto.instrument}\n   @ ₹${premium.toFixed(2)}/unit · outlay ₹${outlay.toFixed(2)} · envelope ₹${Number(portfolio.ceiling ?? portfolio.capital).toFixed(2)}`,
+		});
 		return trade;
 	}
 
@@ -315,10 +329,25 @@ export class FnfTradingService {
 			.then(() => undefined)
 			.catch((e) => this.logger.warn(`reflection write failed: ${(e as Error).message}`));
 
-		return saved;
-	}
+		// T-07: trade report outbox row (delivered to Telegram/WhatsApp by the local poller).
+		const exitLabel = (saved.decisionParams as string | null) ? (JSON.parse(String(saved.decisionParams)) as { exitTrigger?: string })?.exitTrigger ?? 'manual' : 'manual';
+		void this.queueTradeReport({
+			kind: 'CLOSE',
+			occurredAt: asOf,
+			instrument: trade.instrument,
+			side: (trade.side as string) || 'BUY',
+			status: saved.status,
+			price: Number(saved.exitPrice),
+			quantity: qty,
+			netPnl: newNetPnl,
+			ceiling: Number(portfolio.ceiling ?? portfolio.capital),
+			message: `${newNetPnl >= 0 ? '🟢' : '🔴'} CLOSE ${trade.side} ${trade.instrument} · ${exitLabel}\n   exit ₹${Number(saved.exitPrice).toFixed(2)} · net ₹${newNetPnl.toFixed(2)} (gross ${grossPnl.toFixed(2)}, cost ${cost.toFixed(2)}) · envelope now ₹${Number(portfolio.ceiling ?? portfolio.capital).toFixed(2)}`,
+		});
 
-	/** Deterministic Reflexion row for a closed trade (T-08). Never an LLM call —
+		return saved;
+}
+
+/** Deterministic Reflexion row for a closed trade (T-08). Never an LLM call —
 	 *  production rules stay deterministic; the critique is structured facts. */
 	private async writeReflection(trade: FnfTrade, portfolioNetPnl: number): Promise<void> {
 		// Resolve the true underlying token (contract registry first; fall back to
@@ -434,6 +463,29 @@ export class FnfTradingService {
 	/** Latest decision-journal rows for the UI / audit (GATE 1). */
 	async listJournal(limit = 25): Promise<FnfDecisionJournal[]> {
 		return this.journal.find({ order: { ts: 'DESC' }, take: Math.min(limit, 200) });
+	}
+
+	// ── T-07 trade-report outbox ──────────────────────────────────────────
+
+	/** Insert a report row (fire-and-forget; the local poller delivers it). */
+	private queueTradeReport(r: {
+		kind: string; occurredAt: Date; instrument?: string | null; side?: string | null;
+		status?: string | null; price?: number | null; quantity?: number | null;
+		netPnl?: number | null; ceiling?: number | null; message: string;
+	}): void {
+		void this.tradeReports
+			.save(this.tradeReports.create({ ...r, delivery: 'pending' }))
+			.catch((e) => this.logger.warn(`report queue failed: ${(e as Error).message}`));
+	}
+
+	/** Pending report rows for the poller (oldest first). */
+	async pendingTradeReports(limit = 20): Promise<FnfTradeReport[]> {
+		return this.tradeReports.find({ where: { delivery: 'pending' }, order: { createdAt: 'ASC' }, take: Math.min(limit, 50) });
+	}
+
+	/** Mark a report delivered (poller calls after a successful send). */
+	async markTradeReportSent(id: string, delivery = 'sent'): Promise<void> {
+		await this.tradeReports.update(id, { delivery });
 	}
 
 	/** Persist one decision cycle to the point-in-time journal (GATE 1).
