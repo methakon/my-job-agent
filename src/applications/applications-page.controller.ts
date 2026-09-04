@@ -183,6 +183,25 @@ export class ApplicationsPageController {
 		return res.json({ ok: true, application: appMainMap(updated) });
 	}
 
+	/** J-19: Move a failed/needs_info application to success (owner applied it
+	 *  manually / the failure was resolved out-of-band). Sent-family transition
+	 *  so it leaves the failed bucket and shows as a real application. */
+	@Post(':id/mark-success')
+	async markSuccess(@Param('id') id: string, @Res() res: Response) {
+		const a = await this.appRepo.findOneById(id);
+		if (!a) return res.status(404).json({ error: 'not found' });
+		if (['submitted', 'sent', 'applied'].includes(a.status)) {
+			return res.json({ ok: true, status: a.status, message: 'already in success state' });
+		}
+		const updated = await this.appRepo.save({
+			...a,
+			status: 'applied',
+			sentAt: new Date(),
+			note: (a.note ? a.note + '\n' : '') + `[moved to success ${new Date().toISOString()} from ${a.status}]`,
+		});
+		return res.json({ ok: true, application: appMainMap(updated) });
+	}
+
 }
 
 // --- HTML template ---
@@ -248,6 +267,7 @@ function template(
 	.show-failed-bar{margin-top:12px;padding:8px 0;border-top:1px solid var(--line)}
 	.show-failed-bar button{background:transparent;border:1px solid var(--line);color:var(--warn);border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit}
 	.show-failed-bar button:hover{border-color:var(--warn)}
+	.btn-mini{background:var(--ok);color:#fff;border:0;border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit;font-size:13px}
 	.btn-action{display:inline-block;background:var(--accent);color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit;font-size:13px;margin-right:6px}
 	.btn-action:hover{background:#4a7be8}
 	.btn-action.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent)}
@@ -401,6 +421,14 @@ function template(
 	      .catch(e => alert('error: ' + e));
 	  }
 	}
+	function markSuccess(id){
+	  if(confirm('Mark this application as success (moves it out of the failed list)?')){
+	    fetch('/applications-page/' + id + '/mark-success', {method:'POST'})
+	      .then(r => r.json())
+	      .then(j => { if(j.ok) location.reload(); else alert(j.error || 'failed'); })
+	      .catch(e => alert('error: ' + e));
+	  }
+	}
 
 	function jobRow(a){
 	  const cls = ['submitted','needs_info','failed'].includes(a.status) ? a.status : '';
@@ -425,7 +453,7 @@ function template(
 	      '<div class="kv"><b>Applied</b><span>'+new Date(a.createdAt).toLocaleString()+'</span></div>'+
 	      (a.errorDetail?'<div class="kv"><b>Error</b><span>'+esc(a.errorDetail)+'</span></div>':'')+
 	      '<div class="kv"><b>Retries</b><span>'+a.retryCount+'</span></div>'+
-	      '<p style="margin-top:8px"><a href="/applications-page/failed/'+a.id+'" target="_blank">View &amp; move to success</a></p></div>';
+	      '<p style="margin-top:8px"><a href="/applications-page/failed/'+a.id+'">View</a> &nbsp; <button class="btn-mini" onclick="markSuccess(\''+a.id+'\')">✓ Move to success</button></p></div>';
 	  });
 	  bar.innerHTML = html;
 	  document.querySelector('.cal-wrap').after(bar);
