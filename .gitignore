@@ -20,11 +20,15 @@ Thumbs.db
 tmp/
 temp/
 
-# Environment files with secrets — committed .env uses *** placeholders only
-# (real secrets injected at runtime or in a separate non-tracked .env.local)
+# Environment files with secrets — NEVER commit (policy 2026-09-06)
+# Real secrets live only on deploy hosts (local portal + Dhargent/Oracle
+# Cloud) and are synced with scripts/sync-env-dhargent.sh. The committed
+# template is .env.example (blank values).
+.env
+.env.password
 .env.local
 .env.*.local
-# .env.password — tracked (not junk); contains SESSION_PASSWORD
+!.env.example
 
 # Agent PID files — tracked (not junk); kept for agent lifecycle reference
 # agent.pid
