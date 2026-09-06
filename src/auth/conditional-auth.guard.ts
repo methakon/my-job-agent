@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { createHash, timingSafeEqual } from 'crypto';
 import type { Request } from 'express';
 import 'express-session';
 import { PortalUserService, OWNER_EMAIL } from './portal-user.service';
@@ -13,6 +14,11 @@ declare module 'express-session' {
 
 export const BYPASS_AUTH_KEY = 'bypassAuth';
 export const IpWhitelistKey = 'ipWhitelist';
+
+/** Route metadata key set by @AllowAiTestToken() (opt-in /ai/test probe routes). */
+export const AI_TEST_TOKEN_KEY = 'aiTestToken';
+/** HTTP header carrying the /ai/test probe token. */
+export const AI_TEST_HEADER = 'x-hermes-ai-test-token';
 
 export const OPERATOR_EMAIL = 'operator@berhampore.in';
 export const OPERATOR_NAME = 'Operator';
@@ -30,6 +36,22 @@ export function operatorPasswordOk(input: unknown): boolean {
   if (typeof input !== 'string' || input.length === 0) return false;
   const expected = process.env.SESSION_PASSWORD;
   return !!expected && input === expected;
+}
+
+/**
+ * Constant-time check of the /ai/test probe token (x-hermes-ai-test-token)
+ * against the configured HERMES_AI_TEST_TOKEN. Fail-closed: no configured
+ * token, a non-string/empty header, or a mismatch all return false. The token
+ * and its configured value are never logged. SHA-256 digests are compared so
+ * timingSafeEqual never sees unequal lengths.
+ */
+export function aiTestTokenOk(input: unknown): boolean {
+  if (typeof input !== 'string' || input.length === 0) return false;
+  const expected = process.env.HERMES_AI_TEST_TOKEN;
+  if (!expected || expected.length === 0) return false;
+  const a = createHash('sha256').update(input).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
 }
 
 /**
@@ -74,6 +96,17 @@ export class ConditionalAuthGuard implements CanActivate {
       const ip = (req.ip || req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
       if (allowIps.includes(ip)) return true;
     }
+
+    // Route-scoped probe token (@AllowAiTestToken, used by POST /ai/test): a
+    // machine probe may authenticate with x-hermes-ai-test-token instead of the
+    // operator password. Checked ONLY on routes that carry the metadata, so the
+    // token can never open any other route; deliberately mints no session (the
+    // token is not an identity). Fail-closed via aiTestTokenOk().
+    const wantsAiTestToken = this.reflector.getAllAndOverride<boolean>(AI_TEST_TOKEN_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (wantsAiTestToken && aiTestTokenOk(req.headers[AI_TEST_HEADER])) return true;
 
     const body: Record<string, unknown> = (req as Request & { body?: Record<string, unknown> }).body ?? {};
     const header = req.headers[AUTH_HEADER];

@@ -1,5 +1,5 @@
 import { SetMetadata } from '@nestjs/common';
-import { BYPASS_AUTH_KEY, IpWhitelistKey } from './conditional-auth.guard';
+import { BYPASS_AUTH_KEY, IpWhitelistKey, AI_TEST_TOKEN_KEY } from './conditional-auth.guard';
 
 /**
  * Opt a route (or whole controller) out of the global password wall.
@@ -20,3 +20,13 @@ export const BypassAuth = () => SetMetadata(BYPASS_AUTH_KEY, true);
  * Cloudflare tunnel are NOT covered by this — use @BypassAuth for those.
  */
 export const AllowIps = (...ips: string[]) => SetMetadata(IpWhitelistKey, ips);
+
+/**
+ * Opt a handler into the x-hermes-ai-test-token probe header (used by
+ * POST /ai/test). Unlike @BypassAuth this does NOT lift the password wall:
+ * the global guard still runs and only lets the request through when the
+ * token matches the configured HERMES_AI_TEST_TOKEN. Routes without this
+ * metadata ignore the header entirely, so the token authenticates nothing
+ * else. Read from environment only — never hard-code a token.
+ */
+export const AllowAiTestToken = () => SetMetadata(AI_TEST_TOKEN_KEY, true);
