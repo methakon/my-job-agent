@@ -62,6 +62,42 @@ export interface AlgoSignal {
 	reasons: string[];
 }
 
+/** GATE 1 (#3/#7): one ranked candidate carrying its point-in-time quote snapshot
+ *  (bid/ask/mid/ltp, spread, volume, OI, OI change, provider, quote ts/age) so the
+ *  decision can be re-examined against exactly the quotes that were live. */
+export interface JournalCandidate {
+	symbol: string;
+	premium: number;
+	contractValue: number;
+	spreadPct: number | null;
+	delta: number | null;
+	score: number;
+	quoteTsMs?: number;
+	quoteAgeMin?: number;
+	bid?: number | null;
+	ask?: number | null;
+	mid?: number | null;
+	ltp?: number;
+	volume?: number;
+	oi?: number;
+	oiChange?: number | null;
+	iv?: number | null;
+	provider?: string;
+	quality?: string;
+}
+
+/** GATE 1 (#5/#7): a feature value with its actual availability timestamp
+ *  (epoch ms of the IST-naive DB ts — same convention as the ts columns). */
+export interface JournalFeature {
+	underlying: string;
+	spot: number;
+	sma20: number;
+	sma5: number;
+	momentumFrac: number | null;
+	bars: number;
+	lastBarMs: number;
+}
+
 /**
  * FYERS per-segment cost model (official FYERS charges KB, verified 2026-09-04).
  * Brokerage is charged per executed order — each leg (open AND close) incurs it.
@@ -504,10 +540,18 @@ export class FnfTradingService {
 		actionFamily: 'BUY' | 'NO TRADE' | 'ERROR';
 		winnerSymbol?: string;
 		algoSource: string;
-		candidates: { symbol: string; premium: number; contractValue: number; spreadPct: number | null; delta: number | null; score: number }[];
+		candidates: JournalCandidate[];
 		rejected: string[];
 		directionSummary: Record<string, string>;
 		reasons?: string[];
+		/** GATE 1 #8: engine-cycle latency (ms) from cycle start to decision. */
+		cycleMs?: number;
+		/** GATE 1 #7: newest data consumed by the decision (snapshot/quote ts, epoch ms). */
+		featureCutoffMs?: number | null;
+		/** GATE 1 #5: every feature used, at its actual availability ts. */
+		features?: JournalFeature[];
+		/** GATE 1 #8: data-side gaps observed during the cycle (validation failures = rejected). */
+		dataWarnings?: string[];
 	}): void {
 		void (async () => {
 			try {
@@ -534,6 +578,14 @@ export class FnfTradingService {
 							rejectedCount: opts.rejected.length,
 							rejected: opts.rejected.slice(0, 60),
 							reasons: opts.reasons ?? [],
+							// GATE 1 #3/#5/#7/#8 — point-in-time extras (see JournalCandidate).
+							cycle: {
+								startedAtMs: opts.asOf.getTime(),
+								latencyMs: opts.cycleMs ?? null,
+								featureCutoffMs: opts.featureCutoffMs ?? null,
+							},
+							features: opts.features ?? [],
+							dataWarnings: opts.dataWarnings ?? [],
 						}),
 					}),
 				);
@@ -882,6 +934,11 @@ export class FnfTradingService {
 	 * prefers lower capital at risk).
 	 */
 		async generateSignals(portfolioId?: string, asOf: Date = new Date()): Promise<AlgoSignal[]> {
+		// GATE 1 #8: cycle latency + data-gap audit trail.
+		const cycleStartedMs = Date.now();
+		const dataWarnings: string[] = [];
+		const featureMeta = new Map<string, JournalFeature>();
+		let dataCutoffMs = 0; // newest data ts consumed (snapshot/quote), 0 = none yet
 		const portfolio = portfolioId ? await this.getPortfolio(portfolioId) : (await this.listPortfolios())[0] ?? null;
 		const isFriday = asOf.getDay() === 5;
 		const fridayBlocked = isFriday && !(portfolio?.fridayTradingEnabled);
@@ -946,12 +1003,28 @@ export class FnfTradingService {
 				order: { ts: 'DESC' },
 				take: 30,
 			});
-			if (rows.length < 5) continue;
+			if (rows.length < 5) {
+				dataWarnings.push(`${underlying}: <5 index snapshots ≤ asOf — direction skipped`);
+				continue;
+			}
 			const prices = rows.map((r) => Number(r.price)).reverse();
 			const spot = prices[prices.length - 1];
 			const sma = prices.reduce((a, b) => a + b, 0) / prices.length;
 			const smaShort = prices.slice(-5).reduce((a, b) => a + b, 0) / 5;
 			const momentum = (spot / prices[prices.length - 6]) - 1;
+			// GATE 1 #5/#7: record the features this engine consumed + the ts of the
+			// newest bar they came from (the actual availability point).
+			const lastBarMs = new Date(rows[0].ts).getTime();
+			featureMeta.set(underlying, {
+				underlying,
+				spot,
+				sma20: sma,
+				sma5: smaShort,
+				momentumFrac: Number.isFinite(momentum) ? momentum : null,
+				bars: rows.length,
+				lastBarMs,
+			});
+			if (lastBarMs > dataCutoffMs) dataCutoffMs = lastBarMs;
 			const bullish = spot > sma && smaShort > sma;
 			const bearish = spot < sma && smaShort < sma;
 			const rawConfidence = Math.min(85, 40 + Math.round(Math.abs(spot - sma) / sma * 1000) + (shubh ? 15 : 0));
@@ -1014,6 +1087,9 @@ export class FnfTradingService {
 				const premium = Number(quote.ltp);
 				if (!Number.isFinite(premium) || premium <= 0) { rejected.push(`${sym}: invalid premium`); continue; }
 				const quoteAgeMin = Math.max(0, (now - new Date(quote.ts).getTime()) / 60_000);
+				// GATE 1 #7: the quote's own ts is data the decision consumed.
+				const quoteTsMs = new Date(quote.ts).getTime();
+				if (quoteTsMs > dataCutoffMs) dataCutoffMs = quoteTsMs;
 				if (quoteAgeMin > staleMinutes) { rejected.push(`${sym}: stale quote (${quoteAgeMin.toFixed(1)}m)`); continue; }
 				const lotSize = Number(contract.lotSize) || 1;
 				const contractValue = premium * lotSize * lots;
@@ -1131,14 +1207,60 @@ export class FnfTradingService {
 		// ── Phase 5: pick the single best eligible contract (NO TRADE if none) ─
 		// Decision-journal context (GATE 1): every candidate + rejection is
 		// persisted regardless of outcome, so NO TRADE is auditable too.
-		const journalCandidates = candidates.map((c) => ({
-			symbol: c.contract.symbol,
-			premium: c.premium,
-			contractValue: c.contractValue,
-			spreadPct: c.spreadPct,
-			delta: null, // filled by winner path below when available
-			score: c.score,
-		}));
+		// GATE 1 #3: journal candidates carry their full point-in-time quote
+		// snapshot (bid/ask/mid/ltp, spread, volume, OI, IV, provider, quote ts).
+		const journalCandidates: JournalCandidate[] = candidates.map((c) => {
+			const bid = Number(c.quote.bid);
+			const ask = Number(c.quote.ask);
+			const hasTwoWay = Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask >= bid;
+			const oi = Number(c.quote.openInterest);
+			const iv = Number(c.quote.impliedVolatility);
+			return {
+				symbol: c.contract.symbol,
+				premium: c.premium,
+				contractValue: c.contractValue,
+				spreadPct: c.spreadPct,
+				delta: null, // filled by winner path below when available
+				score: c.score,
+				quoteTsMs: new Date(c.quote.ts).getTime(),
+				quoteAgeMin: Math.max(0, (now - new Date(c.quote.ts).getTime()) / 60_000),
+				bid: Number.isFinite(bid) && bid > 0 ? bid : null,
+				ask: Number.isFinite(ask) && ask > 0 ? ask : null,
+				mid: hasTwoWay ? (bid + ask) / 2 : null,
+				ltp: c.premium,
+				volume: Number.isFinite(Number(c.quote.volume)) ? Number(c.quote.volume) : 0,
+				oi: Number.isFinite(oi) && oi > 0 ? oi : 0,
+				oiChange: null, // filled best-effort below
+				iv: Number.isFinite(iv) && iv > 0 ? iv : null,
+				provider: c.quote.provider ?? '',
+				quality: hasTwoWay ? 'two-way' : 'one-way/ltp-only',
+			};
+		});
+		// GATE 1 #3: OI change per survivor (current − previous quote for the same
+		// symbol). Best-effort — a lookup failure leaves oiChange null and never
+		// blocks the signal path.
+		if (journalCandidates.length) {
+			try {
+				await Promise.all(
+					journalCandidates.map(async (jc) => {
+						try {
+							const hist = await this.optionChain.findChain({ symbol: jc.symbol, latestOnly: false, limit: 2 });
+							const cur = hist.rows[0];
+							const prev = hist.rows[1];
+							if (cur && prev) {
+								const cOi = Number(cur.openInterest);
+								const pOi = Number(prev.openInterest);
+								if (Number.isFinite(cOi) && Number.isFinite(pOi)) jc.oiChange = cOi - pOi;
+							}
+						} catch {
+							/* leave oiChange null */
+						}
+					}),
+				);
+			} catch {
+				/* leave all oiChange null */
+			}
+		}
 		const directionSummary: Record<string, string> = {};
 		for (const [u, d] of direction) {
 			directionSummary[u] = d?.dir ? `${d.dir} (conf ${d.conf})` : 'range/none';
@@ -1153,6 +1275,10 @@ export class FnfTradingService {
 				candidates: [],
 				rejected,
 				directionSummary,
+				cycleMs: Date.now() - cycleStartedMs,
+				featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
+				features: [...featureMeta.values()],
+				dataWarnings,
 			});
 			return [];
 		}
@@ -1209,6 +1335,10 @@ export class FnfTradingService {
 			rejected,
 			directionSummary,
 			reasons,
+			cycleMs: Date.now() - cycleStartedMs,
+			featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
+			features: [...featureMeta.values()],
+			dataWarnings,
 		});
 
 		return [{
