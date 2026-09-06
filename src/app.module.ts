@@ -101,6 +101,7 @@ import { AnswerBankService } from './applications/answer-bank.service';
 import { QuickQuestionsController } from './applications/quick-questions.controller';
 import { ApplicationRepository } from './applications/application.repository';
 import { ApplySettingRepository } from './applications/apply-setting.repository';
+import { AiModule } from './ai/ai.module';
 
 @Module({
 	imports: [
@@ -113,6 +114,7 @@ import { ApplySettingRepository } from './applications/apply-setting.repository'
 		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, SandboxTick, ProjectChecklistItem]),
 		SideIncomeModule,
 		AuthModule,
+		AiModule,
 	],
 	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController,
 		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)

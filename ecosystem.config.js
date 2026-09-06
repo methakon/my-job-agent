@@ -14,7 +14,9 @@ module.exports = {
     min_uptime: '5s',
     kill_timeout: 30000,
     env: {
-      NODE_ENV: 'production',
-    },
+        NODE_ENV: 'production',
+        AWS_REGION: 'us-east-1',
+        HERMES_BEDROCK_MODEL_ID: 'qwen.qwen3-coder-next',
+      },
   }],
 };
