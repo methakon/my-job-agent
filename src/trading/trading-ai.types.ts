@@ -31,12 +31,25 @@ export type DeterministicAction = 'BUY' | 'SELL' | 'HOLD' | null;
  * Used to overwrite any LLM-provided model identity.
  */
 export interface AiRoutingMetadata {
+  /** Routing policy version that produced this decision. */
   routingPolicyVersion: string;
-  HermesModelKey: string;
+
+  /** Deprecated: use selectedModelKey instead. */
+  HermesModelKey?: string;
+
+  /** Hermes registry key of the model selected by the router. */
   selectedModelKey: string;
+
+  /** Provider selected for execution. */
   selectedProvider: string;
+
+  /** Provider-specific model ID selected for execution. */
   selectedModelId: string;
+
+  /** Capability/tier classification of the selected model. */
   selectedModelTier: string;
+
+  /** Whether the selected model is experimental. */
   selectedModelExperimental: boolean;
 }
 
@@ -251,7 +264,7 @@ export interface AiTradingAssessment {
    */
   modelIdentity: {
     routingPolicyVersion: string; // From AiRoutingService
-    HermesModelKey: string; // From AiRoutingService
+    HermesModelKey?: string; // From AiRoutingService
     selectedModelKey: string; // From AiRoutingService
     selectedProvider: string; // From AiRoutingService
     selectedModelId: string; // From AiRoutingService

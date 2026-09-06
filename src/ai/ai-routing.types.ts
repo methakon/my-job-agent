@@ -47,4 +47,7 @@ export interface AiRoutingDecision {
 
   /** Whether the selected model is experimental. */
   selectedModelExperimental: boolean;
+
+  /** Deprecated: use selectedModelKey instead. */
+  HermesModelKey?: string;
 }

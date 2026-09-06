@@ -6,10 +6,16 @@ import { FnfDecisionJournal } from './fnf-decision-journal.entity';
 import { FnfPortfolio } from './fnf-portfolio.entity';
 import { AlgoSignal, FnfTradingService } from './fnf-trading.service';
 import { AiTradingDecisionService } from './trading-ai.service';
+import { AiRoutingService } from '../ai/ai-routing.service';
+import {
+  AiRoutingRequest,
+  AiRoutingDecision,
+} from '../ai/ai-routing.types';
 import {
   AiTradingInput,
   AiTradingAssessment,
   AiAssessmentResult,
+  AiRoutingMetadata,
 } from './trading-ai.types';
 
 /**
@@ -44,6 +50,7 @@ export class TradingDecisionOrchestrator implements OnModuleInit {
   constructor(
     private readonly trading: FnfTradingService,
     private readonly aiAssessment: AiTradingDecisionService,
+    private readonly aiRouting: AiRoutingService,
     @InjectRepository(FnfDecisionJournal)
     private readonly journal: Repository<FnfDecisionJournal>,
     @InjectRepository(FnfPortfolio)
@@ -569,7 +576,28 @@ export class TradingDecisionOrchestrator implements OnModuleInit {
     asOf: Date,
   ): Promise<void> {
     try {
-      const result = await this.aiAssessment.assessTradingDecision(input);
+      // Get routing metadata from AiRoutingService
+      const routingRequest: AiRoutingRequest = {
+        taskType: 'trading_research',
+      };
+      const routingDecision = this.aiRouting.resolveWithDecision(routingRequest);
+
+      // Convert AiRoutingDecision to trading's AiRoutingMetadata
+      const routingMetadata: AiRoutingMetadata = {
+        routingPolicyVersion: routingDecision.routingPolicyVersion,
+        HermesModelKey: routingDecision.HermesModelKey,
+        selectedModelKey: routingDecision.selectedModelKey,
+        selectedProvider: routingDecision.selectedProvider,
+        selectedModelId: routingDecision.selectedModelId,
+        selectedModelTier: routingDecision.selectedModelTier,
+        selectedModelExperimental: routingDecision.selectedModelExperimental,
+      };
+
+      // Pass routing metadata to assessment
+      const result = await this.aiAssessment.assessTradingDecision(
+        input,
+        routingMetadata,
+      );
 
       if (!result.success) {
         this.logger.warn(`AI assessment failed for ${input.instrument}: ${result.error}`);

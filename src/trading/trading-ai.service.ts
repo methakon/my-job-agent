@@ -167,3 +167,120 @@ export class AiTradingDecisionService {
     lines.push(`Timestamp: ${input.decisionTimestamp}`);
     lines.push(`Session Phase: ${input.sessionPhase}`);
     lines.push(`Underlying: ${input.underlying}`);
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Parse and validate the AI assessment result.
+   * Strict schema validation - fail-closed for any deviations.
+   */
+  private parseAndValidateAssessment(
+    text: string,
+    latencyMs: number,
+    response: any,
+  ): AiAssessmentResult {
+    try {
+      // Try to extract JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return {
+          success: false,
+          error: 'No valid JSON found in response',
+          details: {
+            latencyMs,
+            textPreview: text.substring(0, 200),
+          },
+        };
+      }
+
+      const json = JSON.parse(jsonMatch[0]);
+
+      // Validate required fields exist and are non-empty
+      if (!json.assessment) {
+        return {
+          success: false,
+          error: 'Missing required field: assessment',
+          details: { latencyMs },
+        };
+      }
+
+      if (!json.assessment.summary || !json.assessment.summary.overallAssessment) {
+        return {
+          success: false,
+          error: 'Missing required field: assessment.summary.overallAssessment',
+          details: { latencyMs },
+        };
+      }
+
+      // All validation passed - return success
+      return {
+        success: true,
+        assessment: json.assessment as AiTradingAssessment,
+      };
+    } catch (error) {
+      const message = (error as Error).message || 'JSON parse failed';
+
+      return {
+        success: false,
+        error: message,
+        details: {
+          latencyMs,
+          textPreview: text.substring(0, 200),
+        },
+      };
+    }
+  }
+
+  /**
+   * Persist AI assessment to journal.
+   * Only called when assessment actually participated (not skipped).
+   */
+  private async persistAssessmentToJournal(
+    decisionId: string,
+    assessment: AiTradingAssessment,
+    input: AiTradingInput,
+    routingMetadata: AiRoutingMetadata,
+  ): Promise<void> {
+    try {
+      const record = await this.journal.findOneBy({ id: decisionId });
+      if (!record) {
+        this.logger.warn(`Decision journal record not found for ID: ${decisionId}`);
+        return;
+      }
+
+      // Create assessment metadata object
+      const assessmentMetadata = {
+        submittedAt: new Date().toISOString(),
+        input: {
+          instrument: input.instrument,
+          underlying: input.underlying,
+          timestamp: input.decisionTimestamp,
+          sessionPhase: input.sessionPhase,
+        },
+        routing: routingMetadata,
+        assessment: {
+          version: assessment.version,
+          modelIdentity: assessment.modelIdentity,
+          directionalAssessment: assessment.directionalAssessment,
+          candidateAssessment: assessment.candidateAssessment,
+          comparedToDeterministicSignal: assessment.comparedToDeterministicSignal,
+          summary: assessment.summary,
+          generationMetadata: assessment.generationMetadata,
+        },
+      };
+
+      // Store in detailJson - existing journal mechanism
+      record.detailJson = JSON.stringify(assessmentMetadata);
+
+      await this.journal.save(record);
+
+      this.logger.log(`AI assessment persisted to journal: ${decisionId}`);
+    } catch (error) {
+      this.logger.error(
+        `Failed to persist AI assessment to journal: ${decisionId}`,
+        (error as Error).stack,
+      );
+    }
+  }
+}

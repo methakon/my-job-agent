@@ -119,6 +119,7 @@ export class AiRoutingService {
       selectedModelId: model.modelId,
       selectedModelTier: model.tier,
       selectedModelExperimental: model.experimental,
+      HermesModelKey: model.key,
     };
   }
 }

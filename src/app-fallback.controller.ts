@@ -1,4 +1,4 @@
-import { All, Controller, Req, Res } from '@nestjs/common';
+import { Controller, Get, Head, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import * as path from 'path';
 import { BypassAuth } from './auth/bypass-auth.decorator';
@@ -22,12 +22,17 @@ import { BypassAuth } from './auth/bypass-auth.decorator';
 @Controller()
 @BypassAuth()
 export class AppFallbackController {
-  @All('*')
+  @Get('*')
   fallback(@Req() req: Request, @Res() res: Response) {
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
-      // Unknown non-GET paths: real 404 JSON instead of silently swallowing.
-      return res.status(404).json({ error: 'not_found', path: req.path });
-    }
-    return res.sendFile(path.join(__dirname, '..', 'public', 'dashboard.html'));
+    return res.sendFile(
+      path.join(__dirname, '..', 'public', 'dashboard.html'),
+    );
+  }
+
+  @Head('*')
+  headFallback(@Req() req: Request, @Res() res: Response) {
+    return res.sendFile(
+      path.join(__dirname, '..', 'public', 'dashboard.html'),
+    );
   }
 }
