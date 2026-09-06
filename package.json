@@ -7,6 +7,7 @@
     "build": "nest build",
     "test:trading": "npm run build && node scripts/yahoo-finance-parser.test.js && node scripts/market-data-filter.test.js && node scripts/option-chain-parser.test.js && node scripts/market-feed-guard.test.js",
     "test:ai": "npm run build && node scripts/ai-bedrock-provider.test.js && node scripts/ai-auth.test.js",
+    "test:trading-ai": "npm run build && node scripts/trading-ai.test.js",
     "start": "nest start",
     "start:dev": "nest start --watch"
   },
