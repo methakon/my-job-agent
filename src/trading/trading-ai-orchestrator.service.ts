@@ -17,6 +17,7 @@ import {
   AiAssessmentResult,
   AiRoutingMetadata,
 } from './trading-ai.types';
+import { Semaphore } from './semaphore';
 
 /**
  * SHADOW-MODE TRADING DECISION ORCHESTRATOR
@@ -46,6 +47,9 @@ import {
 @Injectable()
 export class TradingDecisionOrchestrator implements OnModuleInit {
   private readonly logger = new Logger(TradingDecisionOrchestrator.name);
+
+  // Concurrent AI call limit - matches max concurrent calls in ai.service.ts
+  private readonly aiSemaphore = new Semaphore(4);
 
   constructor(
     private readonly trading: FnfTradingService,
@@ -575,6 +579,8 @@ export class TradingDecisionOrchestrator implements OnModuleInit {
     portfolioId: string | undefined,
     asOf: Date,
   ): Promise<void> {
+    // Acquire semaphore slot (blocks if concurrent limit reached)
+    await this.aiSemaphore.acquire();
     try {
       // Get routing metadata from AiRoutingService
       const routingRequest: AiRoutingRequest = {
@@ -621,6 +627,9 @@ export class TradingDecisionOrchestrator implements OnModuleInit {
     } catch (error) {
       // Assessment failure does NOT affect deterministic path
       this.logger.warn(`AI assessment journaling failed for ${input.instrument}: ${(error as Error).message}`);
+    } finally {
+      // Always release semaphore slot
+      this.aiSemaphore.release();
     }
   }
 
