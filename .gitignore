@@ -20,6 +20,10 @@ Thumbs.db
 tmp/
 temp/
 
+# Hermes persistent project memory — local-only, never commit
+# Contains model-independent project state, skills, and checkpoints
+.hermes/
+
 # Environment files with secrets — NEVER commit (policy 2026-09-06)
 # Real secrets live only on deploy hosts (local portal + Dhargent/Oracle
 # Cloud) and are synced with scripts/sync-env-dhargent.sh. The committed

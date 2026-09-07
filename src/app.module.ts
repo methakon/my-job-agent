@@ -35,10 +35,12 @@ import { FnfPortfolio } from './trading/fnf-portfolio.entity';
 import { FnfTrade } from './trading/fnf-trade.entity';
 import { FnfMarketSnapshot } from './trading/fnf-market-snapshot.entity';
 import { FnfDecayCalibration } from './trading/fnf-decay-calibration.entity';
+import { TradeBookImport, TradeBookImportLog } from './trading/trade-book.entity';
 import { FnfTradingService } from './trading/fnf-trading.service';
 import { FnfTradingController } from './trading/fnf-trading.controller';
 import { FnfTradingPageController } from './trading/fnf-trading-page.controller';
 import { OptionTradingPageController } from './trading/option-trading-page.controller';
+import { TradeBookModule } from './trading/trade-book.module';
 import { FnoMarketDataService } from './trading/fno-market-data.service';
 import { FnoMarketDataController } from './trading/fno-market-data.controller';
 import { FyersAuthController } from './trading/fyers-auth.controller';
@@ -112,10 +114,11 @@ import { AiModule } from './ai/ai.module';
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, SandboxTick, ProjectChecklistItem]),
+		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, SandboxTick, ProjectChecklistItem, TradeBookImport, TradeBookImportLog]),
 		SideIncomeModule,
 		AuthModule,
 		AiModule,
+		TradeBookModule,
 	],
 	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController, FyersAuthController,
 		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
