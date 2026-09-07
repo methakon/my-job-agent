@@ -73,6 +73,11 @@ export class CreateTradeDto {
 	 *  (target, stop-loss, confidence, scenarios, astro match, Friday flag). */
 	@IsOptional() @IsString()
 	decisionParams?: string;
+
+	/** Decision ID from fnf_decision_journal.linkedDecisionId where available.
+	 *  Null where the trade was not tied to a DecisionSnapshot (e.g., manual). */
+	@IsOptional() @IsString()
+	decisionId?: string | null;
 }
 
 export class CloseTradeDto {

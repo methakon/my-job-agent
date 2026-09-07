@@ -286,6 +286,7 @@ export class FnfTradingService {
 			decisionParams: dto.decisionParams
 				? JSON.stringify({ ...JSON.parse(dto.decisionParams), contract: contractMeta })
 				: JSON.stringify({ contract: contractMeta }),
+			decisionId: dto.decisionId ?? null,
 			status: 'OPEN',
 		}));
 

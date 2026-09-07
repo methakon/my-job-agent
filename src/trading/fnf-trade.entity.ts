@@ -85,4 +85,9 @@ export class FnfTrade {
   /** Timestamp the position was closed (nullable). */
   @Column({ type: 'datetime', nullable: true })
   closedAt: Date;
+
+  /** Decision ID from fnf_decision_journal.linkedDecisionId where available.
+   *  Null where the trade was not tied to a DecisionSnapshot (e.g., manual). */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  decisionId: string | null;
 }
