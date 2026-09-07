@@ -195,9 +195,9 @@ export class TradeBookImporterService {
     const entryTimestamp = new Date(`${tradeDate}T00:00:00`);
 
     let side: 'BUY' | 'SELL' | null = null;
-    if (tradeType === 'buy') {
+    if (tradeType === 'BUY') {
       side = 'BUY';
-    } else if (tradeType === 'sell') {
+    } else if (tradeType === 'SELL') {
       side = 'SELL';
     }
     if (!side) {
@@ -206,8 +206,8 @@ export class TradeBookImporterService {
 
     const exitPrice: number | null = null;
     const exitTimestamp: Date | null = null;
-    const fees = 0;
-    const netPnl = 0;
+    const fees: number | null = null;
+    const netPnl: number | null = null;
 
     let underlying = '';
     let strike: number | null = null;

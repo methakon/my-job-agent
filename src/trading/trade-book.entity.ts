@@ -90,11 +90,11 @@ export class TradeBookImport {
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   exitPrice: number | null;
 
-  @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
-  fees: number;
+  @Column({ type: 'decimal', precision: 14, scale: 2, nullable: true })
+  fees: number | null;
 
-  @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 })
-  netPnl: number;
+  @Column({ type: 'decimal', precision: 14, scale: 2, nullable: true })
+  netPnl: number | null;
 
   @Column({ type: 'decimal', precision: 14, scale: 2, nullable: true })
   grossPnl: number | null;

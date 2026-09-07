@@ -43,6 +43,9 @@ import { OptionTradingPageController } from './trading/option-trading-page.contr
 import { TradeBookModule } from './trading/trade-book.module';
 import { FnoMarketDataService } from './trading/fno-market-data.service';
 import { FnoMarketDataController } from './trading/fno-market-data.controller';
+import { FyersToken } from './trading/fyers-token.entity';
+import { FyersTokenService } from './trading/fyers-token.service';
+import { FyersOAuthController } from './trading/fyers-oauth.controller';
 import { FyersAuthController } from './trading/fyers-auth.controller';
 import { MarketDataInspectionController } from './trading/market-data-inspection.controller';
 import { MarketDataPageController } from './trading/market-data-page.controller';
@@ -63,6 +66,9 @@ import { FnfOptionChainController } from './trading/fnf-option-chain.controller'
 import { ProjectChecklistItem } from './project-status/project-checklist-item.entity';
 import { ProjectStatusService } from './project-status/project-status.service';
 import { ProjectStatusPageController } from './project-status/project-status-page.controller';
+import { AgentTodoLog } from './shared/agent-todo-log.entity';
+import { Session } from './shared/session.entity';
+import { SideIncomeOpportunity } from './side-income/side-income-opportunity.entity';
 import { InterviewPrepController } from './interview/interview-prep.controller';
 import { InterviewPracticePageController } from './interview/interview-practice-page.controller';
 import { MailController } from './applications/mail.controller';
@@ -88,6 +94,10 @@ import { DailyDigestService } from './applications/daily-digest.service';
 import { LinkedInProfileService } from './applications/linkedin-profile.service';
 import { SideIncomeModule } from './side-income/side-income.module';
 import { AuthModule } from './auth/auth.module';
+import { DatabaseSyncModule } from './database-sync/database-sync.module';
+import { DatabaseSyncService } from './database-sync/database-sync.service';
+import { DatabaseSyncConfigService } from './database-sync/database-sync.config.service';
+import { DatabaseSyncAudit } from './database-sync/database-sync.entity';
 import { AuthController } from './auth/auth.controller';
 import { AppFallbackController } from './app-fallback.controller';
 import { NaukriAdapter } from './scout/naukri.adapter';
@@ -114,13 +124,14 @@ import { AiModule } from './ai/ai.module';
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
 		}),
-		TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, SandboxTick, ProjectChecklistItem, TradeBookImport, TradeBookImportLog]),
-		SideIncomeModule,
-		AuthModule,
-		AiModule,
-		TradeBookModule,
-	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController, FyersAuthController,
+				TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, SandboxTick, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session, SideIncomeOpportunity, DatabaseSyncAudit]),
+						SideIncomeModule,
+						AuthModule,
+						AiModule,
+						TradeBookModule,
+						DatabaseSyncModule,
+					],
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController, FyersAuthController, FyersOAuthController,
 		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
 		AppFallbackController], // MUST stay last: serves dashboard.html for unmatched GETs
 	providers: [
@@ -163,6 +174,7 @@ import { AiModule } from './ai/ai.module';
 		UpstoxSandboxProvider,
 		UpstoxSandboxIngestionService,
 		ProjectStatusService,
+		FyersTokenService,
 	],
 })
 export class AppModule {}
