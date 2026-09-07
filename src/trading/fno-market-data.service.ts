@@ -429,7 +429,8 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       const instrument = String(record.symbol ?? record.n ?? record.symbolName ?? '').trim();
       const price = asFinite(record.ltp, record.lp, record.last_traded_price, nested?.lp, nested?.ltp);
       if (!instrument || price === undefined || price < 0) return [];
-      const epoch = asFinite(record.timestamp, record.ft, record.ts) ?? Date.now() / 1000;
+      // FYERS v3 uses exch_feed_time (epoch seconds) for timestamp
+      const epoch = asFinite(record.timestamp, record.ft, record.ts, record.exch_feed_time) ?? Date.now() / 1000;
       const ts = new Date(epoch < 2_000_000_000 ? epoch * 1000 : epoch);
       if (Number.isNaN(ts.getTime())) return [];
       return [{

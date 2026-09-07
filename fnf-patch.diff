@@ -1,0 +1,243 @@
+--- a/src/trading/fnf-trading.service.ts
++++ b/src/trading/fnf-trading.service.ts
+@@ -11,6 +11,8 @@ import { FnfTradeReflection } from './fnf-trade-reflection.entity';
+ import { FnfDecisionJournal } from './fnf-decision-journal.entity';
+ import { FnfTradeReport } from './fnf-trade-report.entity';
+ import { localGreeks } from './bsm-greeks';
++import { createHash } from 'crypto';
++import { DecisionSnapshot, JournalCandidate, JournalFeature, JournalCycle } from './fnf-decision-snapshot';
+ import { FnfOptionChainService } from './fnf-option-chain.service';
+ import { OptionContract } from './option-chain-parser';
+ import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto, SetDecayCalibrationDto } from './fnf-trading.dto';
+@@ -553,6 +555,8 @@ export class FnfTradingService {
+ 	features?: JournalFeature[];
+ 	/** GATE 1 #8: data-side gaps observed during the cycle (validation failures = rejected). */
+ 	dataWarnings?: string[];
++	/** Full DecisionSnapshot (optional, passed when generateSignals has it ready). */
++	snapshot?: DecisionSnapshot;
+ }): void {
+ 	void (async () => {
+ 		try {
+@@ -585,6 +589,8 @@ export class FnfTradingService {
+ 			},\n\t\t\t\t\t\t\tfeatures: opts.features ?? [],
+ 			dataWarnings: opts.dataWarnings ?? [],
++			// Full DecisionSnapshot (optional, passed by generateSignals).
++			...(opts.snapshot ? { snapshot: opts.snapshot } : {}),
+ 			}),
+ 		}),
+ 		);
+@@ -1267,6 +1273,71 @@ export class FnfTradingService {
+ 		for (const [u, d] of direction) {
+ 			directionSummary[u] = d?.dir ? `${d.dir} (conf ${d.conf})` : 'range/none';
+ 		}
++		// ── NO TRADE snapshot (authoritative deterministic view) ──────────────────
++		const noTradeSnapshot: DecisionSnapshot = {
++			decisionId: createHash('sha256').update(`${asOf.toISOString()}-${portfolio?.id ?? 'null'}`).digest('hex'),
++			asOf,
++			portfolioId: portfolio?.id ?? null,
++			portfolio: portfolio ? {
++				label: portfolio.label,
++				capital: Number(portfolio.capital),
++				ceiling: Number(portfolio.ceiling),
++				deployed: Number(portfolio.deployed),
++				netPnl: Number(portfolio.netPnl),
++				headroom: (Number(portfolio.capital) + Number(portfolio.netPnl)) - Number(portfolio.deployed),
++				autoTradeEnabled: !!portfolio.autoTradeEnabled,
++				fridayTradingEnabled: !!portfolio.fridayTradingEnabled,
++			} : { label: '', capital: 0, ceiling: 0, deployed: 0, netPnl: 0, headroom: Number.POSITIVE_INFINITY, autoTradeEnabled: false, fridayTradingEnabled: false },
++			underlying: '',
++			direction: { dir: 'CE', reason: 'no candidates', conf: 0, spot: 0, sma20: 0, sma5: 0 },
++			optionContract: { symbol: '', underlying: '', strike: 0, expiry: '', optionType: 'CE', lotSize: 0 },
++			dte: 0,
++			actualQuote: { ltp: 0, bid: null, ask: null, mid: null, volume: 0, oi: 0, oiChange: null, iv: null, provider: '', quoteTs: asOf, quoteAgeMin: 0, quality: 'none', spreadPct: null },
++			localGreeks: { delta: null, gamma: null, theta: null, vega: null, iv: null },
++			providerGreeks: { delta: null, gamma: null, theta: null, vega: null },
++			candidateScoring: { atmScore: 0, expiryScore: 0, greeksScore: 0, totalScore: 0, rank: 0, totalCandidates: 0 },
++			confidence: { raw: 0, decayed: 0, rate: 0, ageHours: 0, timingFactor: 0 },
++			sessionPhase: this.currentSessionPhase(asOf),
++			cycle: { startedAtMs: cycleStartedMs, latencyMs: Date.now() - cycleStartedMs, featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null },
++			features: [...featureMeta.values()],
++			dataWarnings,
++			rejected,
++			winnerSymbol: '',
++			algoSource: 'option-candidate-rank-v1',
++			buildSha: process.env.BUILD_SHA || (process.env.npm_package_version ? `v${process.env.npm_package_version}` : ''),
++			sessionId: asOf.getTime().toString(),
++		};
++		if (!candidates.length) {
++			this.logger.debug(`candidate ranking: no eligible contract — ${rejected.length ? rejected.join('; ') : 'no directional candidates'}`);
++			this.journalDecision({
++				portfolioId,
++				asOf,
++				actionFamily: 'NO TRADE',
++				algoSource: 'option-candidate-rank-v1',
++				candidates: [],
++				rejected,
++				directionSummary,
++				cycleMs: Date.now() - cycleStartedMs,
++				featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
++				features: [...featureMeta.values()],
++				dataWarnings,
++				snapshot: noTradeSnapshot,
++			});
++			return [];
++		}
+ 		candidates.sort((a, b) => b.score - a.score);
+ 		const best = candidates[0];
+ 		// Confidence source: the direction info of the winner's underlying (raw SMA confidence).
+@@ -1331,12 +1402,95 @@ export class FnfTradingService {
+ 		// GATE 1: journal the BUY decision with the winner + all runners-up.
+-		const deltaMatch = best.reasons.join(' ').match(/delta (-?[\\d.]+)/);
+-		const winnerSummary = journalCandidates.map((c) =>
+-			c.symbol === best.contract.symbol ? { ...c, delta: deltaMatch ? Number(deltaMatch[1]) : null } : c,
+-		);
+-		this.journalDecision({
+-			portfolioId,
+-			asOf,
+-			actionFamily: 'BUY',
+-			winnerSymbol: best.contract.symbol,
+-			algoSource: 'option-candidate-rank-v1',
+-			candidates: winnerSummary,
+-			rejected,
+-			directionSummary,
+-			reasons,
+-			cycleMs: Date.now() - cycleStartedMs,
+-			featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
+-			features: [...featureMeta.values()],
+-			dataWarnings,
+-		});
++		// ── BUY snapshot (authoritative deterministic view) ─────────────────────
++		const bestDirection = direction.get(bestUnderlying) ?? { dir: 'CE', reason: 'none', conf: 0, spot: 0 };
++		const bestQuote = best.quote;
++		const bestExpiry = new Date(String(best.contract.expiry).slice(0, 10) + 'T00:00:00.000Z');
++		const bestDte = Math.round((bestExpiry.getTime() - asOf.getTime()) / (1000 * 60 * 60 * 24));
++		const bestYears = bestDte / 365;
++		const bestRate = Number(process.env.FNO_RISK_FREE_RATE ?? 0.065);
++		const bestLocalGreeks = localGreeks(best.premium, {
++			spot: bestDirection.spot,
++			strike: Number(best.contract.strike),
++			years: bestYears,
++			rate: bestRate,
++			q: 0
++		}, best.contract.optionType as 'CE' | 'PE');
++		const bestQuoteTs = new Date(bestQuote.ts);
++		const bestQuoteAgeMin = Math.max(0, (asOf.getTime() - bestQuoteTs.getTime()) / 60_000);
++		const bestBid = Number.isFinite(Number(bestQuote.bid)) && Number(bestQuote.bid) > 0 ? Number(bestQuote.bid) : null;
++		const bestAsk = Number.isFinite(Number(bestQuote.ask)) && Number(bestQuote.ask) >= (bestBid ?? 0) ? Number(bestQuote.ask) : null;
++		const bestMid = bestBid !== null && bestAsk !== null ? (bestBid + bestAsk) / 2 : null;
++		const bestOi = Number.isFinite(Number(bestQuote.openInterest)) ? Number(bestQuote.openInterest) : 0;
++		const bestIv = Number.isFinite(Number(bestQuote.impliedVolatility)) ? Number(bestQuote.impliedVolatility) : null;
++		const bestQuoteProvider = bestQuote.provider ?? '';
++		const bestQuality = bestBid !== null && bestAsk !== null ? 'two-way' : 'one-way/ltp-only';
++
++		// Get underlying feature data
++		const bestFeature = featureMeta.get(bestUnderlying) ?? { underlying: bestUnderlying, spot: 0, sma20: 0, sma5: 0, momentumFrac: null, bars: 0, lastBarMs: 0 };
++
++		const winnerSnapshot: DecisionSnapshot = {
++			decisionId: createHash('sha256').update(`${asOf.toISOString()}-${portfolio?.id ?? 'null'}`).digest('hex'),
++			asOf,
++			portfolioId: portfolio?.id ?? null,
++			portfolio: portfolio ? {
++				label: portfolio.label,
++				capital: Number(portfolio.capital),
++				ceiling: Number(portfolio.ceiling),
++				deployed: Number(portfolio.deployed),
++				netPnl: Number(portfolio.netPnl),
++				headroom: (Number(portfolio.capital) + Number(portfolio.netPnl)) - Number(portfolio.deployed),
++				autoTradeEnabled: !!portfolio.autoTradeEnabled,
++				fridayTradingEnabled: !!portfolio.fridayTradingEnabled,
++			} : { label: '', capital: 0, ceiling: 0, deployed: 0, netPnl: 0, headroom: Number.POSITIVE_INFINITY, autoTradeEnabled: false, fridayTradingEnabled: false },
++			underlying: bestUnderlying,
++			direction: {
++				dir: bestDirection.dir ?? 'CE',
++				reason: bestDirection.reason,
++				conf: bestDirection.conf,
++				spot: bestDirection.spot,
++				sma20: bestFeature.sma20,
++				sma5: bestFeature.sma5,
++			},
++			optionContract: {
++				symbol: best.contract.symbol,
++				underlying: best.contract.underlying,
++				strike: Number(best.contract.strike),
++				expiry: String(best.contract.expiry).slice(0, 10),
++				optionType: best.contract.optionType as 'CE' | 'PE',
++				lotSize: Number(best.contract.lotSize) || 1,
++			},
++			dte: bestDte,
++			actualQuote: {
++				ltp: best.premium,
++				bid: bestBid,
++				ask: bestAsk,
++				mid: bestMid,
++				volume: Number.isFinite(Number(bestQuote.volume)) ? Number(bestQuote.volume) : 0,
++				oi: bestOi,
++				oiChange: null,
++				iv: bestIv,
++				provider: bestQuoteProvider,
++				quoteTs: bestQuoteTs,
++				quoteAgeMin: bestQuoteAgeMin,
++				quality: bestQuality,
++				spreadPct: best.spreadPct,
++			},
++			localGreeks: bestLocalGreeks ? {
++				delta: bestLocalGreeks.delta,
++				gamma: bestLocalGreeks.gamma,
++				theta: bestLocalGreeks.theta,
++				vega: bestLocalGreeks.vega,
++				iv: bestLocalGreeks.iv,
++			} : { delta: null, gamma: null, theta: null, vega: null, iv: null },
++			providerGreeks: {
++				delta: Number.isFinite(Number(bestQuote.delta)) ? Number(bestQuote.delta) : null,
++				gamma: Number.isFinite(Number(bestQuote.gamma)) ? Number(bestQuote.gamma) : null,
++				theta: Number.isFinite(Number(bestQuote.theta)) ? Number(bestQuote.theta) : null,
++				vega: Number.isFinite(Number(bestQuote.vega)) ? Number(bestQuote.vega) : null,
++			},
++			candidateScoring: {
++				atmScore: best.atmScore,
++				expiryScore: best.expiryScore,
++				greeksScore: best.greeksScore,
++				totalScore: best.score,
++				rank: 1,
++				totalCandidates: candidates.length,
++			},
++			confidence: {
++				raw: bestRawConf,
++				decayed,
++				rate,
++				ageHours,
++				timingFactor,
++			},
++			sessionPhase: this.currentSessionPhase(asOf),
++			cycle: { startedAtMs: cycleStartedMs, latencyMs: Date.now() - cycleStartedMs, featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null },
++			features: [...featureMeta.values()],
++			dataWarnings,
++			rejected,
++			winnerSymbol: best.contract.symbol,
++			algoSource: 'option-candidate-rank-v1',
++			buildSha: process.env.BUILD_SHA || (process.env.npm_package_version ? `v${process.env.npm_package_version}` : ''),
++			sessionId: asOf.getTime().toString(),
++		};
++
++		const deltaMatch = best.reasons.join(' ').match(/delta (-?[\\d.]+)/);
++		const winnerSummary = journalCandidates.map((c) =>
++			c.symbol === best.contract.symbol ? { ...c, delta: deltaMatch ? Number(deltaMatch[1]) : null } : c,
++		);
++		this.journalDecision({
++			portfolioId,
++			asOf,
++			actionFamily: 'BUY',
++			winnerSymbol: best.contract.symbol,
++			algoSource: 'option-candidate-rank-v1',
++			candidates: winnerSummary,
++			rejected,
++			directionSummary,
++			reasons,
++			cycleMs: Date.now() - cycleStartedMs,
++			featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
++			features: [...featureMeta.values()],
++			dataWarnings,
++			snapshot: winnerSnapshot,
++		});
+ 
+ 		return [{

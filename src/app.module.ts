@@ -41,6 +41,7 @@ import { FnfTradingPageController } from './trading/fnf-trading-page.controller'
 import { OptionTradingPageController } from './trading/option-trading-page.controller';
 import { FnoMarketDataService } from './trading/fno-market-data.service';
 import { FnoMarketDataController } from './trading/fno-market-data.controller';
+import { FyersAuthController } from './trading/fyers-auth.controller';
 import { MarketDataInspectionController } from './trading/market-data-inspection.controller';
 import { MarketDataPageController } from './trading/market-data-page.controller';
 import { MarketDataInspectionService } from './trading/market-data-inspection.service';
@@ -116,7 +117,7 @@ import { AiModule } from './ai/ai.module';
 		AuthModule,
 		AiModule,
 	],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController,
+	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController, FyersAuthController,
 		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
 		AppFallbackController], // MUST stay last: serves dashboard.html for unmatched GETs
 	providers: [

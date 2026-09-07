@@ -11,10 +11,13 @@ import { FnfTradeReflection } from './fnf-trade-reflection.entity';
 import { FnfDecisionJournal } from './fnf-decision-journal.entity';
 import { FnfTradeReport } from './fnf-trade-report.entity';
 import { localGreeks } from './bsm-greeks';
+import { DecisionSnapshot } from './fnf-decision-snapshot';
 import { FnfOptionChainService } from './fnf-option-chain.service';
 import { OptionContract } from './option-chain-parser';
 import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto, SetDecayCalibrationDto } from './fnf-trading.dto';
 import { AstroMuhurtaService } from '../astro/astro-muhurta.service';
+
+export { DecisionSnapshot } from './fnf-decision-snapshot';
 
 /** Minimum score for a shubh muhurta window (same threshold as the engine). */
 const SHUBH_SCORE_MIN = Number(process.env.SHUBH_MIN_SCORE ?? 65);
@@ -552,6 +555,10 @@ export class FnfTradingService {
 		features?: JournalFeature[];
 		/** GATE 1 #8: data-side gaps observed during the cycle (validation failures = rejected). */
 		dataWarnings?: string[];
+		/** Decision unique ID (point-in-time, correlates snapshot/journal/AI). */
+		decisionId?: string;
+		/** Point-in-time decision snapshot for AI shadow path (no reconstruction). */
+		snapshot?: DecisionSnapshot;
 	}): void {
 		void (async () => {
 			try {
@@ -573,6 +580,8 @@ export class FnfTradingService {
 						algoSource: opts.algoSource,
 						buildSha: process.env.BUILD_SHA || (process.env.npm_package_version ? `v${process.env.npm_package_version}` : ''),
 						detailJson: JSON.stringify({
+						decisionId: opts.decisionId ?? null,
+						snapshot: opts.snapshot ? this.sanitizeSnapshot(opts.snapshot) : null,
 							direction: opts.directionSummary,
 							candidates: opts.candidates,
 							rejectedCount: opts.rejected.length,
@@ -897,6 +906,17 @@ export class FnfTradingService {
 
 	/** Map an option contract's underlying token to the index/underlying snapshot
 	 *  instrument used for direction + ATM determination. */
+
+/**
+ * Sanitize DecisionSnapshot for journal storage: remove circular refs, large blobs.
+ * This prepares the snapshot for JSON.stringify() without causing errors.
+ */
+private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = { ...snap };
+  // Remove any properties that could cause circular references or be unnecessarily large
+  // Currently we keep everything as DecisionSnapshot fields are shallow
+  return sanitized;
+}
 	private indexInstrumentFor(underlying: string): string | null {
 		const t = underlying.toUpperCase().replace(/[^A-Z0-9]/g, '');
 		if (t.startsWith('NIFTY50') || t === 'NIFTY') return 'NSE:NIFTY50-INDEX';
@@ -1266,7 +1286,40 @@ export class FnfTradingService {
 			directionSummary[u] = d?.dir ? `${d.dir} (conf ${d.conf})` : 'range/none';
 		}
 		if (!candidates.length) {
-			this.logger.debug(`candidate ranking: no eligible contract — ${rejected.length ? rejected.join('; ') : 'no directional candidates'}`);
+			// NO TRADE snapshot for deterministic decision trail
+			const noTradeSnapshot: DecisionSnapshot = {
+				decisionId: 'NO_TRADE_' + asOf.getTime().toString(),
+				asOf,
+				portfolioId: portfolio?.id ?? null,
+				portfolio: {
+					label: portfolio?.label || '',
+					capital: Number(portfolio?.capital ?? 0),
+					ceiling: Number(portfolio?.ceiling ?? 0),
+					deployed: Number(portfolio?.deployed ?? 0),
+					netPnl: Number(portfolio?.netPnl ?? 0),
+					headroom: (Number(portfolio?.capital ?? 0) + Number(portfolio?.netPnl ?? 0)) - Number(portfolio?.deployed ?? 0),
+					autoTradeEnabled: !!portfolio?.autoTradeEnabled,
+					fridayTradingEnabled: !!portfolio?.fridayTradingEnabled,
+				},
+				underlying: '',
+				direction: { dir: 'CE', reason: 'no candidates', conf: 0, spot: 0, sma20: 0, sma5: 0 },
+				optionContract: { symbol: '', underlying: '', strike: 0, expiry: '', optionType: 'CE' as 'CE', lotSize: 0 },
+				dte: 0,
+				actualQuote: { ltp: 0, bid: null, ask: null, mid: null, volume: 0, oi: 0, oiChange: null, iv: null, provider: 'none', quoteTs: asOf, quoteAgeMin: 0, quality: 'none', spreadPct: null },
+				localGreeks: { delta: null, gamma: null, theta: null, vega: null, iv: null },
+				providerGreeks: { delta: null, gamma: null, theta: null, vega: null },
+				candidateScoring: { atmScore: 0, expiryScore: 0, greeksScore: 0, totalScore: 0, rank: 0, totalCandidates: 0 },
+				confidence: { raw: 0, decayed: 0, rate: 0, ageHours: 0, timingFactor: 0 },
+				sessionPhase: this.currentSessionPhase(asOf),
+				cycle: { startedAtMs: cycleStartedMs, latencyMs: Date.now() - cycleStartedMs, featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null },
+				features: [...featureMeta.values()],
+				dataWarnings,
+				rejected,
+				winnerSymbol: '',
+				algoSource: 'option-candidate-rank-v1',
+				buildSha: process.env.BUILD_SHA || (process.env.npm_package_version ? `v${process.env.npm_package_version}` : ''),
+				sessionId: asOf.getTime().toString(),
+			};
 			this.journalDecision({
 				portfolioId,
 				asOf,
@@ -1279,6 +1332,7 @@ export class FnfTradingService {
 				featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
 				features: [...featureMeta.values()],
 				dataWarnings,
+				snapshot: noTradeSnapshot,
 			});
 			return [];
 		}
@@ -1294,6 +1348,104 @@ export class FnfTradingService {
 			asOf,
 		);
 		const premium = best.premium;
+		// BUY snapshot for deterministic decision trail
+		const bestExpiry = new Date(best.contract.expiry);
+		const dte = Math.round((bestExpiry.getTime() - asOf.getTime()) / 86_400_000);
+		const greeks = localGreeks(premium, {
+			spot: direction.get(bestUnderlying)?.spot ?? 0,
+			strike: Number(best.contract.strike),
+			years: dte / 365,
+			rate: 0.07,
+			q: 0,
+		}, best.contract.optionType.toUpperCase() as 'CE' | 'PE');
+		const winnerSymbol = best.contract.symbol;
+		const dirInfo = direction.get(bestUnderlying)!; // BUY case: winner underlying always has direction
+		const winnerSnapshot: DecisionSnapshot = {
+			decisionId: 'BUY_' + winnerSymbol + '_' + asOf.getTime().toString(),
+			asOf,
+			portfolioId: portfolio?.id ?? null,
+			portfolio: {
+				label: portfolio?.label || '',
+				capital: Number(portfolio?.capital ?? 0),
+				ceiling: Number(portfolio?.ceiling ?? 0),
+				deployed: Number(portfolio?.deployed ?? 0),
+				netPnl: Number(portfolio?.netPnl ?? 0),
+				headroom: (Number(portfolio?.capital ?? 0) + Number(portfolio?.netPnl ?? 0)) - Number(portfolio?.deployed ?? 0),
+				autoTradeEnabled: !!portfolio?.autoTradeEnabled,
+				fridayTradingEnabled: !!portfolio?.fridayTradingEnabled,
+			},
+			underlying: bestUnderlying,
+			direction: {
+				dir: dirInfo.dir!,
+				reason: dirInfo.reason,
+				conf: dirInfo.conf,
+				spot: dirInfo.spot,
+				sma20: (dirInfo as any).sma20,
+				sma5: (dirInfo as any).sma5,
+			},
+			optionContract: {
+				symbol: winnerSymbol,
+				underlying: bestUnderlying,
+				strike: Number(best.contract.strike),
+				expiry: best.contract.expiry,
+				optionType: best.contract.optionType.toUpperCase() as 'CE' | 'PE',
+				lotSize: best.contract.lotSize,
+			},
+			dte,
+			actualQuote: {
+				ltp: premium,
+				bid: best.quote.bid ? Number(best.quote.bid) : null,
+				ask: best.quote.ask ? Number(best.quote.ask) : null,
+				mid: (best.quote.bid && best.quote.ask) ? (Number(best.quote.bid) + Number(best.quote.ask)) / 2 : premium,
+				volume: best.quote.volume ? Number(best.quote.volume) : 0,
+				oi: best.quote.openInterest ? Number(best.quote.openInterest) : 0,
+				oiChange: null,
+				iv: best.quote.impliedVolatility ? Number(best.quote.impliedVolatility) : null,
+				provider: best.quote.provider || 'FNO',
+				quoteTs: new Date(best.quote.ts),
+				quoteAgeMin: 0,
+				quality: 'live',
+				spreadPct: null,
+			},
+			localGreeks: {
+				delta: greeks?.delta ?? null,
+				gamma: greeks?.gamma ?? null,
+				theta: greeks?.theta ?? null,
+				vega: greeks?.vega ?? null,
+				iv: greeks?.iv ?? null,
+			},
+			providerGreeks: {
+				delta: best.quote.delta ? Number(best.quote.delta) : null,
+				gamma: best.quote.gamma ? Number(best.quote.gamma) : null,
+				theta: best.quote.theta ? Number(best.quote.theta) : null,
+				vega: best.quote.vega ? Number(best.quote.vega) : null,
+			},
+			candidateScoring: {
+				atmScore: Number(best.atmScore),
+				expiryScore: Number(best.expiryScore),
+				greeksScore: Number(best.greeksScore),
+				totalScore: Number(best.score),
+				rank: 1,
+				totalCandidates: candidates.length,
+			},
+			confidence: {
+				raw: Math.round(bestRawConf),
+				decayed: Math.round(decayed),
+				rate,
+				ageHours,
+				timingFactor,
+			},
+			sessionPhase: this.currentSessionPhase(asOf),
+			cycle: { startedAtMs: cycleStartedMs, latencyMs: Date.now() - cycleStartedMs, featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null },
+			features: [...featureMeta.values()],
+			dataWarnings,
+			rejected,
+			winnerSymbol,
+			algoSource: 'option-candidate-rank-v1',
+			buildSha: process.env.BUILD_SHA || (process.env.npm_package_version ? `v${process.env.npm_package_version}` : ''),
+			sessionId: asOf.getTime().toString(),
+		};
+
 		const reasons = [...best.reasons];
 		reasons.push(`ranked #1 of ${candidates.length} affordable candidate(s) with score ${best.score.toFixed(1)}`);
 		if (candidates.length > 1) {
@@ -1339,6 +1491,7 @@ export class FnfTradingService {
 			featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
 			features: [...featureMeta.values()],
 			dataWarnings,
+			snapshot: winnerSnapshot,
 		});
 
 		return [{

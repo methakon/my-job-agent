@@ -12,6 +12,10 @@ export class FnfDecisionJournal {
 	@PrimaryGeneratedColumn('uuid')
 	id!: string;
 
+	/** decisionId from deterministic DecisionSnapshot (stable identity across snapshot/journal/AI). */
+	@Column({ type: 'varchar', length: 128, nullable: true })
+	decisionId!: string | null;
+
 	/** decision time (asOf of the cycle, IST-naive like market snapshots). */
 	@Column({ type: 'datetime' })
 	ts!: Date;

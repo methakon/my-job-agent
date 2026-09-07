@@ -72,7 +72,7 @@ export interface AiTradingInput {
    * Preserves point-in-time replay.
    */
   decisionTimestamp: string;
-
+  decisionId?: string;
   /**
    * Session phase: pre-open | open | post-close | holiday | closed
    */
