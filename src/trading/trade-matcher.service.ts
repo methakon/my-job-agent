@@ -42,13 +42,23 @@ export class TradeMatcherService {
     quoteCount: number;
     underlyingSnapshots: number;
   }> {
-    const matchResult = {
-      matchStatus: 'NO_MATCH' as const,
+    const matchResult: {
+      matchStatus: 'MATCHED_EXACT' | 'MATCHED_SYMBOL_TIME' | 'MATCHED_CONTRACT_TIME' | 'PARTIAL' | 'NO_MATCH';
+      matchMethod: string;
+      entryDataFound: boolean;
+      exitDataFound: boolean;
+      timeDifferenceMs: number | null;
+      dataCoverage: 'full' | 'partial' | 'minimal' | 'none';
+      tickCount: number;
+      quoteCount: number;
+      underlyingSnapshots: number;
+    } = {
+      matchStatus: 'NO_MATCH',
       matchMethod: 'none',
       entryDataFound: false,
       exitDataFound: false,
       timeDifferenceMs: null,
-      dataCoverage: 'none' as const,
+      dataCoverage: 'none',
       tickCount: 0,
       quoteCount: 0,
       underlyingSnapshots: 0,
@@ -125,13 +135,16 @@ export class TradeMatcherService {
     // Try symbol + time proximity (lower quality)
     if (trade.symbol || trade.instrumentKey) {
       const symbol = trade.symbol || trade.instrumentKey;
+      if (!symbol) {
+        return matchResult;
+      }
       const entryTick = await this.findTickByInstrument(symbol, trade.entryTimestamp, 300000); // 5 min window
       if (entryTick) {
         matchResult.entryDataFound = true;
         matchResult.tickCount = 1;
         matchResult.matchStatus = 'MATCHED_SYMBOL_TIME';
         matchResult.matchMethod = 'symbol_time';
-        matchResult.timeDifferenceMs = 300000; // Max window
+        matchResult.timeDifferenceMs = null;
       }
 
       if (matchResult.entryDataFound) {
@@ -267,7 +280,7 @@ export class TradeMatcherService {
       underlyingSnapshots: number;
     },
   ) {
-    trade.matchStatus = result.matchStatus as any;
+    trade.matchStatus = result.matchStatus;
     trade.matchMethod = result.matchMethod;
     await this.tradeBookRepo.save(trade);
   }

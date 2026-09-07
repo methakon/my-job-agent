@@ -26,6 +26,7 @@
     "astronomy-engine": "^2.1.19",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "csv-parse": "^7.0.2",
     "express-rate-limit": "^8.7.0",
     "express-session": "^1.19.0",
     "fyers-api-v3": "^2.1.0",

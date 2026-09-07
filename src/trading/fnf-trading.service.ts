@@ -1332,6 +1332,7 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 				featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
 				features: [...featureMeta.values()],
 				dataWarnings,
+				decisionId: noTradeSnapshot.decisionId,
 				snapshot: noTradeSnapshot,
 			});
 			return [];
@@ -1491,6 +1492,7 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 			featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
 			features: [...featureMeta.values()],
 			dataWarnings,
+			decisionId: winnerSnapshot.decisionId,
 			snapshot: winnerSnapshot,
 		});
 

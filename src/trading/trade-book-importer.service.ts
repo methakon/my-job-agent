@@ -67,7 +67,7 @@ export class TradeBookImporterService {
     let failedCount = 0;
 
     for (let i = 0; i < records.length; i++) {
-      const row = records[i];
+      const row = records[i] as Record<string, string>;
       const rowNumber = i + 2;
 
       try {
