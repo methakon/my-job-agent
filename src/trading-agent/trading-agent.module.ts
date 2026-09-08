@@ -8,6 +8,7 @@ import { FyersTokenService } from '../trading/fyers-token.service';
 import { FnfOptionChainService } from '../trading/fnf-option-chain.service';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FnoMarketDataService } from '../trading/fno-market-data.service';
+import { FyersToken } from '../trading/fyers-token.entity';
 import { MuhurtaWindow } from '../astro/muhurta-window.entity';
 import { FnfPortfolio } from '../trading/fnf-portfolio.entity';
 import { FnfTrade } from '../trading/fnf-trade.entity';
@@ -54,6 +55,7 @@ import { SessionDriverService } from './session-driver.service';
       FnfDecisionJournal,
       FnfTradeReport,
       SandboxTick,
+      FyersToken,
     ]),
   ],
   providers: [
