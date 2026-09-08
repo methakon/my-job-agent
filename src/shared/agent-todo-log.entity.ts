@@ -5,7 +5,7 @@ export class AgentTodoLog {
 	@ PrimaryGeneratedColumn()
 	id: number;
 
-	@Column({ type: 'varchar', length: 32, unique: true, nullable: true })
+	@Column({ type: 'varchar', length: 32, nullable: true })
 	todoId: string;
 
 	@Column({ type: 'varchar', length: 255 })

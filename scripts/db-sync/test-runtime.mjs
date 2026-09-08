@@ -33,7 +33,7 @@ async function testSync() {
     const syncService = app.get(DatabaseSyncService);
     
     // Check if trading hours
-    const configService = app.get(app.get('DatabaseSyncConfigService').constructor);
+    const configService = app.get('DatabaseSyncConfigService');
     const isTrading = configService.isTradingHours();
     console.log(`Trading hours check: ${isTrading}`);
     

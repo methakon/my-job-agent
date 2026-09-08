@@ -35,7 +35,7 @@ export const TABLE_OWNERSHIP: Record<string, 'ORACLE_AUTHORITATIVE' | 'LOCAL_AUT
 	side_income_opportunities: 'SHARED_APPEND_ONLY',
 	mail_accounts: 'SHARED_APPEND_ONLY',
 	apply_settings: 'SHARED_APPEND_ONLY',
-	agent_todo_log: 'EXCLUDED',
+	agent_todo_log: 'SHARED_APPEND_ONLY',
 	sessions: 'EXCLUDED',
 	typeorm_migrations: 'EXCLUDED',
 	database_sync_audit: 'EXCLUDED',
@@ -101,6 +101,14 @@ export class DatabaseSyncService {
 		return { tableName };
 	}
 
+	private transformRecordForSync(tableName: string, record: any): any {
+		// For agent_todo_log, convert empty todoId strings to null
+		if (tableName === 'agent_todo_log' && record.todoId === '') {
+			record.todoId = null;
+		}
+		return record;
+	}
+
 	private async syncTable(tableName: string, direction: SyncDirection): Promise<void> {
 		const batchSize = this.config.getConfig().batchSize;
 		const checkpoint = await this.getCheckpoint(tableName);
@@ -138,7 +146,8 @@ export class DatabaseSyncService {
 
 		for (const record of records) {
 			try {
-				const idVal = record[idField];
+				const transformed = this.transformRecordForSync(tableName, { ...record });
+				const idVal = transformed[idField];
 				const existing = await destRepo.findOne({ where: { [idField]: idVal } });
 
 				if (existing) {
@@ -155,11 +164,11 @@ export class DatabaseSyncService {
 						rowsSkipped++;
 						continue;
 					}
-					Object.assign(existing, record);
+					Object.assign(existing, transformed);
 					await destRepo.save(existing);
 					rowsUpdated++;
 				} else {
-					await destRepo.save(record);
+					await destRepo.save(transformed);
 					rowsInserted++;
 				}
 				checkpoint.lastId = idVal;
