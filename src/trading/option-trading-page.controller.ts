@@ -1,7 +1,8 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { DECAY_DEFAULTS, FnfTradingService, WEEKDAY_NAMES } from './fnf-trading.service';
 import { FnoMarketDataService } from './fno-market-data.service';
+import { FyersTokenService } from './fyers-token.service';
 
 const esc = (s: unknown): string =>
   String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -25,10 +26,18 @@ const badge = (label: string, cls: string): string => `<span class="badge ${cls}
  */
 @Controller('option-trading')
 export class OptionTradingPageController {
-  constructor(private readonly trading: FnfTradingService, private readonly feed: FnoMarketDataService) {}
+  constructor(
+    private readonly trading: FnfTradingService,
+    private readonly feed: FnoMarketDataService,
+    private readonly fyersTokens: FyersTokenService,
+  ) {}
 
   @Get()
-  async page(@Res() res: Response) {
+  async page(
+    @Res() res: Response,
+    @Query('fyers') fyers: string | undefined,
+    @Query('reason') reason: string | undefined,
+  ) {
     const [portfolios, trades, market, signals, learning, astro, calibrations, journal] = await Promise.all([
       this.trading.listPortfolios(),
       this.trading.listTrades(undefined, 200),
@@ -49,6 +58,47 @@ export class OptionTradingPageController {
     const capPct = portfolio && Number(portfolio.ceiling || portfolio.capital)
       ? Math.round((Number(portfolio.deployed) / Number(portfolio.ceiling || portfolio.capital)) * 100)
       : 0;
+
+    // ── FYERS token card (market-data source for this desk) ──
+    const fyersBanner = fyers === 'ok'
+      ? '<div class="banner ok">✅ FYERS login successful — token stored in the database. The FYERS feed reconnects automatically (≤ 1 min, no restart needed).</div>'
+      : fyers === 'error'
+        ? `<div class="banner bad">⚠️ FYERS login failed — ${esc(reason ?? 'unknown reason')}. Click <b>GET THE TOKEN</b> to try again (login link is valid for 5 minutes).</div>`
+        : '';
+    const tokenInfo = await this.fyersTokens.getActiveTokenInfo();
+    const fmtIst = (d: Date | null): string =>
+      d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+    const tokenExpired = !!tokenInfo?.expiresAt && tokenInfo.expiresAt.getTime() < Date.now();
+    const [tokenCls, tokenLabel] = !tokenInfo
+      ? ['warn', 'NO TOKEN — click GET THE TOKEN below']
+      : tokenExpired
+        ? ['bad', 'EXPIRED — click GET THE TOKEN below']
+        : ['ok', 'ACTIVE (stored in DB, encrypted)'];
+    let feedCls = 'dim';
+    let feedLabel = 'not enabled';
+    if (feedStatus.enabled) {
+      if (feedStatus.connected && !feedStatus.fallbackActive) {
+        feedCls = 'ok';
+        feedLabel = `FYERS WebSocket connected (${feedStatus.subscribedSymbols.length} symbols)`;
+      } else if (feedStatus.fallbackActive) {
+        feedCls = 'warn';
+        feedLabel = 'Yahoo fallback active — reconnects to FYERS ≤ 1 min after a fresh login';
+      } else {
+        feedCls = 'warn';
+        feedLabel = feedStatus.lastMessage ?? feedStatus.provider;
+      }
+    }
+    const fyersCard = `
+<div class="card token-card">
+  <div class="card-title">🔑 FYERS token — market-data source for this desk</div>
+  <div class="kv">
+    <div><span>Stored token</span><b class="${tokenCls}">${tokenLabel}</b></div>
+    <div><span>Expires (IST)</span><b>${fmtIst(tokenInfo?.expiresAt ?? null)}</b></div>
+    <div><span>Live feed</span><b class="${feedCls}">${feedLabel}</b></div>
+  </div>
+  <p style="margin:12px 0 2px"><a class="btn" href="/auth/fyers/login">🔑 GET THE TOKEN — log in at FYERS</a></p>
+  <div class="hint">Opens FYERS in this tab (FY ID + password + TOTP + PIN — typed only into FYERS, never stored by this app). On success FYERS returns you here: the token is saved in the database (single row, encrypted) and the FYERS feed reconnects automatically. No .env edits, no restart.</div>
+</div>`;
 
     const portfolioHtml = portfolio
       ? `<div class="grid2">
@@ -127,8 +177,16 @@ export class OptionTradingPageController {
 <style>
 :root{--bg:#0f1115;--card:#1a1d24;--line:#2a2e38;--fg:#e8eaed;--dim:#9aa0aa;--ok:#3fb96f;--warn:#e0a83c;--bad:#e05c5c;--accent:#8d78ff}
 *{box-sizing:border-box}body{background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,sans-serif;padding:24px;max-width:1280px;margin:auto}a{color:var(--accent)}h1{font-size:24px;margin:0}.masthead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px}.meta,.hint,.dim{color:var(--dim)}.meta{font-size:13px}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}.card-title{font-size:14px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:900px){.grid2{grid-template-columns:1fr}}.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px}.kv>div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed var(--line);padding:4px 0}.kv span{color:var(--dim)}table{border-collapse:collapse;width:100%;margin:6px 0 10px;font-size:13px}td,th{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}th{background:var(--card);color:var(--dim);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em}.mini{max-width:600px}.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.small{font-size:12px}.badge{font-size:11px;padding:2px 9px;border-radius:99px;background:var(--line);color:var(--dim);display:inline-block;margin:2px 3px 2px 0}.badge.ok{background:rgba(63,185,111,.18);color:var(--ok)}.badge.warn{background:rgba(224,168,60,.18);color:var(--warn)}.today td{background:rgba(141,120,255,.1)}.empty{border:1px dashed var(--line);border-radius:10px;padding:20px;text-align:center;color:var(--dim)}code{font:12px/1.5 ui-monospace,monospace;color:var(--warn);background:rgba(224,168,60,.1);padding:1px 4px;border-radius:4px}.hero{border-color:rgba(141,120,255,.55);background:linear-gradient(135deg,rgba(141,120,255,.12),var(--card) 48%)}.notice{border-left:4px solid var(--ok);padding:10px 12px;background:rgba(63,185,111,.1);margin:10px 0}.formgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}@media(max-width:900px){.formgrid{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.formgrid{grid-template-columns:1fr}}label{display:grid;gap:4px;color:var(--dim);font-size:12px}input,select{width:100%;background:#11141a;color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:8px;font:inherit}button{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:9px 14px;font-weight:600;cursor:pointer}.result{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:8px;min-height:44px}.footer{margin-top:24px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+.btn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:600}
+.btn:hover{filter:brightness(1.1)}
+.banner{padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px}
+.banner.ok{background:rgba(63,185,111,.14);border:1px solid var(--ok);color:var(--ok)}
+.banner.bad{background:rgba(224,92,92,.14);border:1px solid var(--bad);color:var(--bad)}
+.token-card{border-color:rgba(141,120,255,.4)}
 </style></head><body>
 <div class="masthead"><div><h1>🟣 F&amp;O Options Trading</h1><div class="meta">Dedicated option desk · shared FNF/F&amp;O risk envelope · decay-adjusted signals · astro timing · learning and P&amp;L</div></div><div class="meta">Paper-only · API <code>/trading/...</code> · <a href="/docs">Swagger</a></div></div>
+${fyersBanner}
+${fyersCard}
 <section class="card hero"><div class="card-title">🛑 Safety boundary · live market input</div><div class="notice"><b>REAL MARKET DATA IN → SIMULATED PLAN OUT.</b> ${feedStatus.provider === 'yahoo' ? 'Yahoo Finance chart polling' : 'FYERS market-data WebSocket'}: <b id="feedState" class="${feedStatus.connected ? 'ok' : 'warn'}">${feedStatus.connected ? 'CONNECTED' : 'NOT CONNECTED'}</b> · <span id="feedTicks">${feedStatus.ticksReceived}</span> tick(s) received · <a href="/trading/market-feed/status">feed status JSON</a></div><div class="hint">Subscribed symbols: ${feedStatus.subscribedSymbols.map((symbol) => `<code>${esc(symbol)}</code>`).join(' ') || 'none'}. This page has no live broker order path. Nothing here submits an order or changes the trade ledger.</div><div class="hint">Option execution remains disabled until the contract, chain, Greeks, margin, and paper-fill adapters are validated. <span id="feedMessage">${feedStatus.lastError ? `Feed error: ${esc(feedStatus.lastError)}` : esc(feedStatus.lastMessage ?? '')}</span></div></section>
 ${portfolioHtml}
 <section class="card"><div class="card-title">🧮 Option contract planner — local calculation only</div><div class="formgrid"><label>Underlying<select id="underlying"><option>NIFTY</option><option>SENSEX</option><option>BANKNIFTY</option></select></label><label>Expiry<input id="expiry" type="date"></label><label>Strike<input id="strike" type="number" min="0" step="0.05" placeholder="e.g. 25000"></label><label>Type<select id="optionType"><option>CE</option><option>PE</option></select></label><label>Action<select id="action"><option>BUY</option><option>SELL</option></select></label><label>Premium (₹)<input id="premium" type="number" min="0" step="0.05" placeholder="0.00"></label><label>Lot size<input id="lotSize" type="number" min="1" step="1" value="1"></label><label>Lots<input id="lots" type="number" min="1" step="1" value="1"></label></div><div style="margin-top:14px"><button id="planButton" type="button">Calculate paper plan</button></div><div id="planResult" class="result dim">Enter contract details. This calculation never sends an order.</div></section>
