@@ -184,12 +184,12 @@ export class FyersOAuthController {
         stateData.redirectUri,
       );
 
-      // Store encrypted tokens
+      // Store encrypted tokens (single active row — updated in place)
       await this.fyersTokenService.storeTokens(
         exchangeResult.access_token,
         exchangeResult.refresh_token || null,
         exchangeResult.fyId || null,
-        code,
+        authCodeValue,
       );
 
       this.logger.log('Tokens stored successfully');

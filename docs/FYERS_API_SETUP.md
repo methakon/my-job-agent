@@ -35,15 +35,42 @@ the old `myapi.fyers.in/api/oauth/*` endpoints no longer apply).
    `invalid app id hash` code -5 on v3). APP_ID must be the FULL id WITH suffix
    (TQHWHBA2SZ-200); the suffix-less form fails. Verified 2026-09-03.
 
-   Response: { "s": "ok", "access_token": "..." } → store in `FYERS_ACCESS_TOKEN`.
+   Response: { "s": "ok", "access_token": "...", "refresh_token": "...", "fy_id": "..." }
 
-## 2. Credentials in .env (both hosts)
+   In this repo you never handle the response manually: the app does the whole
+   exchange for you.
+
+## 2. Token storage — DATABASE, not .env (single-row model)
+
+**User rule (2026-09-08): no new token is stored in the database; the OAuth
+callback reads the `auth_code` URL parameter, exchanges it, and stores the
+result ONCE; every runtime consumer then reads the token from the database.**
+
+- **Intake**: GET `https://berhampore.in/auth/fyers/login` (or
+  `/trading/fyers/auth-url`) → user logs in at FYERS → FYERS redirects to
+  `/auth/fyers/callback?auth_code=...&state=...` → the callback validates
+  state, exchanges the `auth_code`, and stores access+refresh tokens
+  ENCRYPTED (AES-256-CBC under `ENCRYPTION_KEY`) in `fyers_tokens`.
+- **Single row**: the row is INSERTED on the first-ever login; every later
+  login/refresh UPDATES that same active row in place — the table never
+  accumulates new token rows.
+- **Consumers**: `FnoMarketDataService` (live feed) and
+  `scripts/fetch-fyers-history.ts` read the token from the DB via
+  `FyersTokenService.getActiveAccessToken()`; `.env` `FYERS_ACCESS_TOKEN` is
+  only a fallback for hosts that have never completed a callback login.
+- **Manual exchange**: `GET /trading/fyers/exchange-token?auth_code=...` also
+  stores into the same single DB row (no raw tokens in the response).
+- **Refresh**: `GET /trading/fyers/refresh-token` refreshes using the DB
+  refresh token (requires `FYERS_PIN` in `.env`; PIN is never stored in DB).
+
+## 3. Credentials in .env (both hosts)
 
 ```
 FYERS_APP_ID=TQHWHBA2SZ-200
 FYERS_APP_SECRET=<from console — full value, base64-ish, ~24+ chars>
 FYERS_REDIRECT_URI=https://berhampore.in/auth/fyers/callback
-FYERS_ACCESS_TOKEN=<empty until exchange runs>
+# FYERS_ACCESS_TOKEN / FYERS_REFRESH_TOKEN are LEGACY fallbacks only — after
+# one /auth/fyers/login the tokens live in fyers_tokens and .env is not read.
 FNO_MARKET_DATA_PROVIDER=fyers        # fyers primary; yahoo only fallback
 ```
 
@@ -51,7 +78,7 @@ FNO_MARKET_DATA_PROVIDER=fyers        # fyers primary; yahoo only fallback
 secret is a runtime credential that must never be pasted into chat or commit
 messages; write it via masked python/ssh only.
 
-## 3. Data endpoints (v3)
+## 4. Data endpoints (v3)
 
 - History (used by scripts/fetch-fyers-history.ts):
   POST https://api-t1.fyers.in/data/v3/history
@@ -67,7 +94,7 @@ messages; write it via masked python/ssh only.
   execution stays in the internal paper ledger (session driver, qty 1,
   ₹10L sandbox portfolio, +2%/−1% bracket, decay self-learning).
 
-## 4. Troubleshooting
+## 5. Troubleshooting
 
 - `invalid app id hash` on validate-authcode → appIdHash must be SHA-256 hex of
   `FULL_APP_ID_WITH_SUFFIX:SECRET` (base64 fails with code -5). If still failing
@@ -82,7 +109,7 @@ messages; write it via masked python/ssh only.
 - Static IP → required only for real order placement; paper/data access needs
   no static-IP registration.
 
-## 5. Deploy/restart reminder
+## 6. Deploy/restart reminder
 
 Any `.env` or code change ⇒ `pm2 restart trading-agent` on Dhargent AND
 `pm2 restart my-job-agent` at home. Env vars are read at process start only.

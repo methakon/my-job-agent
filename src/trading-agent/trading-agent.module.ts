@@ -3,6 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { mysqlConfig } from '../shared/db.config';
 import { AstroMuhurtaService } from '../astro/astro-muhurta.service';
+import { EncryptionService } from '../auth/encryption.service';
+import { FyersTokenService } from '../trading/fyers-token.service';
 import { FnfOptionChainService } from '../trading/fnf-option-chain.service';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FnoMarketDataService } from '../trading/fno-market-data.service';
@@ -62,6 +64,10 @@ import { SessionDriverService } from './session-driver.service';
     SessionDriverService,
     UpstoxSandboxProvider,
     UpstoxSandboxIngestionService,
+    // FYERS token DB store (FnoMarketDataService reads its access token from
+    // the single fyers_tokens row written by the OAuth callback — not .env).
+    FyersTokenService,
+    EncryptionService,
   ],
 })
 export class TradingAgentModule {}

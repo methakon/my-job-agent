@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { FnfTradingService } from './fnf-trading.service';
 import { parseYahooChartResponse, parseYahooSymbolConfig, YahooSymbolConfig } from './yahoo-finance-parser';
 import { FnfOptionChainService } from './fnf-option-chain.service';
+import { FyersTokenService } from './fyers-token.service';
 import { OptionContract } from './option-chain-parser';
 import { shouldAcceptTick } from './market-feed-guard';
 
@@ -88,7 +89,11 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private readonly optionContracts: Map<string, OptionContract>;
   private destroyed = false;
 
-  constructor(private readonly trading: FnfTradingService, private readonly optionChain: FnfOptionChainService) {
+  constructor(
+    private readonly trading: FnfTradingService,
+    private readonly optionChain: FnfOptionChainService,
+    private readonly fyersTokens: FyersTokenService,
+  ) {
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
       .split(',')
       .map((s) => s.trim())
@@ -176,7 +181,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
     // Register option contracts first (works even when the feed is disabled —
     // the engine needs the tradable universe regardless of live streaming).
     const optionSymbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? '')
@@ -209,10 +214,16 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
     // Requested provider = fyers: FYERS socket is primary. Yahoo is NOT polled
     // unless/until FYERS is unavailable (missing credentials, socket error/close).
+    // Token source = DATABASE first (single row written by the OAuth callback);
+    // .env FYERS_ACCESS_TOKEN is only a fallback for boxes that have never
+    // completed a callback login.
     const appId = process.env.FYERS_APP_ID?.trim();
-    const accessToken = process.env.FYERS_ACCESS_TOKEN?.trim();
+    const dbToken = await this.fyersTokens.getActiveAccessToken();
+    const accessToken = (dbToken ?? process.env.FYERS_ACCESS_TOKEN)?.trim() ?? null;
     if (!appId || !accessToken) {
-      this.startYahooFallback('FYERS credentials missing (FYERS_APP_ID/FYERS_ACCESS_TOKEN)');
+      this.startYahooFallback(
+        'FYERS credentials missing (FYERS_APP_ID env and no active token row in DB; login via /auth/fyers/login)',
+      );
       return;
     }
 

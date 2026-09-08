@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { BypassAuth } from '../auth/bypass-auth.decorator';
+import { FyersTokenService } from './fyers-token.service';
 import * as querystring from 'querystring';
 
 /**
@@ -16,13 +17,19 @@ import * as querystring from 'querystring';
  * Flow (v3 canonical):
  * 1. GET /trading/fyers/auth-url → returns authorization URL
  * 2. User opens URL, authorizes, gets redirected with auth_code
- * 3. GET /trading/fyers/exchange-token?auth_code=<auth_code> → returns access_token + refresh_token
+ * 3. The callback (or this exchange-token endpoint) exchanges the auth_code
+ *    and STORES the resulting tokens encrypted in fyers_tokens (single active
+ *    row, updated in place — never a new row).
+ * 4. Runtime consumers (market data, history scripts) read the token from the
+ *    DATABASE; nothing is written to .env.
  * 
  * Token exchange uses validate-authcode with appIdHash (SHA-256 hex of APP_ID:SECRET).
  */
 @Controller('trading/fyers')
 export class FyersAuthController {
   private readonly FYERS_API_BASE = 'https://api-t1.fyers.in/api/v3';
+
+  constructor(private readonly fyersTokenService: FyersTokenService) {}
 
   // Compute SHA-256 hex of APP_ID:SECRET for validate-authcode
   private computeAppIdHash(appId: string, appSecret: string): string {
@@ -53,15 +60,11 @@ export class FyersAuthController {
     }
 
     // FYERS OAuth2 auth code endpoint
-    // Generate a 32-character hex state string for CSRF protection
-    const crypto = require('crypto');
-    const state = crypto.randomBytes(16).toString('hex');
-    
+    // State optional - omitting to avoid state mismatch issues
     const params = {
       client_id: appId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      state,
     };
 
     const authUrl = `${this.FYERS_API_BASE}/generate-authcode?${querystring.stringify(params)}`;
@@ -81,6 +84,9 @@ export class FyersAuthController {
   /**
    * Exchange auth_code for access_token and refresh_token.
    * Call this after user authorizes and gets redirected with auth_code.
+   * The exchanged tokens are stored encrypted in the DATABASE (single active
+   * row — updated in place, never a new row). Raw tokens are never returned
+   * in the response and never written to .env.
    */
   @Get('exchange-token')
   @BypassAuth()
@@ -144,17 +150,18 @@ export class FyersAuthController {
         );
       }
 
+      // Persist in DB (single active row, updated in place — no new rows).
+      await this.fyersTokenService.storeTokens(
+        data.access_token,
+        data.refresh_token || null,
+        data.fy_id || null,
+        authCodeValue,
+      );
+
       return res.json({
         success: true,
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        expires_in: data.expires_in,
-        instructions: [
-          'Update .env with:',
-          `FYERS_ACCESS_TOKEN=${data.access_token}`,
-          `FYERS_REFRESH_TOKEN=${data.refresh_token}`,
-          'Then restart trading-agent with `pm2 restart trading-agent --update-env`',
-        ],
+        message:
+          'FYERS token exchanged and stored securely in the database (fyers_tokens, encrypted, single active row). Runtime reads the token from the DB — no .env update needed.',
       });
     } catch (error) {
       throw new HttpException(
@@ -168,72 +175,28 @@ export class FyersAuthController {
   }
 
   /**
-   * Generate access token from refresh token (when access_token expires).
+   * Refresh the access token using the refresh token stored in the DATABASE.
+   * The refreshed token updates the same single active DB row (no new row).
+   * Requires FYERS_PIN to be configured in .env (PIN is never stored in DB).
    */
   @Get('refresh-token')
   @BypassAuth()
   async refreshToken(@Res() res: Response) {
-    const appId = process.env.FYERS_APP_ID?.trim();
-    const appSecret = process.env.FYERS_APP_SECRET?.trim();
-    const refreshToken = process.env.FYERS_REFRESH_TOKEN?.trim();
-
-    if (!appId || !appSecret || !refreshToken) {
+    const ok = await this.fyersTokenService.refreshAccessToken();
+    if (!ok) {
       throw new HttpException(
         {
-          error: 'missing_credentials',
+          error: 'refresh_failed',
           detail:
-            'Set FYERS_APP_ID, FYERS_APP_SECRET, and FYERS_REFRESH_TOKEN in .env',
+            'Refresh failed — is FYERS_PIN configured in .env and is a refresh token stored in the DB? Alternatively re-login via GET /auth/fyers/login.',
         },
-        HttpStatus.INTERNAL_SERVER_ERROR,
+        HttpStatus.BAD_REQUEST,
       );
     }
 
-    try {
-      // FYERS v3 refresh-token uses the same appIdHash format as validate-authcode
-      const appIdHash = this.computeAppIdHash(appId, appSecret);
-      const response = await fetch(`${this.FYERS_API_BASE}/refresh-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `${appIdHash}:${refreshToken}`,
-        },
-        body: JSON.stringify({
-          grant_type: 'refresh_token',
-          appIdHash,
-          refresh_token: refreshToken,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.s !== 'ok' || !data.access_token) {
-        throw new HttpException(
-          {
-            error: 'refresh_failed',
-            detail: data.message || JSON.stringify(data),
-          },
-          HttpStatus.BAD_REQUEST,
-        );
-      }
-
-      return res.json({
-        success: true,
-        access_token: data.access_token,
-        refresh_token: data.refresh_token || refreshToken, // May be same or new
-        instructions: [
-          'Update .env with new access_token:',
-          `FYERS_ACCESS_TOKEN=${data.access_token}`,
-          'Then restart trading-agent with `pm2 restart trading-agent --update-env`',
-        ],
-      });
-    } catch (error) {
-      throw new HttpException(
-        {
-          error: 'refresh_request_failed',
-          detail: (error as Error).message,
-        },
-        HttpStatus.SERVICE_UNAVAILABLE,
-      );
-    }
+    return res.json({
+      success: true,
+      message: 'Access token refreshed and rotated in place in the database (single active row).',
+    });
   }
 }

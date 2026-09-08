@@ -17,17 +17,13 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { TradingAgentModule } from '../src/trading-agent/trading-agent.module';
 import { FnfTradingService } from '../src/trading/fnf-trading.service';
+import { FyersTokenService } from '../src/trading/fyers-token.service';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const IST_OFFSET_S = 5 * 3600 + 30 * 60; // +05:30
 
 async function main(): Promise<void> {
   const appId = process.env.FYERS_APP_ID?.trim() ?? '';
-  const token = process.env.FYERS_ACCESS_TOKEN?.trim() ?? '';
-  if (!appId || !token) {
-    console.error('[fyers-history] FYERS_ACCESS_TOKEN missing — exchange an auth code first (see FYERS_API_SETUP.md).');
-    process.exit(2);
-  }
   const symbols = (process.env.FYERS_HIST_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,BSE:SENSEX-INDEX')
     .split(',').map((s) => s.trim()).filter(Boolean);
   const res = process.env.FYERS_HIST_RES ?? '5';
@@ -35,6 +31,14 @@ async function main(): Promise<void> {
 
   const app = await NestFactory.createApplicationContext(TradingAgentModule, { logger: ['error', 'warn'] });
   const trading = app.get(FnfTradingService);
+  // Token source: DATABASE (single row written by the OAuth callback), with
+  // .env FYERS_ACCESS_TOKEN only as a fallback.
+  const fyersTokens = app.get(FyersTokenService);
+  const token = (await fyersTokens.getActiveAccessToken()) ?? process.env.FYERS_ACCESS_TOKEN?.trim() ?? '';
+  if (!appId || !token) {
+    console.error('[fyers-history] No active FYERS token — login via GET /auth/fyers/login first (token is stored in the DB, not .env).');
+    process.exit(2);
+  }
 
   // day boundary of "today" in IST, as UTC epoch seconds
   const now = Math.floor(Date.now() / 1000);

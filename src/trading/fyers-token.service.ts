@@ -11,8 +11,13 @@ import { ConfigType } from '@nestjs/config';
  * 
  * Design principles:
  * - Tokens encrypted with EncryptionService (AES-256-CBC under ENCRYPTION_KEY)
- * - Historical tokens retained for audit (never deleted, only status='revoked')
- * - Only one active token at a time
+ * - SINGLE-ROW token model: one active row, created on the first OAuth
+ *   callback login and UPDATED IN PLACE on every re-login/refresh — no new
+ *   token rows are ever added to the database.
+ * - The OAuth callback is the only token intake: it reads auth_code from the
+ *   URL parameter, exchanges it, and stores the result here once.
+ * - Runtime consumers (market data, scripts) read the token from this DB
+ *   store, never from freshly-minted tokens or repeated inserts.
  * - Expiry inferred from FYERS v3 doc (market close next business day)
  * - PIN NEVER stored; manual entry required for refresh
  * - PIN must be provided at refresh time; not persisted in DB
@@ -65,8 +70,14 @@ export class FyersTokenService {
   }
 
   /**
-   * Store new tokens after successful OAuth exchange.
-   * 
+   * Store tokens after successful OAuth exchange.
+   *
+   * Single-row semantics (user rule: "no new token should be stored in the
+   * database"):
+   * - If an active row already exists, it is UPDATED in place with the new
+   *   encrypted tokens — the row count never grows on re-login or rotation.
+   * - A row is INSERTED only on the very first login (no active row yet).
+   *
    * @param accessToken - Raw access token from FYERS
    * @param refreshToken - Raw refresh token from FYERS (nullable)
    * @param userId - FYERS user ID (FY ID) for audit
@@ -86,17 +97,32 @@ export class FyersTokenService {
     const accessTokenEncrypted = this.encryption.encrypt(accessToken);
     const refreshTokenEncrypted = refreshToken ? this.encryption.encrypt(refreshToken) : null;
 
-    // Mark all existing active tokens as replaced
-    await this.repo.update(
-      { status: 'active' },
-      {
-        status: 'revoked',
-        statusReason: 'replaced_by_new_tokens',
-        revokedAt: new Date(),
-      },
-    );
+    // Reuse the existing active row if present (single-row model — no new rows).
+    const existing = await this.repo.findOne({ where: { status: 'active' } });
+    if (existing) {
+      // Collapse any stray duplicate active rows (idempotent safety net).
+      await this.repo.update(
+        { status: 'active', id: Not(existing.id) },
+        {
+          status: 'revoked',
+          statusReason: 'superseded_single_active_row',
+          revokedAt: new Date(),
+        },
+      );
 
-    // Create new active token
+      existing.accessTokenEncrypted = accessTokenEncrypted;
+      existing.refreshTokenEncrypted = refreshTokenEncrypted;
+      existing.appId = this.appId || existing.appId;
+      if (userId) existing.userId = userId;
+      if (authCodeHash) existing.authCodeHash = authCodeHash;
+      existing.status = 'active';
+      existing.statusReason = null;
+      existing.revokedAt = null;
+      existing.expiresAt = null;
+      return this.repo.save(existing);
+    }
+
+    // No active row yet — very first login: create the single token row.
     const token = this.repo.create({
       provider: 'fyers',
       appId: this.appId || 'unknown',
