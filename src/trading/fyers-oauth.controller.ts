@@ -20,7 +20,7 @@ import * as querystring from 'querystring';
  * 1. Browser calls GET /auth/fyers/login
  * 2. Server generates secure random state, stores it with expiration
  * 3. Browser redirected to FYERS auth URL
- * 4. FYERS redirects back to /auth/fyers/callback?code=...&state=...
+ * 4. FYERS redirects back to /auth/fyers/callback?auth_code=...&state=...
  * 5. Server validates state, exchanges auth_code, stores encrypted tokens
  * 6. Browser redirected to success/failure UI
  * 
@@ -108,16 +108,21 @@ export class FyersOAuthController {
   @Get('callback')
   @BypassAuth()
   async callback(
+    @Query('auth_code') authCode: string | undefined,
     @Query('code') code: string | undefined,
     @Query('state') state: string | undefined,
     @Res() res: Response,
   ) {
+    // FYERS v3 redirects with auth_code (NOT code). code is accepted as a
+    // fallback alias only for manually-constructed test URLs.
+    const authCodeValue = authCode || code;
+
     // Validate required parameters
-    if (!code || !state) {
-      this.logger.warn('Missing code or state in callback');
+    if (!authCodeValue || !state) {
+      this.logger.warn('Missing auth_code or state in callback');
       return res.redirect(
         '/auth/fyers/error?error=missing_params&detail=' +
-          encodeURIComponent('Both code and state are required'),
+          encodeURIComponent('Both auth_code and state are required'),
       );
     }
 
@@ -172,7 +177,7 @@ export class FyersOAuthController {
     try {
       const appIdHash = this.computeAppIdHash(stateData.appId, stateData.appSecret);
       const exchangeResult = await this.exchangeAuthCode(
-        code,
+        authCodeValue,
         appIdHash,
         stateData.appId,
         stateData.appSecret,

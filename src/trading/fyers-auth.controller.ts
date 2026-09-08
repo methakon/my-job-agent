@@ -16,7 +16,7 @@ import * as querystring from 'querystring';
  * Flow (v3 canonical):
  * 1. GET /trading/fyers/auth-url → returns authorization URL
  * 2. User opens URL, authorizes, gets redirected with auth_code
- * 3. GET /trading/fyers/exchange-token?code=<auth_code> → returns access_token + refresh_token
+ * 3. GET /trading/fyers/exchange-token?auth_code=<auth_code> → returns access_token + refresh_token
  * 
  * Token exchange uses validate-authcode with appIdHash (SHA-256 hex of APP_ID:SECRET).
  */
@@ -53,11 +53,15 @@ export class FyersAuthController {
     }
 
     // FYERS OAuth2 auth code endpoint
+    // Generate a 32-character hex state string for CSRF protection
+    const crypto = require('crypto');
+    const state = crypto.randomBytes(16).toString('hex');
+    
     const params = {
       client_id: appId,
       redirect_uri: redirectUri,
       response_type: 'code',
-      state: 'my-job-agent-auth', // Can be any string for CSRF protection
+      state,
     };
 
     const authUrl = `${this.FYERS_API_BASE}/generate-authcode?${querystring.stringify(params)}`;
@@ -69,7 +73,7 @@ export class FyersAuthController {
         '2. Login with your FYERS credentials',
         '3. Authorize the app',
         '4. You will be redirected to your redirect_uri with ?auth_code=...',
-        '5. Copy the full redirected URL and call /exchange-token with the code parameter',
+        '5. Copy the full redirected URL and call /exchange-token with the auth_code parameter',
       ],
     });
   }
@@ -80,10 +84,20 @@ export class FyersAuthController {
    */
   @Get('exchange-token')
   @BypassAuth()
-  async exchangeToken(@Query('code') code: string, @Res() res: Response) {
-    if (!code) {
+  async exchangeToken(
+    @Query('auth_code') authCode: string | undefined,
+    @Query('code') code: string | undefined,
+    @Res() res: Response,
+  ) {
+    // FYERS v3 redirects with auth_code (NOT code); code is kept as a fallback
+    // alias for manually-constructed test URLs.
+    const authCodeValue = authCode || code;
+    if (!authCodeValue) {
       throw new HttpException(
-        { error: 'missing_code', detail: 'Query param ?code=<auth_code> required' },
+        {
+          error: 'missing_code',
+          detail: 'Query param ?auth_code=<code from FYERS redirect> required',
+        },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -114,7 +128,7 @@ export class FyersAuthController {
         body: JSON.stringify({
           grant_type: 'authorization_code',
           appIdHash,
-          code,
+          code: authCodeValue,
         }),
       });
 
