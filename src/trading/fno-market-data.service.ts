@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { FnfTradingService } from './fnf-trading.service';
 import { parseYahooChartResponse, parseYahooSymbolConfig, YahooSymbolConfig } from './yahoo-finance-parser';
 import { FnfOptionChainService } from './fnf-option-chain.service';
@@ -88,6 +89,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private readonly yahooTimeoutMs: number;
   private readonly optionContracts: Map<string, OptionContract>;
   private destroyed = false;
+  private readonly fyersRetryMs: number;
+  private fyersRetryTimer: ReturnType<typeof setInterval> | null = null;
+  private connectedTokenHash: string | null = null;
 
   constructor(
     private readonly trading: FnfTradingService,
@@ -107,6 +111,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     );
     this.yahooPollMs = Math.max(5_000, Number(process.env.YAHOO_FINANCE_POLL_MS ?? 15_000));
     this.yahooTimeoutMs = Math.max(2_000, Number(process.env.YAHOO_FINANCE_TIMEOUT_MS ?? 10_000));
+    this.fyersRetryMs = Math.max(15_000, Number(process.env.FYERS_RETRY_MS ?? 60_000));
     this.optionContracts = new Map(this.optionChain.configuredContracts().map((contract) => [contract.symbol, contract]));
     const supportedProvider = provider === 'fyers' || provider === 'yahoo';
     // 'fyers' (default) = FYERS primary; Yahoo poll stands in only while FYERS is unavailable.
@@ -228,16 +233,11 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
-      const token = `${appId}:${accessToken}`;
-      this.socket = fyersDataSocketModule.getInstance(token, '', false);
-      this.socket.on('connect', () => this.onConnect());
-      this.socket.on('message', (message: unknown) => this.onMessage(message));
-      this.socket.on('error', (message: unknown) => this.onError(message));
-      this.socket.on('close', (message: unknown) => this.onClose(message));
-      this.socket.autoreconnect?.(6);
-      this.socket.connect();
-      this.statusValue.lastMessage = 'connecting to FYERS market-data WebSocket';
-      this.logger.log(this.statusValue.lastMessage);
+      this.connectFyersSocket(accessToken);
+      // Watches for a NEW token landing in the DB (fresh login from the
+      // paper-desk "GET THE TOKEN" flow) while this socket is down, then
+      // rebuilds the socket — no process restart needed.
+      this.startFyersRetryWatcher();
     } catch (error) {
       this.onError(error);
     }
@@ -245,10 +245,70 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy(): void {
     this.destroyed = true;
+    if (this.fyersRetryTimer) {
+      clearInterval(this.fyersRetryTimer);
+      this.fyersRetryTimer = null;
+    }
     this.stopYahooFallback();
     this.socket?.close?.();
     this.socket = null;
     this.statusValue.connected = false;
+  }
+
+  /** Build (or rebuild) the FYERS socket bound to the given access token. */
+  private connectFyersSocket(accessToken: string): void {
+    const appId = process.env.FYERS_APP_ID?.trim();
+    if (!appId) throw new Error('FYERS_APP_ID not configured');
+    this.socket?.close?.();
+    this.socket = this.freshSocketModule().getInstance(`${appId}:${accessToken}`, '', false);
+    this.connectedTokenHash = this.tokenHash(accessToken);
+    this.socket.on('connect', () => this.onConnect());
+    this.socket.on('message', (message: unknown) => this.onMessage(message));
+    this.socket.on('error', (message: unknown) => this.onError(message));
+    this.socket.on('close', (message: unknown) => this.onClose(message));
+    this.socket.autoreconnect?.(6);
+    this.socket.connect();
+    this.statusValue.lastMessage = 'connecting to FYERS market-data WebSocket';
+    this.logger.log(this.statusValue.lastMessage);
+  }
+
+  /**
+   * fyers-api-v3 caches ONE socket instance per process (getInstance returns
+   * the same object forever, bound to the first token). To reconnect with a
+   * new token we evict the module from the require cache so a fresh instance
+   * is built. Only ever called after the previous socket was closed.
+   */
+  private freshSocketModule(): typeof fyersDataSocketModule {
+    for (const key of Object.keys(require.cache)) {
+      if (key.includes('fyers-api-v3')) delete require.cache[key];
+    }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    return require('fyers-api-v3').fyersDataSocket as typeof fyersDataSocketModule;
+  }
+
+  private tokenHash(token: string): string {
+    return crypto.createHash('sha256').update(token).digest('hex').slice(0, 32);
+  }
+
+  /** While the FYERS socket is down (Yahoo fallback), reconnect automatically
+   *  as soon as the DB token changes (i.e. a fresh login via the callback). */
+  private startFyersRetryWatcher(): void {
+    if (this.fyersRetryTimer) return;
+    this.fyersRetryTimer = setInterval(() => void this.tryFyersReconnect(), this.fyersRetryMs);
+    this.fyersRetryTimer.unref?.();
+  }
+
+  private async tryFyersReconnect(): Promise<void> {
+    if (this.destroyed || !this.statusValue.fallbackActive) return;
+    try {
+      const token = await this.fyersTokens.getActiveAccessToken();
+      if (!token || this.tokenHash(token) === this.connectedTokenHash) return; // no new login since the failure
+      this.logger.log('FYERS token changed in DB — rebuilding market-data socket with the new token');
+      this.connectFyersSocket(token);
+    } catch (error) {
+      this.statusValue.lastError = `FYERS reconnect failed: ${this.safeMessage(error)}`;
+      this.logger.warn(this.statusValue.lastError);
+    }
   }
 
   /** Start (or keep) the Yahoo poller for explicit-yahoo mode. */

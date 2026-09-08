@@ -1,6 +1,8 @@
-import { Controller, Get, Res } from '@nestjs/common';
+import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { FnfTradingService, WEEKDAY_NAMES, DECAY_DEFAULTS } from './fnf-trading.service';
+import { FnoMarketDataService } from './fno-market-data.service';
+import { FyersTokenService } from './fyers-token.service';
 
 const esc = (s: unknown): string =>
 	String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -21,10 +23,18 @@ const badge = (label: string, cls: string): string => `<span class="badge ${cls}
 
 @Controller('fnf-trading')
 export class FnfTradingPageController {
-	constructor(private readonly trading: FnfTradingService) {}
+	constructor(
+		private readonly trading: FnfTradingService,
+		private readonly fyersTokens: FyersTokenService,
+		private readonly feed: FnoMarketDataService,
+	) {}
 
 	@Get()
-	async page(@Res() res: Response) {
+	async page(
+		@Res() res: Response,
+		@Query('fyers') fyers: string | undefined,
+		@Query('reason') reason: string | undefined,
+	) {
 		const [portfolios, trades, market, signals, learning, astro, calibrations] = await Promise.all([
 			this.trading.listPortfolios(),
 			this.trading.listTrades(undefined, 200),
@@ -37,6 +47,48 @@ export class FnfTradingPageController {
 
 		const portfolio = portfolios[0] ?? null;
 		const isFriday = new Date().getDay() === 5;
+
+		// ── FYERS token card (market-data source for the paper desk) ──
+		const fyersBanner = fyers === 'ok'
+			? '<div class="banner ok">✅ FYERS login successful — token stored in the database. The FYERS feed reconnects automatically (within a minute — no restart needed).</div>'
+			: fyers === 'error'
+				? `<div class="banner bad">⚠️ FYERS login failed — ${esc(reason ?? 'unknown reason')}. Click <b>GET THE TOKEN</b> to try again (login link is valid for 5 minutes).</div>`
+				: '';
+		const tokenInfo = await this.fyersTokens.getActiveTokenInfo();
+		const feedStatus = this.feed.status();
+		const fmtIst = (d: Date | null): string =>
+			d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
+		const tokenExpired = !!tokenInfo?.expiresAt && tokenInfo.expiresAt.getTime() < Date.now();
+		const [tokenCls, tokenLabel] = !tokenInfo
+			? ['warn', 'NO TOKEN — click GET THE TOKEN below']
+			: tokenExpired
+				? ['bad', 'EXPIRED — click GET THE TOKEN below']
+				: ['ok', 'ACTIVE (stored in DB, encrypted)'];
+		let feedCls = 'dim';
+		let feedLabel = 'not enabled';
+		if (feedStatus.enabled) {
+			if (feedStatus.connected && !feedStatus.fallbackActive) {
+				feedCls = 'ok';
+				feedLabel = `FYERS WebSocket connected (${feedStatus.subscribedSymbols.length} symbols)`;
+			} else if (feedStatus.fallbackActive) {
+				feedCls = 'warn';
+				feedLabel = 'Yahoo fallback active — auto-reconnects to FYERS ≤ 1 min after a fresh login';
+			} else {
+				feedCls = 'warn';
+				feedLabel = esc(feedStatus.lastMessage ?? feedStatus.provider);
+			}
+		}
+		const fyersCard = `
+<div class="card token-card">
+  <div class="card-title">🔑 FYERS token — paper-desk market data</div>
+  <div class="kv">
+    <div><span>Stored token</span><b class="${tokenCls}">${tokenLabel}</b></div>
+    <div><span>Expires (IST)</span><b>${fmtIst(tokenInfo?.expiresAt ?? null)}</b></div>
+    <div><span>Live feed</span><b class="${feedCls}">${feedLabel}</b></div>
+  </div>
+  <p style="margin:12px 0 2px"><a class="btn" href="/auth/fyers/login">🔑 GET THE TOKEN — log in at FYERS</a></p>
+  <div class="hint">Opens FYERS in this tab (FY ID + password + TOTP + PIN — typed only into FYERS, never stored by this app). On success FYERS returns you here automatically: the token is saved in the database (single row, encrypted) and the FYERS feed reconnects on its own. No .env edits, no restart.</div>
+</div>`;
 
 		// ── portfolio card ──
 		let portfolioHtml = `<div class="empty">No portfolio yet — create one via <code>POST /trading/portfolios</code>.</div>`;
@@ -213,6 +265,12 @@ tr.today td{background:rgba(91,140,255,.08)}
 .hint{color:var(--dim);font-size:12px;margin-top:8px}
 code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,60,.1);padding:1px 4px;border-radius:4px}
 .footer{margin-top:24px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+.banner{padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:14px}
+.banner.ok{background:rgba(63,185,111,.14);border:1px solid var(--ok);color:var(--ok)}
+.banner.bad{background:rgba(224,92,92,.14);border:1px solid var(--bad);color:var(--bad)}
+.btn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:600}
+.btn:hover{filter:brightness(1.12)}
+.token-card{border-color:rgba(91,140,255,.42)}
 </style></head><body>
 <div class="masthead">
   <div>
@@ -221,6 +279,8 @@ code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,
   </div>
   <div class="meta">API: <code>GET /trading/...</code> · Swagger <a href="/docs">/docs</a></div>
 </div>
+${fyersBanner}
+${fyersCard}
 ${portfolioHtml}
 
 <div class="card">

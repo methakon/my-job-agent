@@ -159,6 +159,27 @@ export class FyersTokenService {
   }
 
   /**
+   * Non-sensitive summary of the single active token row (for UI status
+   * cards). Never exposes the raw token: expiry is read from the JWT exp claim.
+   */
+  async getActiveTokenInfo(): Promise<{ active: boolean; expiresAt: Date | null; refreshAvailable: boolean } | null> {
+    const row = await this.repo.findOne({ where: { status: 'active' } });
+    if (!row?.accessTokenEncrypted) return null;
+    let expiresAt: Date | null = null;
+    try {
+      const plain = this.encryption.decrypt(row.accessTokenEncrypted);
+      const payload = plain.split('.')[1];
+      if (payload) {
+        const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { exp?: number };
+        if (typeof claims.exp === 'number' && Number.isFinite(claims.exp)) expiresAt = new Date(claims.exp * 1000);
+      }
+    } catch {
+      expiresAt = null; // opaque/non-JWT token — no exp available
+    }
+    return { active: true, expiresAt, refreshAvailable: !!row.refreshTokenEncrypted };
+  }
+
+  /**
    * Get active refresh token (decrypted).
    * Returns null if no active token or no refresh token stored.
    */

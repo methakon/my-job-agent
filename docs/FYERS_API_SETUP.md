@@ -62,6 +62,13 @@ result ONCE; every runtime consumer then reads the token from the database.**
   stores into the same single DB row (no raw tokens in the response).
 - **Refresh**: `GET /trading/fyers/refresh-token` refreshes using the DB
   refresh token (requires `FYERS_PIN` in `.env`; PIN is never stored in DB).
+- **Auto-reconnect**: while the FYERS socket is down (Yahoo fallback), the
+  service watches the DB and rebuilds the socket ~1 min after a fresh login —
+  no .env edits, no restart.
+- **Paper desk button**: /fnf-trading shows a "🔑 GET THE TOKEN" button
+  (→ /auth/fyers/login); after authorizing, FYERS redirects back to the
+  callback, the token is stored, and the browser lands on /fnf-trading again
+  with a success banner.
 
 ## 3. Credentials in .env (both hosts)
 

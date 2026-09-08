@@ -22,7 +22,8 @@ import * as querystring from 'querystring';
  * 3. Browser redirected to FYERS auth URL
  * 4. FYERS redirects back to /auth/fyers/callback?auth_code=...&state=...
  * 5. Server validates state, exchanges auth_code, stores encrypted tokens
- * 6. Browser redirected to success/failure UI
+ * 6. Browser redirected back to the F&amp;O paper desk (/fnf-trading) which shows
+ *    a success/failure banner; the feed reconnects to FYERS automatically
  * 
  * Human FYERS authentication (login/PIN/OTP) is REQUIRED and cannot be bypassed.
  * This controller only automates the callback handling and token persistence.
@@ -121,8 +122,8 @@ export class FyersOAuthController {
     if (!authCodeValue || !state) {
       this.logger.warn('Missing auth_code or state in callback');
       return res.redirect(
-        '/auth/fyers/error?error=missing_params&detail=' +
-          encodeURIComponent('Both auth_code and state are required'),
+        '/fnf-trading?fyers=error&reason=' +
+          encodeURIComponent('Missing auth_code/state from FYERS'),
       );
     }
 
@@ -130,8 +131,8 @@ export class FyersOAuthController {
     if (!/^[a-f0-9]{32}$/.test(state)) {
       this.logger.warn('Invalid state format');
       return res.redirect(
-        '/auth/fyers/error?error=invalid_state&detail=' +
-          encodeURIComponent('State must be a 32-character hex string'),
+        '/fnf-trading?fyers=error&reason=' +
+          encodeURIComponent('Invalid state parameter from FYERS'),
       );
     }
 
@@ -142,8 +143,8 @@ export class FyersOAuthController {
     if (!stateData) {
       this.logger.warn('State not found or expired');
       return res.redirect(
-        '/auth/fyers/error?error=state_not_found&detail=' +
-          encodeURIComponent('Session expired or invalid state'),
+        '/fnf-trading?fyers=error&reason=' +
+          encodeURIComponent('Login session expired or invalid — click GET THE TOKEN again'),
       );
     }
 
@@ -151,8 +152,8 @@ export class FyersOAuthController {
     if (stateData.used) {
       this.logger.warn('State already used (potential replay attack)');
       return res.redirect(
-        '/auth/fyers/error?error=state_used&detail=' +
-          encodeURIComponent('This session has already been used'),
+        '/fnf-trading?fyers=error&reason=' +
+          encodeURIComponent('Login session already used — click GET THE TOKEN again'),
       );
     }
 
@@ -164,8 +165,8 @@ export class FyersOAuthController {
       this.logger.warn('State expired');
       this.stateStore.delete(stateKey);
       return res.redirect(
-        '/auth/fyers/error?error=state_expired&detail=' +
-          encodeURIComponent('Session expired'),
+        '/fnf-trading?fyers=error&reason=' +
+          encodeURIComponent('Login session expired — click GET THE TOKEN again'),
       );
     }
 
@@ -193,11 +194,11 @@ export class FyersOAuthController {
       );
 
       this.logger.log('Tokens stored successfully');
-      return res.redirect('/auth/fyers/success');
+      return res.redirect('/fnf-trading?fyers=ok');
     } catch (error) {
       this.logger.error('Token exchange failed', error as Error);
       return res.redirect(
-        '/auth/fyers/error?error=exchange_failed&detail=' +
+        '/fnf-trading?fyers=error&reason=' +
           encodeURIComponent((error as Error).message),
       );
     }
