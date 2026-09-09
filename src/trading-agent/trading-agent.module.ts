@@ -24,6 +24,7 @@ import { FnfTradeReport } from '../trading/fnf-trade-report.entity';
 import { SandboxTick } from '../trading/sandbox-tick.entity';
 import { UpstoxSandboxProvider } from '../trading/upstox-sandbox.provider';
 import { UpstoxSandboxIngestionService } from '../trading/upstox-sandbox-ingestion.service';
+import { UnifiedMarketDataModule } from '../trading/unified-market-data/unified-market-data.module';
 import { SessionDriverService } from './session-driver.service';
 
 /**
@@ -57,6 +58,7 @@ import { SessionDriverService } from './session-driver.service';
       SandboxTick,
       FyersToken,
     ]),
+    UnifiedMarketDataModule,
   ],
   providers: [
     AstroMuhurtaService,

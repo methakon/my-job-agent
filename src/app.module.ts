@@ -121,6 +121,7 @@ import { AiModule } from './ai/ai.module';
 
 // ── Upstox LIVE paper module (new, isolated) ──────────────────────────────────
 import { UpstoxLivePaperModule } from './trading/upstox-live-paper/upstox-live-paper.module';
+import { UnifiedMarketDataModule } from './trading/unified-market-data/unified-market-data.module';
 import {
   UpstoxLivePaperPortfolio,
   UpstoxLivePaperTrade,
@@ -160,6 +161,7 @@ import {
     DatabaseSyncModule,
     UpstoxTradingModule,
     UpstoxLivePaperModule,
+    UnifiedMarketDataModule,
   ],
   controllers: [
     ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController,
