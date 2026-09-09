@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "build": "nest build",
-    "test:trading": "npm run build && node scripts/yahoo-finance-parser.test.js && node scripts/market-data-filter.test.js && node scripts/option-chain-parser.test.js && node scripts/market-feed-guard.test.js && node scripts/yahoo-disable.test.js && node scripts/unified-market-data.test.js",
+    "test:trading": "npm run build && node scripts/yahoo-finance-parser.test.js && node scripts/market-data-filter.test.js && node scripts/option-chain-parser.test.js && node scripts/market-feed-guard.test.js && node scripts/feed-health-gate.test.js && node scripts/yahoo-disable.test.js && node scripts/unified-market-data.test.js",
     "test:ai": "npm run build && node scripts/ai-bedrock-provider.test.js && node scripts/ai-auth.test.js",
     "test:trading-ai": "npm run build && node scripts/trading-ai.test.js",
     "test:upstox-live-paper": "npm run build && node scripts/upstox-live-paper.test.js",

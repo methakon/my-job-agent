@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThanOrEqual } from 'typeorm';
 import { BsmGreeks, BsmInputs, localGreeks, bsmGreeks } from '../bsm-greeks';
 import { UpstoxLivePaperConfig } from './upstox-live-paper.config';
+import { FeedHealthService } from '../unified-market-data/feed-health.service';
 import { UPSTOX_LIVE_DATA_ISOLATION } from './upstox-live-paper.const';
 import { UpstoxLivePaperOptionQuote, UpstoxLivePaperMarketSnapshot } from './upstox-live-paper-entities';
 
@@ -87,6 +88,8 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   private lastOptionQuoteTsByContract = new Map<string, number>();
   private lastMarketSnapshotTsByInstrument = new Map<string, number>();
   private staleBlockedCount = 0;
+  /** Newest tick timestamp observed from ANY Upstox instrument (feed gate). */
+  private lastLiveTickMs: number | null = null;
   private optionChainFetchedAt: Date | null = null;
   private wsConnected = false;
   private wsLastError: string | null = null;
@@ -109,15 +112,29 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     if (typeof err==='object' && err && (err as UpstoxApiError).message) return (err as UpstoxApiError).message as string;
     return String(err);
   }
-  markOptionQuoteTs(cs: string, ms: number): void { this.lastOptionQuoteTsByContract.set(cs, ms); }
-  markMarketSnapshotTs(inst: string, ms: number): void { this.lastMarketSnapshotTsByInstrument.set(inst, ms); }
+  markOptionQuoteTs(cs: string, ms: number): void {
+    this.lastOptionQuoteTsByContract.set(cs, ms);
+    if (this.lastLiveTickMs === null || ms > this.lastLiveTickMs) this.lastLiveTickMs = ms;
+  }
+  markMarketSnapshotTs(inst: string, ms: number): void {
+    this.lastMarketSnapshotTsByInstrument.set(inst, ms);
+    if (this.lastLiveTickMs === null || ms > this.lastLiveTickMs) this.lastLiveTickMs = ms;
+  }
   underlyingPriceCache(): Map<string, number> { return this.latestUnderlyingPriceByInstrument; }
 
   constructor(config: UpstoxLivePaperConfig,
     @InjectRepository(UpstoxLivePaperOptionQuote) optionQuotes: Repository<UpstoxLivePaperOptionQuote>,
-    @InjectRepository(UpstoxLivePaperMarketSnapshot) marketSnapshots: Repository<UpstoxLivePaperMarketSnapshot>) {
+    @InjectRepository(UpstoxLivePaperMarketSnapshot) marketSnapshots: Repository<UpstoxLivePaperMarketSnapshot>,
+    private readonly feedHealth: FeedHealthService) {
     this.config = config; this.optionQuotes = optionQuotes; this.marketSnapshots = marketSnapshots;
     this.paperOnly = config.paperOnly; this.safetyLockActive = config.safetyLockActive;
+    // Feed-health gate registration (brief s6/s8): the Upstox desk's own REST
+    // polling registers as its live source until the desk migrates onto the
+    // unified tick stream (Phase 4). Never satisfies the gate before its first
+    // real tick (ageMs null).
+    this.feedHealth.registerFeed('UPSTOX_REST', 'upstox-paper', {
+      ageMs: () => (this.lastLiveTickMs === null ? null : Math.max(0, Date.now() - this.lastLiveTickMs)),
+    });
   }
 
   async onModuleInit(): Promise<void> {

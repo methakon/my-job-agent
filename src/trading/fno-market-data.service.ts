@@ -7,6 +7,7 @@ import { FyersTokenService } from './fyers-token.service';
 import { OptionContract } from './option-chain-parser';
 import { shouldAcceptTick } from './market-feed-guard';
 import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
+import { FeedHealthService } from './unified-market-data/feed-health.service';
 
 // The FYERS package currently ships JavaScript without TypeScript declarations.
 // Keep the SDK boundary typed as unknown/any and validate every inbound field.
@@ -111,6 +112,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     private readonly optionChain: FnfOptionChainService,
     private readonly fyersTokens: FyersTokenService,
     private readonly unified: UnifiedMarketDataService,
+    private readonly feedHealth: FeedHealthService,
   ) {
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
       .split(',')
@@ -148,6 +150,17 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       lastError: null,
       lastMessage: null,
     };
+    // Feed-health gate registration (brief s6/s8): this feed backs the FnF
+    // engine. A disabled feed is reported but never satisfies the new-trading
+    // gate (age provider stays null until real ticks arrive).
+    this.feedHealth.registerFeed('FYERS_LIVE', 'fnf', {
+      enabled: () => this.statusValue.enabled,
+      ageMs: () => {
+        const at = this.statusValue.lastTickAt;
+        if (!at) return null;
+        return Math.max(0, Date.now() - new Date(at).getTime());
+      },
+    });
   }
 
 

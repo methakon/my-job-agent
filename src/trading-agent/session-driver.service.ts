@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { FnfTradingService } from '../trading/fnf-trading.service';
+import { FeedHealthService } from '../trading/unified-market-data/feed-health.service';
 
 type Signal = Awaited<ReturnType<FnfTradingService['generateSignals']>>[number];
 type Portfolio = Awaited<ReturnType<FnfTradingService['listPortfolios']>>[number];
@@ -32,7 +33,10 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 	private lastSessionArchiveDate = '';
 	private lastDayArchiveDate = '';
 
-	constructor(private readonly trading: FnfTradingService) {
+	constructor(
+		private readonly trading: FnfTradingService,
+		private readonly feedHealth: FeedHealthService,
+	) {
 		this.intervalMs = Math.max(5_000, Number(process.env.FNO_SESSION_DRIVER_MS ?? 10_000));
 		this.paperQty = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
 	}
@@ -224,6 +228,13 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 			this.logger.warn(
 				`paper account depleted (capital ${Number(portfolio.capital).toFixed(2)} + netPnl ${Number(portfolio.netPnl).toFixed(2)}) — holding new opens until user redeposits`,
 			);
+			return false;
+		}
+		// Feed-health gate (brief s8): never OPEN a new position on stale/down
+		// data. Recovery is automatic — the gate re-opens when fresh ticks resume.
+		const gate = this.feedHealth.gateForFnf();
+		if (!gate.allowNewTrading) {
+			this.throttledWarn(`feed gate paused new opens (${gate.reason}) — holding`);
 			return false;
 		}
 		try {

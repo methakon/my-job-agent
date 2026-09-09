@@ -22,10 +22,12 @@ import { UpstoxLivePaperService } from './upstox-live-paper.service';
 import { UpstoxLivePaperWeeklyReportService } from './upstox-live-paper-weekly-report.service';
 import { UpstoxLivePaperController } from './upstox-live-paper.controller';
 import { EncryptionService } from '../../auth/encryption.service';
+import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-data.module';
 
 @Module({
   imports: [
     ConfigModule,
+    UnifiedMarketDataModule,
     TypeOrmModule.forFeature([
       UpstoxLivePaperPortfolio,
       UpstoxLivePaperTrade,
