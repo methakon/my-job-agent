@@ -7,7 +7,7 @@
 - [x] **Upstox Sandbox isolation (spec v2) COMPLETE** — 13/13 isolation tests + FYERS regression PASS (83d0f3f → c9a1bc7); see docs/UPSTOX_SANDBOX.md
 - [ ] **EPIC-P1 queued (in_progress)**: Option Chain Market Prediction & Profit Engine (spec paste_3, §1–36). Phase 1 audit done; Phase 2 (feature pipeline + OBSERVATION engine) next
 - [x] Decision batch + daily DB backups (see PROJECT_PROMPT.md Progress 2026-09-05 late)
-- NEXT: EPIC-P1 Phase 2 (auto-continue); J-17 TinyFish (approved); Chrome-gated J-05/06/07/08/18 (approved); FYERS Monday auth-code before 09:15 IST
+- NEXT: EPIC-P1 Phase 2 (auto-continue); Chrome-gated J-05/06/07/08/18 (approved); FYERS Monday auth-code before 09:15 IST  (J-17 TinyFish DROPPED 2026-09-10 by user — adapter removed)
 
 ## Decision batch (2026-09-05) — 6 user directives executed
 - [x] **I-01 pm2 startup persistence**: user-level systemd unit `~/.config/systemd/user/pm2.service` (Type=forking + RemainAfterExit, no User= line — 216/GROUP pitfall in user manager); enabled+active, apps resurrect from dump; no sudo needed (5ec78f8)
@@ -16,7 +16,7 @@
 - [x] **T-07 trade reports → Telegram**: `fnf_trade_reports` outbox (OPEN/CLOSE rows on every trade) + local poller `hermes send -t telegram` every 2 min Mon–Fri 09:00–15:59; WhatsApp-ready via T7_TARGETS when gateway re-pairs; verified delivery (667c6ef)
 - [x] **Daily DB backup** (user directive): `myjob_db_backup.sh` — dump on Dhargent (mysqldump 8.0 installed, restricted-user flags) → download to `~/projects/my-job-agent/backups/` → remove from server; cron pre-open 08:55 + post-close 15:45 IST Mon–Fri (jobs 7447716d75e9, fa77d6783087); 2.5MB verified
 - [x] **Chrome automation APPROVED** (user) — J-05/06/07/08/18 unblocked for next session
-- NEXT: J-17 TinyFish pilot (approved, queued); Chrome-gated job items; G-4/G-6/G-8 data-accumulation gates (Mon 09-07 session); WhatsApp re-pair for T-07 reports
+- NEXT: Chrome-gated job items; G-4/G-6/G-8 data-accumulation gates (Mon 09-07 session); WhatsApp re-pair for T-07 reports  (J-17 TinyFish DROPPED 2026-09-10 by user — adapter removed)
 
 ## Auto-continue batch 3 (2026-09-05) — feature engine + data-boundary reached
 - [x] **GATE 3 → 5/10**: FeatureEngineService live — session VWAP (tick-mean fallback for volumeless index ticks), Wilder ATR-14 (distinct-price ticks), ORB-5/15/30, gapPct/priorClose/openPrice, feature-health/missingness; reads live+history snapshot tables. Verified on real NIFTY 2026-09-04 (vwap 23942.48, atr 4.24, orb5 73.65, gap −0.268%, 11,582 bars). GET /trading/market/features/:instrument?day=; determinism + empty-day tests ALL PASS (2ba0b7c, 78b0ca2)

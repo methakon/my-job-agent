@@ -11,7 +11,6 @@ import { WorkableAdapter } from './workable.adapter';
 import { Micro1JobsAdapter } from './micro1.adapter';
 import { FoundeverAdapter } from './foundever.adapter';
 import { BicsomAdapter } from './bicsom.adapter';
-import { TinyFishAdapter } from './tinyfish.adapter';
 import { PortalCredentialService } from '../applications/portal-credential.service';
 import { InboxReaderService } from '../applications/inbox-reader.service';
 import { LeadRepository } from '../leads/lead.repository';
@@ -60,19 +59,6 @@ export class ScoutService {
 		return this.finnAdapter;
 	}
 
-	/** TinyFish runs only when a key exists (costs credits per run). */
-	private tinyFishAdapter: TinyFishAdapter | null = null;
-	private getTinyFish(): TinyFishAdapter | null {
-		if (!process.env.TINYFISH_API_KEY) return null;
-		if (!this.tinyFishAdapter) {
-			this.tinyFishAdapter = new TinyFishAdapter();
-			// Timer-collected results store straight into the normal pipeline.
-			this.tinyFishAdapter.onCollected(async (leads) => this.storeAndScore(leads));
-			this.adapters.push(this.tinyFishAdapter);
-		}
-		return this.tinyFishAdapter;
-	}
-
 	/** Runs every SCOUT_INTERVAL_MINUTES (default 60 — FR-18 hourly fetch). */
 	@Interval(Number(process.env.SCOUT_INTERVAL_MINUTES || 60) * 60 * 1000)
 	async runScheduled(): Promise<void> {
@@ -82,7 +68,6 @@ export class ScoutService {
 	async runOnce(): Promise<{ scraped: number; newLeads: number }> {
 		this.getNaukri(); // ensure naukri adapter registered
 		this.getFinn(); // ensure finn adapter registered (scrape needs no login)
-		this.getTinyFish(); // register only when TINYFISH_API_KEY present
 		let scraped = 0;
 		let newLeads = 0;
 		for (const adapter of this.adapters) {
@@ -93,14 +78,6 @@ export class ScoutService {
 			} catch (err) {
 				this.logger.warn(`${adapter.source} scrape failed: ${String(err)}`);
 			}
-		}
-		// TinyFish scrape() launches async runs and returns []; collect any runs
-		// that completed since the last cycle (timer polls also store directly).
-		try {
-			const tf = this.getTinyFish();
-			if (tf) newLeads += await tf.collectPending();
-		} catch (err) {
-			this.logger.warn(`tinyfish collect failed: ${String(err)}`);
 		}
 		this.logger.log(`scout done: ${scraped} scraped, ${newLeads} new`);
 		return { scraped, newLeads };
