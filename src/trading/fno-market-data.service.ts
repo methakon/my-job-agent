@@ -26,9 +26,9 @@ type FyersSocket = {
 
 type FeedStatus = {
   provider: 'fyers' | 'yahoo' | 'disabled';
-  /** Provider configured at boot (fyers = primary with Yahoo auto-fallback). */
+  /** Provider requested via env at boot (yahoo is REFUSED — brief s3). */
   requestedProvider: 'fyers' | 'yahoo';
-  /** True while Yahoo polling stands in for an unavailable FYERS socket. */
+  /** Always false — Yahoo fallback is permanently disabled on the live trading path. */
   fallbackActive: boolean;
   enabled: boolean;
   connected: boolean;
@@ -70,9 +70,16 @@ const asRecord = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' ? value as Record<string, unknown> : null;
 
 /**
- * Real-time/near-real-time F&O market-data input. FYERS and Yahoo are data-only here: this service owns
- * one market-data socket and only calls FnfTradingService.ingestSnapshots().
- * No broker order socket or order-placement method is reachable from it.
+ * Real-time/near-real-time F&O market-data input. FYERS is the ONLY live
+ * source: this service owns one market-data socket and only calls
+ * FnfTradingService.ingestSnapshots(). No broker order socket or
+ * order-placement method is reachable from it.
+ *
+ * Yahoo Finance is HARD-DISABLED on the live trading/data path (brief s3):
+ * FNO_MARKET_DATA_PROVIDER=yahoo is refused at boot, and no Yahoo fallback
+ * can start when FYERS is unavailable. Yahoo poll/parse code below is
+ * retained ONLY for historical/non-trading reference and has no call sites
+ * from any live path.
  */
 @Injectable()
 export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
@@ -87,6 +94,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private readonly yahooSymbols: YahooSymbolConfig[];
   private readonly yahooPollMs: number;
   private readonly yahooTimeoutMs: number;
+  private readonly yahooEnabled: boolean;
   private readonly optionContracts: Map<string, OptionContract>;
   private destroyed = false;
   private readonly fyersRetryMs: number;
@@ -104,6 +112,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       .filter(Boolean)
       .slice(0, 50);
     const provider = (process.env.FNO_MARKET_DATA_PROVIDER ?? 'fyers').toLowerCase();
+    const yahooEnabled = /^(1|true|yes)$/i.test(process.env.YAHOO_FEED_ENABLED ?? 'false');
     const enabled = /^(1|true|yes)$/i.test(process.env.FNO_MARKET_DATA_ENABLED ?? 'false');
     this.persistEveryMs = Math.max(250, Number(process.env.FNO_MARKET_DATA_PERSIST_MS ?? 1000));
     this.yahooSymbols = parseYahooSymbolConfig(
@@ -111,18 +120,20 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     );
     this.yahooPollMs = Math.max(5_000, Number(process.env.YAHOO_FINANCE_POLL_MS ?? 15_000));
     this.yahooTimeoutMs = Math.max(2_000, Number(process.env.YAHOO_FINANCE_TIMEOUT_MS ?? 10_000));
+    this.yahooEnabled = yahooEnabled;
     this.fyersRetryMs = Math.max(15_000, Number(process.env.FYERS_RETRY_MS ?? 60_000));
     this.optionContracts = new Map(this.optionChain.configuredContracts().map((contract) => [contract.symbol, contract]));
-    const supportedProvider = provider === 'fyers' || provider === 'yahoo';
-    // 'fyers' (default) = FYERS primary; Yahoo poll stands in only while FYERS is unavailable.
-    // 'yahoo' = explicit Yahoo-only mode (manual override).
+    // Yahoo is NOT an allowed provider on the live trading/data path (brief
+    // s3): FNO_MARKET_DATA_PROVIDER=yahoo is recorded as requested intent but
+    // refused at boot — status provider stays 'disabled' and no Yahoo poller
+    // can ever start from a live path.
     const requestedProvider: FeedStatus['requestedProvider'] = provider === 'yahoo' ? 'yahoo' : 'fyers';
-    const subscribedSymbols = requestedProvider === 'yahoo' ? this.yahooSymbols.map(({ symbol }) => symbol) : symbols;
+    const subscribedSymbols = symbols;
     this.statusValue = {
-      provider: supportedProvider ? requestedProvider : 'disabled',
+      provider: provider === 'fyers' ? 'fyers' : 'disabled',
       requestedProvider,
       fallbackActive: false,
-      enabled: enabled && supportedProvider && subscribedSymbols.length > 0,
+      enabled: enabled && provider === 'fyers' && subscribedSymbols.length > 0,
       connected: false,
       subscribedSymbols,
       ticksReceived: 0,
@@ -187,6 +198,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    // Brief s3: Yahoo must never participate in live trading or market-data
+    // processing. Log the disable state on every boot, before anything else.
+    this.logger.log('Yahoo market-data feed: DISABLED');
     // Register option contracts first (works even when the feed is disabled —
     // the engine needs the tradable universe regardless of live streaming).
     const optionSymbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? '')
@@ -201,34 +215,35 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`configured option contract upsert failed for ${contract.symbol}: ${(e as Error).message}`);
       });
     }
-    if (!this.statusValue.enabled) {
-      this.statusValue.lastMessage = this.statusValue.provider === 'yahoo'
-        ? 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure YAHOO_FINANCE_SYMBOLS'
-        : 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure FYERS credentials';
-      this.logger.log(this.statusValue.lastMessage);
-      return;
-    }
-
     if (this.statusValue.requestedProvider === 'yahoo') {
-      this.statusValue.provider = 'yahoo';
-      this.statusValue.lastMessage = `polling Yahoo Finance chart API every ${this.yahooPollMs}ms (explicit Yahoo mode, paper-only)`;
+      // Brief s3 hard rule: Yahoo is not permitted even as an explicit
+      // provider override. Refuse and stay disabled until the operator
+      // configures FYERS (FNO_MARKET_DATA_PROVIDER=fyers + credentials).
+      this.statusValue.provider = 'disabled';
+      this.statusValue.enabled = false;
+      this.statusValue.lastMessage = 'Yahoo market-data feed: DISABLED — Yahoo is not permitted on the live trading/data path; set FNO_MARKET_DATA_PROVIDER=fyers and configure FYERS credentials';
+      this.logger.warn(this.statusValue.lastMessage);
+      return;
+    }
+    if (!this.statusValue.enabled) {
+      this.statusValue.lastMessage = 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure FYERS credentials';
       this.logger.log(this.statusValue.lastMessage);
-      this.startYahooPoller();
       return;
     }
 
-    // Requested provider = fyers: FYERS socket is primary. Yahoo is NOT polled
-    // unless/until FYERS is unavailable (missing credentials, socket error/close).
-    // Token source = DATABASE first (single row written by the OAuth callback);
-    // .env FYERS_ACCESS_TOKEN is only a fallback for boxes that have never
-    // completed a callback login.
+    // FYERS socket is primary. Token source = DATABASE first (single row
+    // written by the OAuth callback); .env FYERS_ACCESS_TOKEN is only a
+    // fallback for boxes that have never completed a callback login.
     const appId = process.env.FYERS_APP_ID?.trim();
     const dbToken = await this.fyersTokens.getActiveAccessToken();
     const accessToken = (dbToken ?? process.env.FYERS_ACCESS_TOKEN)?.trim() ?? null;
     if (!appId || !accessToken) {
-      this.startYahooFallback(
-        'FYERS credentials missing (FYERS_APP_ID env and no active token row in DB; login via /auth/fyers/login)',
-      );
+      this.statusValue.connected = false;
+      this.statusValue.lastMessage = 'FYERS credentials missing (FYERS_APP_ID env and no active token row in DB; login via /auth/fyers/login) — feed disabled; Yahoo fallback is NOT permitted';
+      this.logger.warn(this.statusValue.lastMessage);
+      // Keep watching: a fresh login lands a token row and the next watcher
+      // tick rebuilds the socket without a process restart.
+      this.startFyersRetryWatcher();
       return;
     }
 
@@ -249,7 +264,10 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.fyersRetryTimer);
       this.fyersRetryTimer = null;
     }
-    this.stopYahooFallback();
+    if (this.yahooPollTimer) {
+      clearInterval(this.yahooPollTimer);
+      this.yahooPollTimer = null;
+    }
     this.socket?.close?.();
     this.socket = null;
     this.statusValue.connected = false;
@@ -299,11 +317,20 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async tryFyersReconnect(): Promise<void> {
-    if (this.destroyed || !this.statusValue.fallbackActive) return;
+    if (this.destroyed) return;
     try {
       const token = await this.fyersTokens.getActiveAccessToken();
-      if (!token || this.tokenHash(token) === this.connectedTokenHash) return; // no new login since the failure
-      this.logger.log('FYERS token changed in DB — rebuilding market-data socket with the new token');
+      if (!token) return;
+      const sameToken = this.tokenHash(token) === this.connectedTokenHash;
+      if (this.statusValue.connected && sameToken) return;
+      // No Yahoo fallback exists anymore (brief s3): if the socket is down
+      // (SDK autoreconnect exhausted, or a fresh login landed a new token)
+      // rebuild it with the current token. connectFyersSocket is idempotent.
+      this.logger.log(
+        sameToken
+          ? 'FYERS socket down — rebuilding market-data socket (Yahoo fallback is disabled)'
+          : 'FYERS token changed in DB — rebuilding market-data socket with the new token',
+      );
       this.connectFyersSocket(token);
     } catch (error) {
       this.statusValue.lastError = `FYERS reconnect failed: ${this.safeMessage(error)}`;
@@ -311,14 +338,21 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Start (or keep) the Yahoo poller for explicit-yahoo mode. */
+  // ═══ Dead code retained for historical / non-trading reference ═══
+  // Yahoo Finance participation on the live trading/data path is permanently
+  // disabled (brief s3). The following methods (Yahoo poller + fallback) are
+  // kept ONLY so the parsing/normalisation logic survives for non-trading
+  // uses; NO live path calls them — verified by scripts/yahoo-disable.test.js.
+  // ══════════════════════════════════════════════════════════════════════
+
+  /** Start (or keep) the Yahoo poller for explicit-yahoo mode. NOT CALLED. */
   private startYahooPoller(): void {
     if (this.yahooPollTimer) return;
     void this.pollYahoo();
     this.yahooPollTimer = setInterval(() => void this.pollYahoo(), this.yahooPollMs);
   }
 
-  /** Yahoo stands in ONLY while FYERS is unavailable; stops when FYERS connects. */
+  /** Yahoo stands in ONLY while FYERS is unavailable; stops when FYERS connects. NOT CALLED. */
   private startYahooFallback(reason: string): void {
     if (this.destroyed || this.statusValue.requestedProvider !== 'fyers' || this.yahooPollTimer) return;
     this.statusValue.fallbackActive = true;
@@ -347,7 +381,6 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
   private onConnect(): void {
     if (!this.socket) return;
-    this.stopYahooFallback();
     this.statusValue.connected = true;
     this.statusValue.provider = 'fyers';
     this.statusValue.lastError = null;
@@ -360,16 +393,14 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
   private onClose(message: unknown): void {
     this.statusValue.connected = false;
-    this.statusValue.lastMessage = `socket closed${message ? `: ${this.safeMessage(message)}` : ''}`;
+    this.statusValue.lastMessage = `socket closed${message ? `: ${this.safeMessage(message)}` : ''} — no fallback (Yahoo disabled); reconnect watcher active`;
     this.logger.warn(this.statusValue.lastMessage);
-    this.startYahooFallback('FYERS socket closed');
   }
 
   private onError(message: unknown): void {
     this.statusValue.connected = false;
     this.statusValue.lastError = this.safeMessage(message);
-    this.logger.warn(`FYERS market-data error: ${this.statusValue.lastError}`);
-    this.startYahooFallback(`FYERS socket error: ${this.statusValue.lastError}`);
+    this.logger.warn(`FYERS market-data error: ${this.statusValue.lastError} — no fallback (Yahoo disabled); reconnect watcher active`);
   }
 
   private onMessage(message: unknown): void {
