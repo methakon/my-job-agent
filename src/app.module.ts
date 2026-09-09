@@ -54,6 +54,9 @@ import { FeatureEngineService } from './trading/feature-engine.service';
 import { UpstoxSandboxProvider } from './trading/upstox-sandbox.provider';
 import { SandboxTick } from './trading/sandbox-tick.entity';
 import { UpstoxSandboxIngestionService } from './trading/upstox-sandbox-ingestion.service';
+import { UpstoxTradingModule } from './trading/upstox-trading.module';
+import { UpstoxPortfolio, UpstoxTrade } from './trading/upstox-trading.entity';
+import { UpstoxTradingPageController } from './trading/upstox-trading-page.controller';
 import { FnfOptionContract } from './trading/fnf-option-contract.entity';
 import { FnfOptionQuote } from './trading/fnf-option-quote.entity';
 import { FnfMarketSnapshotHistory } from './trading/fnf-market-snapshot-history.entity';
@@ -116,65 +119,68 @@ import { ApplicationRepository } from './applications/application.repository';
 import { ApplySettingRepository } from './applications/apply-setting.repository';
 import { AiModule } from './ai/ai.module';
 
+// ── Upstox LIVE paper module (new, isolated) ──────────────────────────────────
+import { UpstoxLivePaperModule } from './trading/upstox-live-paper/upstox-live-paper.module';
+import {
+  UpstoxLivePaperPortfolio,
+  UpstoxLivePaperTrade,
+  UpstoxLivePaperOrder,
+  UpstoxLivePaperPosition,
+  UpstoxLivePaperPnlEvent,
+  UpstoxLivePaperOptionQuote,
+  UpstoxLivePaperMarketSnapshot,
+  UpstoxLivePaperWeeklyReport,
+  UpstoxLivePaperToken,
+} from './trading/upstox-live-paper/upstox-live-paper-entities';
+
 @Module({
-	imports: [
-		ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', '../../.env'] }),
-		ScheduleModule.forRoot(),
-		TypeOrmModule.forRootAsync({
-			inject: [ConfigService],
-			useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
-		}),
-				TypeOrmModule.forFeature([CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate, InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem, FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote, FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport, SandboxTick, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session, SideIncomeOpportunity, DatabaseSyncAudit]),
-						SideIncomeModule,
-						AuthModule,
-						AiModule,
-						TradeBookModule,
-						DatabaseSyncModule,
-					],
-	controllers: [ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController, InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController, BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController, VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController, OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController, FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController, CvRegionFormatController, FyersAuthController, FyersOAuthController,
-		AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
-		AppFallbackController], // MUST stay last: serves dashboard.html for unmatched GETs
-	providers: [
-		ProfileService,
-		ProfileRepository,
-		ProfileOptimizer,
-		ScoutService,
-		LeadRepository,
-		ApplyEngineService,
-		AnswerBankService,
-		DirectChannelDetector,
-		DirectApplyMailer,
-		MailService,
-		HumanEmailComposer,
-		AtsCvBuilder,
-		ProcessLearningService,
-		InboxReaderService,
-		ApplicationRepository,
-		ApplySettingRepository,
-		PortalCredentialService,
-		HrEmailInvestigator,
-		AutoApplyLoopService,
-		RetryBackoffService,
-		BrowserFormService,
-		LearningWeightsService,
-		DailyDigestService,
-		LinkedInProfileService,
-		EmailTrackerService,
-		InterviewPrepService,
-		AstroMuhurtaService,
-		AstroLeadScoringService,
-		PreApplyItemRepository,
-		PreApplyService,
-		MuhurtaSendService,
-		FnfTradingService,
-		FnoMarketDataService,
-		FnfOptionChainService,
-		MarketDataInspectionService,
-		FeatureEngineService,
-		UpstoxSandboxProvider,
-		UpstoxSandboxIngestionService,
-		ProjectStatusService,
-		FyersTokenService,
-	],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env', '../../.env'] }),
+    ScheduleModule.forRoot(),
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => mysqlConfig(config.get<string>('DATABASE_NAME', 'myjob_agent')),
+    }),
+    TypeOrmModule.forFeature([
+      CandidateProfile, JobLead, Application, QuestionAnswer, CvRegionFormat, ApplySetting, StatusUpdate,
+      InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem,
+      FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote,
+      FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport,
+      SandboxTick, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session,
+      SideIncomeOpportunity, DatabaseSyncAudit, UpstoxPortfolio, UpstoxTrade,
+      // Upstox LIVE paper entities (isolated)
+      UpstoxLivePaperPortfolio, UpstoxLivePaperTrade, UpstoxLivePaperOrder, UpstoxLivePaperPosition,
+      UpstoxLivePaperPnlEvent, UpstoxLivePaperOptionQuote, UpstoxLivePaperMarketSnapshot,
+      UpstoxLivePaperWeeklyReport, UpstoxLivePaperToken,
+    ]),
+    SideIncomeModule,
+    AuthModule,
+    AiModule,
+    TradeBookModule,
+    DatabaseSyncModule,
+    UpstoxTradingModule,
+    UpstoxLivePaperModule,
+  ],
+  controllers: [
+    ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController,
+    InterviewPracticePageController, MailController, InboxController, PortalCredentialController, AutoApplyController,
+    BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController,
+    VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController,
+    OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController,
+    FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController,
+    CvRegionFormatController, FyersAuthController, FyersOAuthController, UpstoxTradingPageController,
+    AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
+    AppFallbackController, // MUST stay last: serves dashboard.html for unmatched GETs
+  ],
+  providers: [
+    ProfileService, ProfileRepository, ProfileOptimizer, ScoutService, LeadRepository, ApplyEngineService,
+    AnswerBankService, DirectChannelDetector, DirectApplyMailer, MailService, HumanEmailComposer, AtsCvBuilder,
+    ProcessLearningService, InboxReaderService, ApplicationRepository, ApplySettingRepository, PortalCredentialService,
+    HrEmailInvestigator, AutoApplyLoopService, RetryBackoffService, BrowserFormService, LearningWeightsService,
+    DailyDigestService, LinkedInProfileService, EmailTrackerService, InterviewPrepService, AstroMuhurtaService,
+    AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService,
+    FnfTradingService, FnoMarketDataService, FnfOptionChainService, MarketDataInspectionService, FeatureEngineService,
+    UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, FyersTokenService,
+  ],
 })
 export class AppModule {}

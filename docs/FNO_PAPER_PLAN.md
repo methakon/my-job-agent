@@ -1,6 +1,6 @@
-# F&O paper-trading plan — interim Yahoo mode
+# F&O paper-trading plan — FYERS live mode
 
-Status: paper-only; no live orders. Yahoo is used only for experimental underlying/index analysis while the broker account is under document review. FYERS credentials, when approved and provided by the user, must remain environment-only and must never be committed or retained in summaries.
+Status: paper-only; no live orders. FYERS market-data feed is LIVE via the shared DB token (single-row `fyers_tokens`, encrypted; see FYERS_API_SETUP.md) on both hosts — the home my-job-agent service (UI feed) and the Dhargent trading-agent (auto session driver) both connect with the same app id. Yahoo Finance is a fallback only when the FYERS socket is down (auto-reconnect watcher polls the DB row and rebuilds the socket on a fresh login; no `.env` edits, no restart). FYERS credentials/tokens stay environment/DB-only — never committed or retained in summaries. (2026-09-08: upgraded from interim Yahoo mode; before this date FYERS was unavailable pending OAuth wiring.)
 
 ## Starting envelope
 

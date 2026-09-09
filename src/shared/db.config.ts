@@ -9,7 +9,7 @@ export function mysqlConfig(databaseName: string): TypeOrmModuleOptions {
 	return {
 		type: 'mysql' as const,
 		host: process.env.MYSQL_HOST || 'localhost',
-		port: Number(process.env.MYSQL_PORT || 3306),
+		port: Number(process.env.MYSQL_PORT) || 3306,
 		username: process.env.MYSQL_USER || 'mylife',
 		password: process.env.MYSQL_PASSWORD || 'mylife-secret',
 		database: databaseName,

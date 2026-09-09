@@ -95,6 +95,14 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-10) — Upstox live-paper module booted on live dist (resume of session 20260909_204144_511b4b)
+
+- **upstox-live-paper module** (src/trading/upstox-live-paper/, from the 2026-09-09 session; ~26 files, self-contained: auth/token OAuth intake, market service, paper execution, scheduled weekly report, entities, UI at /upstox-live-paper) is now REGISTERED and BOOTING on the production dist. App green: "Nest application successfully started", port 3010, dashboard 200, /project-status 401 gate intact. TinyFish removal (prior) stays: no TinyFishAdapter anywhere.
+- **Boot-fix arc (2026-09-10)**: seed json asset config added (nest-cli.json; nest build never copied checklist-v4.seed.json → crash loop), EncryptionService + WeeklyReportService providers registered, explicit column types on 13 `X | null` columns (TS design:type Object) + 3 bare precision/scale columns, duplicate upstox controllers removed from AppModule controllers (root cause of "available in AppModule context" DI failures), weekly-report @Cron fixed to 6-field `0 30 18 * * 1-5`, accessTokenEncrypted made nullable (TOKEN_MISSING seed rows carry none).
+- **Master lock honored**: module runs paper regardless of UPSTOX_SANDBOX_ENABLED (per its config); flag=true in .env; token row seeded for client 8CA31472-…; DB tables auto-created via synchronize (dev).
+- **NEXT (user epic brief 2026-09-10, pasted)**: AUDIT existing market-data/trading paths first (brief section 2), then unify live market data (single common feed + normalized tick for BOTH FnF and Upstox engines), disable Yahoo on the trading data path, hard account isolation, common tick storage, restart recovery, tests. Upstox paper module is the vehicle for the Upstox side of the parallel run.
+- **NOT yet committed**: docs/TODO.md, docs/FNO_PAPER_PLAN.md, public/dashboard.html, upstox-trading legacy sandbox controller/entity/module/service, emergency-trading.controller, inbox/mail-account/side-income/auth/db.config modifications (all included in this commit).
+
 ## Progress (2026-09-05) — decision engine, Reflexion/Greeks, v5 checklist, auth hardening
 - **Candidate-ranking DECISION ENGINE live** (`option-candidate-rank-v1`, f7bce35): universe-wide
   candidates → ₹5k capital filter (NOT instrument rule) → gates (stale/spread/volume/decay) →

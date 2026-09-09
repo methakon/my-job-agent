@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SideIncomeOpportunity } from './side-income-opportunity.entity';
+import { randomUUID } from 'crypto';
 
 /**
  * SideIncomeService — seeds and serves researched side-income opportunities
@@ -165,7 +166,7 @@ export class SideIncomeService implements OnModuleInit {
 		const existing = await this.repo.count();
 		if (existing > 0) return;
 		for (const seed of SEEDS) {
-			await this.repo.save(this.repo.create(seed));
+			await this.repo.save(this.repo.create({ ...seed, id: randomUUID() }));
 		}
 		this.logger.log(`seeded ${SEEDS.length} side-income opportunities`);
 	}

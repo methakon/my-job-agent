@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>my-job-agent — Upstox LIVE Paper Trading</title>
+<style>
+:root{--bg:#0f1115;--card:#1a1d24;--line:#2a2e38;--fg:#e8eaed;--dim:#9aa0aa;--ok:#3fb96f;--warn:#e0a83c;--bad:#e05c5c;--accent:#5b8cff}
+body{background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,sans-serif;padding:24px;max-width:1100px;margin:auto}
+a{color:var(--accent)}
+h1{font-size:24px;margin:0 0 4px}
+.masthead{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+.meta{color:var(--dim);font-size:13px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:800px){.grid2{grid-template-columns:1fr}}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px}
+.kv>div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed var(--line);padding:4px 0}
+.kv span{color:var(--dim)}
+table{border-collapse:collapse;width:100%;margin:6px 0 10px;font-size:13px}
+td,th{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--card);color:var(--dim);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.05em}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--dim)}
+.small{font-size:12px}
+.badge{font-size:11px;padding:2px 10px;border-radius:99px;background:var(--line);color:var(--dim);display:inline-block;margin-right:4px}
+.badge.ok{background:rgba(63,185,111,.18);color:var(--ok)}
+.badge.bad{background:rgba(224,92,92,.18);color:var(--bad)}
+.badge.warn{background:rgba(224,168,60,.18);color:var(--warn)}
+.footer{margin-top:24px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+.btn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:600}
+.btn:hover{filter:brightness(1.12)}
+.security{background:rgba(63,185,111,.08);border:1px solid var(--ok);border-radius:12px;padding:16px;margin-bottom:16px}
+.security .row{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px dashed rgba(63,185,111,.25)}
+.security .row:last-child{border-bottom:none}
+.security .label{color:var(--dim)}
+.security .value{color:var(--ok);font-weight:600}
+.security .value.bad{color:var(--bad)}
+.security .value.warn{color:var(--warn)}
+.empty{color:var(--dim);text-align:center;padding:16px}
+</style>
+</head>
+<body>
+<div class="masthead">
+  <div>
+    <h1>📈 Upstox LIVE Paper Trading</h1>
+    <div class="meta">LIVE market data · internal paper execution · real orders disabled</div>
+  </div>
+  <div class="meta">
+    <a href="/upstox-live-paper/status">JSON status</a> ·
+    <a href="/upstox-live-paper/report">generate weekly report</a> ·
+    <a href="/upstox-live-paper/report/list">report history</a> ·
+    <a href="/upstox-trading">Upstox sandbox</a> ·
+    <a href="/fnf-trading">FYERS desk</a> ·
+    <a href="/">dashboard</a>
+  </div>
+</div>
+
+<div class="security">
+  <div class="card-title" style="margin-bottom:10px">Safety lock — read before using</div>
+  <div class="row"><span class="label">UPSTOX MARKET DATA</span><span class="value" id="safety-data">—</span></div>
+  <div class="row"><span class="label">EXECUTION</span><span class="value" id="safety-execution">PAPER</span></div>
+  <div class="row"><span class="label">REAL ORDERS</span><span class="value bad" id="safety-real">DISABLED</span></div>
+  <div class="row"><span class="label">SAFETY LOCK</span><span class="value" id="safety-lock">UPSTOX_SANDBOX_ENABLED=true</span></div>
+  <div class="row"><span class="label">PAPER CAPITAL</span><span class="value" id="safety-capital">—</span></div>
+  <div class="row"><span class="label">UPSTOX AUTH</span><span class="value" id="safety-auth">—</span></div>
+  <div class="row"><span class="label">UPSTOX TOKEN STATUS</span><span class="value" id="safety-token">—</span></div>
+</div>
+
+<div id="status" class="empty">Loading status…</div>
+
+<script>
+(async () => {
+  try {
+    const res = await fetch('/upstox-live-paper/status');
+    if (!res.ok) throw new Error('status fetch failed');
+    const s = await res.json();
+    const fmt = (n, d=2) => { const v=Number(n??0); return isNaN(v)?'—':v.toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d}); };
+    const esc = (x) => String(x==null?'':x).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+
+    // Safety block
+    document.getElementById('safety-data').textContent = s.feed?.marketDataSource ?? 'UNKNOWN';
+    document.getElementById('safety-execution').textContent = 'PAPER';
+    document.getElementById('safety-real').textContent = 'DISABLED';
+    document.getElementById('safety-real').className = 'value bad';
+    document.getElementById('safety-lock').textContent = 'UPSTOX_SANDBOX_ENABLED=' + (s.feed?.safetyLockActive !== false);
+    document.getElementById('safety-capital').textContent = '₹' + fmt(s?.portfolio?.capital ? s.portfolio.capital : 5000, 0);
+
+    const auth = s.auth || {};
+    const authEl = document.getElementById('safety-auth');
+    authEl.textContent = auth.status || 'UNKNOWN';
+    authEl.className = 'value ' + ((auth.status === 'TOKEN_VALID' || auth.status === 'AUTHENTICATED') ? 'ok' : (auth.status === 'TOKEN_MISSING' || auth.status === 'AUTH_REQUIRED') ? 'bad' : 'warn'));
+
+    const tokenEl = document.getElementById('safety-token');
+    tokenEl.textContent = [auth.status, auth.expiresAt ? 'expires '+new Date(auth.expiresAt).toLocaleString('en-IN') : 'no expiry'].filter(Boolean).join(' · ') || '—';
+    tokenEl.className = 'value ' + ((auth.status === 'TOKEN_VALID' || auth.status === 'AUTHENTICATED') ? 'ok' : (auth.status === 'TOKEN_MISSING' || auth.status === 'AUTH_REQUIRED') ? 'bad' : 'warn'));
+
+    const feed = s.feed || {};
+    const monitoring = s.monitoring || {};
+
+    const statusBox = document.getElementById('status');
+    statusBox.innerHTML = '';
+
+    // Connection + feed
+    const connCard = document.createElement('div');
+    connCard.className = 'card';
+    connCard.innerHTML = `
+      <div class="card-title">🔌 Connection & feed</div>
+      <div class="kv">
+        <div><span>Market data source</span><b>${esc(feed.marketDataSource)}</b></div>
+        <div><span>Instruments tracked</span><b>${feed.instrumentsTracked ?? 0}</b></div>
+        <div><span>Option chain fetched at</span><b class="small">${feed.optionChainFetchedAt ? new Date(feed.optionChainFetchedAt).toLocaleString('en-IN') : '—'}</b></div>
+        <div><span>Last option quote</span><b class="small">${feed.lastOptionQuoteTs ? new Date(feed.lastOptionQuoteTs).toLocaleString('en-IN') : '—'}</b></div>
+        <div><span>Last market snapshot</span><b class="small">${feed.lastMarketSnapshotTs ? new Date(feed.lastMarketSnapshotTs).toLocaleString('en-IN') : '—'}</b></div>
+        <div><span>WebSocket connected</span><b>${feed.wsConnected ? 'YES' : 'NO'}</b></div>
+        <div><span>WS last error</span><b class="small ${feed.wsLastError ? 'bad':'dim'}">${feed.wsLastError || '—'}</b></div>
+        <div><span>REST last error</span><b class="small ${feed.restLastError ? 'bad':'dim'}">${feed.restLastError || '—'}</b></div>
+        <div><span>Quotes persisted today</span><b>${feed.quotesPersistedToday ?? 0}</b></div>
+        <div><span>Stale-blocked trades</span><b class="${feed.staleBlockedTrades > 0 ? 'warn' : 'dim'}">${feed.staleBlockedTrades}</b></div>
+      </div>
+      <div class="hint">If market data is stale, the paper engine will not open new positions.</div>
+    `;
+    statusBox.appendChild(connCard);
+
+    // Monitoring
+    const monCard = document.createElement('div');
+    monCard.className = 'card';
+    monCard.innerHTML = `
+      <div class="card-title">🛡️ Monitoring counters</div>
+      <div class="kv">
+        <div><span>WS reconnects</span><b>${monitoring.wsReconnectCount ?? 0}</b></div>
+        <div><span>API errors</span><b class="${monitoring.apiErrorCount > 0 ? 'bad' : 'dim'}">${monitoring.apiErrorCount ?? 0}</b></div>
+        <div><span>DB errors</span><b class="${monitoring.dbErrorCount > 0 ? 'bad' : 'dim'}">${monitoring.dbErrorCount ?? 0}</b></div>
+        <div><span>Abnormal spreads</span><b class="${monitoring.abnormalSpreadCount > 0 ? 'warn' : 'dim'}">${monitoring.abnormalSpreadCount ?? 0}</b></div>
+        <div><span>Missing strikes</span><b class="${monitoring.missingStrikeCount > 0 ? 'warn' : 'dim'}">${monitoring.missingStrikeCount ?? 0}</b></div>
+        <div><span>Paper inconsistencies</span><b class="${monitoring.paperInconsistencyCount > 0 ? 'bad' : 'dim'}">${monitoring.paperInconsistencyCount ?? 0}</b></div>
+        <div><span>Paper account OK</span><b class="${monitoring.paperAccountOk ? 'ok' : 'bad'}">${monitoring.paperAccountOk ? 'YES' : 'NO'}</b></div>
+      </div>
+      <div class="small dim">${esc(monitoring.certification)}</div>
+    `;
+    statusBox.appendChild(monCard);
+
+    // Portfolio summary
+    const port = s.portfolio || s.portfolios && s.portfolios[0];
+    if (port) {
+      const cap = Number(port.capital ?? 0);
+      const deployed = Number(port.deployed ?? 0);
+      const ceiling = Number(port.ceiling ?? port.capital ?? 0);
+      const headroom = Math.max(0, ceiling - deployed);
+      const netPnl = Number(port.netPnl ?? 0);
+      const unrealised = Number(port.unrealisedPnl ?? 0);
+      const totalEquity = cap + netPnl + unrealised;
+      const dd = Number(port.drawdown ?? 0);
+
+      const pfCard = document.createElement('div');
+      pfCard.className = 'card';
+      pfCard.innerHTML = `
+        <div class="card-title">💰 Paper portfolio — ${esc(port.label)} (${esc(port.id)})</div>
+        <div class="kv">
+          <div><span>Capital</span><b>₹${fmt(cap,0)}</b></div>
+          <div><span>Ceiling</span><b>₹${fmt(ceiling,0)}</b></div>
+          <div><span>Deployed</span><b>₹${fmt(deployed,0)}</b></div>
+          <div><span>Headroom</span><b class="${headroom < 1000 ? 'bad' : 'ok'}">₹${fmt(headroom,0)}</b></div>
+          <div><span>Realised P&L</span><b class="${netPnl >= 0 ? 'ok' : 'bad'}">₹${fmt(netPnl)}</b></div>
+          <div><span>Unrealised P&L</span><b class="${unrealised >= 0 ? 'ok' : 'bad'}">₹${fmt(unrealised)}</b></div>
+          <div><span>Total equity</span><b class="${totalEquity >= cap ? 'ok' : 'bad'}">₹${fmt(totalEquity)}</b></div>
+          <div><span>Drawdown</span><b class="${dd > 0 ? 'bad' : 'dim'}">₹${fmt(dd)}</b></div>
+          <div><span>Open positions</span><b>${port.openPositionCount ?? 0}</b></div>
+          <div><span>Auto-trade</span><b class="${port.autoTradeEnabled ? 'ok' : 'dim'}">${port.autoTradeEnabled ? 'ON' : 'OFF'}</b></div>
+          <div><span>Friday block</span><b class="${port.fridayTradingEnabled ? 'ok' : 'warn'}">${port.fridayTradingEnabled ? 'allowed' : 'active'}</b></div>
+          <div><span>Data source / mode</span><b>${esc(port.dataSource)} / ${esc(port.executionMode)}</b></div>
+        </div>
+      `;
+      statusBox.appendChild(pfCard);
+    }
+
+    // Positions
+    const positions = s.positions || [];
+    if (positions.length) {
+      const posCard = document.createElement('div');
+      posCard.className = 'card';
+      posCard.innerHTML = `<div class="card-title">📌 Open positions</div><table><tr><th>Instrument</th><th>Side</th><th>Qty</th><th>Avg entry</th><th>Mark</th><th>Unrealised</th><th>Status</th></tr>${
+        positions.map(p => `<tr><td>${esc(p.instrument)}</td><td class="${p.side==='BUY'?'ok':'bad'}">${p.side}</td><td>${Number(p.quantity).toLocaleString('en-IN')}</td><td>₹${fmt(p.averagePrice)}</td><td>₹${fmt(p.markPrice)}</td><td class="${Number(p.unrealisedPnl)>=0?'ok':'bad'}">₹${fmt(p.unrealisedPnl)}</td><td class="dim">${p.status}</td></tr>`).join('')
+      }</table>`;
+      statusBox.appendChild(posCard);
+    } else {
+      const posCard = document.createElement('div');
+      posCard.className = 'card';
+      posCard.innerHTML = `<div class="card-title">📌 Open positions</div><div class="empty">No open positions.</div>`;
+      statusBox.appendChild(posCard);
+    }
+
+    // Recent trades
+    const trades = s.trades || [];
+    if (trades.length) {
+      const trCard = document.createElement('div');
+      trCard.className = 'card';
+      trCard.innerHTML = `<div class="card-title">📒 Recent trades</div><table><tr><th>Opened</th><th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>Status</th><th>Algo</th></tr>${
+        trades.slice(0,20).map(t => {
+          const statusCls = t.status==='CLOSED'?'dim':t.status==='OPEN'?'ok':'warn';
+          const netCls = t.status==='CLOSED' ? (Number(t.netPnl)>=0?'ok':'bad') : '';
+          const pnl = t.status==='CLOSED' ? ` · <span class="${netCls}">₹${fmt(t.netPnl)}</span>` : '';
+          return `<tr><td>${new Date(t.orderedAt).toLocaleString('en-IN')}</td><td>${esc(t.instrument)}</td><td class="${t.side==='BUY'?'ok':'bad'}">${t.side}</td><td>${Number(t.quantity).toLocaleString('en-IN')}</td><td>₹${fmt(t.entryPrice)}</td><td class="${statusCls}">${t.status}${pnl}</td><td class="dim small">${esc(t.algoSource ?? 'manual')}</td></tr>`;
+        }).join('')
+      }</table>`;
+      statusBox.appendChild(trCard);
+    } else {
+      const trCard = document.createElement('div');
+      trCard.className = 'card';
+      trCard.innerHTML = `<div class="card-title">📒 Recent trades</div><div class="empty">No trades yet.</div>`;
+      statusBox.appendChild(trCard);
+    }
+
+    // Weekly reports
+    const reports = s.reports || [];
+    if (reports.length) {
+      const rptCard = document.createElement('div');
+      rptCard.className = 'card';
+      rptCard.innerHTML = `<div class="card-title">📄 Weekly reports</div><table><tr><th>Week</th><th>Generated</th><th>Net P&L</th><th>Win rate</th><th>Trades</th></tr>${
+        reports.slice(0,10).map(r => `<tr><td>${esc(r.reportWeek)}</td><td class="dim small">${new Date(r.generatedAt).toLocaleString('en-IN')}</td><td class="${Number(r.totalPnl)>=0?'ok':'bad'}">₹${fmt(r.totalPnl)}</td><td>${r.winRate.toFixed(1)}%</td><td>${r.tradeCount}</td></tr>`).join('')
+      }</table><div class="hint"><a class="btn" href="/upstox-live-paper/report">🔄 Generate this week's report</a> · <a href="/reports/upstox-live-paper/">Markdown files</a></div>`;
+      statusBox.appendChild(rptCard);
+    }
+
+    // Learning summary if present
+    if (s.learning) {
+      const lrnCard = document.createElement('div');
+      lrnCard.className = 'card';
+      lrnCard.innerHTML = `
+        <div class="card-title">🧠 Learning summary (closed trades)</div>
+        <div class="kv">
+          <div><span>Total closed</span><b>${s.learning.total}</b></div>
+          <div><span>Winners</span><b class="ok">${s.learning.winners}</b></div>
+          <div><span>Win rate</span><b>${s.learning.winRate}%</b></div>
+          <div><span>Net P&L</span><b class="${s.learning.netPnl >= 0 ? 'ok' : 'bad'}">₹${fmt(s.learning.netPnl)}</b></div>
+        </div>
+        ${Object.entries(s.learning.byAlgo || {}).length ? `<div class="small dim">By algo: ${Object.entries(s.learning.byAlgo).map(([k,v]) => `${esc(k)}: ${v.count} trades, ${v.winRate.toFixed(0)}% WR, ₹${fmt(v.netPnl)}`).join(' · ')}</div>` : ''}
+      `;
+      statusBox.appendChild(lrnCard);
+    }
+
+  } catch (err) {
+    document.getElementById('status').innerHTML = `<div class="bad">Failed to load status: ${err instanceof Error ? err.message : err}</div>`;
+  }
+})();
+</script>
+
+<div class="footer">
+  Upstox LIVE paper system · separate from FYERS (fnf_* tables) and Upstox Sandbox (upstox_* / sandbox_ticks tables) · never touches real order endpoints.
+</div>
+</body>
+</html>

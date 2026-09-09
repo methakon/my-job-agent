@@ -42,21 +42,81 @@ export class InboxReaderService {
 		return Buffer.concat([d.update(Buffer.from(dataHex, 'hex')), d.final()]).toString('utf8');
 	}
 
+	/**
+	 * Connect to IMAP server with exponential backoff for failed accounts.
+	 */
 	private async connect(account: MailAccount): Promise<ImapFlow> {
+		// Skip if IMAP disabled for this account
+		if (account.useImap !== undefined && account.useImap === false) {
+			throw new Error(`IMAP disabled for ${account.email}`);
+		}
+
+		// Skip if too many recent failures (exponential backoff)
+		if (account.imapFailureCount && account.imapFailureCount > 0) {
+			const hoursSinceLastFailure = account.lastImapSuccess
+				? (Date.now() - account.lastImapSuccess.getTime()) / (60 * 60 * 1000)
+				: Infinity;
+			
+			// Exponential backoff: wait 2^(n-1) hours for n failures
+			const backoffHours = Math.pow(2, account.imapFailureCount - 1);
+			if (hoursSinceLastFailure < backoffHours) {
+				throw new Error(`IMAP backoff for ${account.email}: ${account.imapFailureCount} failures, wait ${backoffHours} hours`);
+			}
+		}
+
 		const client = new ImapFlow({
-			host: account.provider === 'gmail' ? 'imap.gmail.com' : 'outlook.office365.com',
-			port: 993,
+			host: account.imapHost || (account.provider === 'gmail' ? 'imap.gmail.com' : 'outlook.office365.com'),
+			port: account.imapPort || 993,
 			secure: true,
 			auth: { user: account.email, pass: this.decrypt(account.passwordEnc) },
 			logger: false,
-		});
+		} as any); // timeout option not in Typescript types but works at runtime
+
 		await client.connect();
 		return client;
 	}
 
+	private async updateImapStatus(account: MailAccount, success: boolean): Promise<void> {
+		try {
+			if (success) {
+				await this.repo.update(account.id, {
+					lastImapSuccess: new Date(),
+					imapFailureCount: 0,
+				});
+			} else {
+				await this.repo.update(account.id, {
+					imapFailureCount: (account.imapFailureCount || 0) + 1,
+				});
+
+				// Auto-disable if 5+ consecutive failures
+				if ((account.imapFailureCount || 0) + 1 >= 5) {
+					await this.repo.update(account.id, {
+						useImap: false,
+					});
+					this.logger.warn(`Auto-disabled IMAP for ${account.email}: 5+ consecutive failures`);
+				}
+			}
+		} catch (err) {
+			this.logger.error(`Failed to update IMAP status for ${account.email}: ${err.message}`);
+		}
+	}
+
 	/** FR-12: find the newest OTP/verification code, optionally filtered by portal name. */
 	async readOtp(portalHint?: string, withinMinutes = 15): Promise<OtpEmail | null> {
-		const accounts = await this.repo.find({ where: { active: true }, order: { isPrimary: 'DESC' } });
+		// Only check accounts with active IMAP
+		const accounts = await this.repo.find({ 
+			where: { 
+				active: true, 
+				useImap: true 
+			}, 
+			order: { isPrimary: 'DESC' } 
+		});
+
+		if (accounts.length === 0) {
+			this.logger.warn('No active IMAP accounts available for OTP reading');
+			return null;
+		}
+
 		for (const account of accounts) {
 			let client: ImapFlow | null = null;
 			try {
@@ -79,14 +139,17 @@ export class InboxReaderService {
 					candidates.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
 					if (candidates[0]) {
 						this.logger.log(`OTP found for ${portalHint ?? 'portal'}: ${candidates[0].code} (${candidates[0].from})`);
+						await this.updateImapStatus(account, true);
 						return candidates[0];
 					}
 				} finally {
 					lock.release();
 				}
 				await client.logout();
+				await this.updateImapStatus(account, true);
 			} catch (err) {
 				this.logger.warn(`inbox read failed on ${account.email}: ${String(err).slice(0, 150)}`);
+				await this.updateImapStatus(account, false);
 				if (client) await client.logout().catch(() => undefined);
 			}
 		}
@@ -96,7 +159,19 @@ export class InboxReaderService {
 	/** Poll unread recruiter-ish replies for tracking. Returns subjects seen. */
 	async pollReplies(): Promise<string[]> {
 		const subjects: string[] = [];
-		const accounts = await this.repo.find({ where: { active: true }, order: { isPrimary: 'DESC' } });
+		const accounts = await this.repo.find({ 
+			where: { 
+				active: true, 
+				useImap: true 
+			}, 
+			order: { isPrimary: 'DESC' } 
+		});
+
+		if (accounts.length === 0) {
+			this.logger.warn('No active IMAP accounts available for reply polling');
+			return subjects;
+		}
+
 		for (const account of accounts) {
 			let client: ImapFlow | null = null;
 			try {
@@ -113,11 +188,57 @@ export class InboxReaderService {
 					lock.release();
 				}
 				await client.logout();
+				await this.updateImapStatus(account, true);
 			} catch (err) {
 				this.logger.warn(`reply poll failed on ${account.email}: ${String(err).slice(0, 120)}`);
+				await this.updateImapStatus(account, false);
 				if (client) await client.logout().catch(() => undefined);
 			}
 		}
 		return subjects;
+	}
+
+	/**
+	 * Get IMAP health status for all accounts.
+	 */
+	async getImapHealth(): Promise<Array<{
+		email: string;
+		provider: string;
+		useImap: boolean;
+		imapHost: string;
+		imapPort: number;
+		isAppPassword: boolean;
+		imapFailureCount: number;
+		lastImapSuccess: Date | null;
+		lastFailureAgeHours: number | null;
+		backoffHours: number;
+	}>> {
+		const accounts = await this.repo.find({
+			where: { active: true },
+			order: { isPrimary: 'DESC', email: 'ASC' }
+		});
+
+		return accounts.map(acc => {
+			const lastFailureAgeHours = acc.lastImapSuccess
+				? (Date.now() - acc.lastImapSuccess.getTime()) / (60 * 60 * 1000)
+				: null;
+			
+			const backoffHours = (acc.imapFailureCount && acc.imapFailureCount > 0)
+				? Math.pow(2, acc.imapFailureCount - 1)
+				: 0;
+
+			return {
+				email: acc.email,
+				provider: acc.provider,
+				useImap: acc.useImap ?? true,
+				imapHost: acc.imapHost || (acc.provider === 'gmail' ? 'imap.gmail.com' : 'outlook.office365.com'),
+				imapPort: acc.imapPort || 993,
+				isAppPassword: acc.isAppPassword ?? false,
+				imapFailureCount: acc.imapFailureCount || 0,
+				lastImapSuccess: acc.lastImapSuccess,
+				lastFailureAgeHours,
+				backoffHours,
+			};
+		});
 	}
 }

@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { FnfTradingService, WEEKDAY_NAMES, DECAY_DEFAULTS } from './fnf-trading.service';
 import { FnoMarketDataService } from './fno-market-data.service';
 import { FyersTokenService } from './fyers-token.service';
+import { BypassAuth, AllowIps } from '../auth/bypass-auth.decorator';
 
 const esc = (s: unknown): string =>
 	String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -22,6 +23,8 @@ const pct = (n: unknown): string => {
 const badge = (label: string, cls: string): string => `<span class="badge ${cls}">${esc(label)}</span>`;
 
 @Controller('fnf-trading')
+@BypassAuth()
+@AllowIps('127.0.0.1', '::1')
 export class FnfTradingPageController {
 	constructor(
 		private readonly trading: FnfTradingService,
