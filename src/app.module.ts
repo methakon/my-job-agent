@@ -124,6 +124,7 @@ import { AiModule } from './ai/ai.module';
 // ── Upstox LIVE paper module (new, isolated) ──────────────────────────────────
 import { UpstoxLivePaperModule } from './trading/upstox-live-paper/upstox-live-paper.module';
 import { UnifiedMarketDataModule } from './trading/unified-market-data/unified-market-data.module';
+import { PreOpenModule } from './trading/pre-open/pre-open.module';
 import { UnifiedOptionQuote } from './trading/unified-market-data/unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './trading/unified-market-data/unified-market-snapshot.entity';
 import { PatternSignal } from './trading/pattern-engine/pattern-signal.entity';
@@ -173,6 +174,7 @@ import {
     UpstoxTradingModule,
     UpstoxLivePaperModule,
     UnifiedMarketDataModule,
+    PreOpenModule,
   ],
   controllers: [
     ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController,
