@@ -158,36 +158,52 @@ export class ProjectClarificationService implements OnModuleInit {
 
 	/**
 	 * Everything the page renders, in one pass: total/pending/answered counts,
-	 * the per-item split, stage-level counts, and the pending questions that are
-	 * not attached to any checklist row (they get their own panel).
+	 * the per-item split, stage-level counts, and every question that is NOT
+	 * reachable from a checklist row.
+	 *
+	 * A question is only reachable from a row when its itemId still matches a row
+	 * that is actually rendered. A null itemId, or an itemId whose checklist row no
+	 * longer exists (re-seeded checklist, deleted row), MUST land in `unattached`
+	 * instead of being filed under an id nobody renders — otherwise the page shows
+	 * "1 awaiting clarification" in the stage list with no box to type in.
 	 */
 	async overview(): Promise<{
 		stats: ClarificationStats;
 		byItem: Map<number, ItemClarificationCounts>;
+		unattached: ItemClarificationCounts;
 		unattachedPending: ProjectClarification[];
+		allPending: ProjectClarification[];
 		byStage: StageClarificationCount[];
 	}> {
-		const rows = await this.all();
+		const [rows, liveItems] = await Promise.all([
+			this.all(),
+			this.items.find({ select: { id: true } }),
+		]);
+		const liveIds = new Set(liveItems.map((i) => i.id));
 		const stats: ClarificationStats = { total: rows.length, pending: 0, answered: 0 };
 		const byItem = new Map<number, ItemClarificationCounts>();
-		const unattachedPending: ProjectClarification[] = [];
+		const unattached: ItemClarificationCounts = { pending: [], answered: [] };
+		const allPending: ProjectClarification[] = [];
 		const stages = new Map<string, StageClarificationCount>();
 
 		for (const r of rows) {
 			const pending = r.status !== 'answered';
 			if (pending) stats.pending += 1;
 			else stats.answered += 1;
+			if (pending) allPending.push(r);
 
-			if (r.itemId != null) {
-				let bucket = byItem.get(r.itemId);
-				if (!bucket) {
-					bucket = { pending: [], answered: [] };
-					byItem.set(r.itemId, bucket);
-				}
-				(pending ? bucket.pending : bucket.answered).push(r);
-			} else if (pending) {
-				unattachedPending.push(r);
-			}
+			const bucket =
+				r.itemId != null && liveIds.has(r.itemId)
+					? (() => {
+							let b = byItem.get(r.itemId);
+							if (!b) {
+								b = { pending: [], answered: [] };
+								byItem.set(r.itemId, b);
+							}
+							return b;
+						})()
+					: unattached;
+			(pending ? bucket.pending : bucket.answered).push(r);
 
 			const stage = r.stage || '(no stage)';
 			let s = stages.get(stage);
@@ -202,7 +218,7 @@ export class ProjectClarificationService implements OnModuleInit {
 		const byStage = [...stages.values()].sort(
 			(a, b) => b.pending - a.pending || b.answered - a.answered || a.stage.localeCompare(b.stage),
 		);
-		return { stats, byItem, unattachedPending, byStage };
+		return { stats, byItem, unattached, unattachedPending: unattached.pending, allPending, byStage };
 	}
 }
 

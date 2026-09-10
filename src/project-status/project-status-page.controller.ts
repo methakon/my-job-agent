@@ -26,10 +26,16 @@ const STATUS_BUTTONS = ['pending', 'in_progress', 'done', 'blocked'];
 const istWhen = (d: Date | null | undefined): string =>
 	d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : '';
 
-/** Yellow block: a question the agent needs answered, with the operator's save box. */
-const pendingBlock = (c: ProjectClarification): string => `
-<div class="cl-box">
-  <div class="cl-q">❓ needs clarification${c.stage ? ` · <span class="cl-stage">${esc(c.stage)}</span>` : ''} · filed ${esc(istWhen(c.createdAt))} by ${esc(c.askedBy)} · <code>#${c.id}</code></div>
+/**
+ * Yellow block: a pending question WITH its answer box. Every pending question
+ * is rendered in the always-open panel at the top of the page, so a question can
+ * never be reachable only by expanding a collapsed gate.
+ */
+const pendingBlock = (c: ProjectClarification, rowLink?: number | null): string => `
+<div class="cl-box" id="clar-${c.id}">
+  <div class="cl-q">❓ awaiting your clarification${c.stage ? ` · <span class="cl-stage">${esc(c.stage)}</span>` : ''} · filed ${esc(istWhen(c.createdAt))} by ${esc(c.askedBy)} · <code>#${c.id}</code>${
+		rowLink ? ` · <a href="#item-${rowLink}">↓ checklist row #${rowLink}</a>` : ''
+	}</div>
   <div class="cl-text">${esc(c.question)}</div>
   <form method="post" action="/project-status/clarifications/${c.id}/answer" class="cl-form">
     <textarea name="answer" rows="2" maxlength="4000" placeholder="your clarification…" required></textarea>
@@ -37,13 +43,31 @@ const pendingBlock = (c: ProjectClarification): string => `
   </form>
 </div>`;
 
-/** Collapsed history of an answered question (the row keeps its normal colour). */
-const answeredBlock = (c: ProjectClarification): string => `
-<details class="cl-box ok">
-  <summary><span class="cl-q ok">💬 clarification given · ${esc(istWhen(c.answeredAt))}</span> — ${esc(c.question.slice(0, 110))}${c.question.length > 110 ? '…' : ''}</summary>
+/** Compact pointer shown on a checklist row: the box itself lives in the panel. */
+const pendingPointer = (n: number): string =>
+	`<span class="badge clarify">❔ ${n} awaiting clarification</span> <a class="cl-up" href="#clarifications">answer above ↑</a>`;
+
+/**
+ * Answered question: the stored answer stays EDITABLE in place — the textarea is
+ * prefilled with what was saved, so an answer like "hi" can be corrected without
+ * re-typing the question. "send back to pending" is for answers that are wrong
+ * rather than incomplete.
+ */
+const answeredBlock = (c: ProjectClarification, open = false, rowLink?: number | null): string => `
+<details class="cl-box ok" id="clar-${c.id}"${open ? ' open' : ''}>
+  <summary>
+    <span class="cl-q ok">💬 clarification given · ${esc(istWhen(c.answeredAt))} · <code>#${c.id}</code>${c.stage ? ` · <span class="cl-stage">${esc(c.stage)}</span>` : ''}</span>
+    — ${esc(c.question.slice(0, 110))}${c.question.length > 110 ? '…' : ''}
+  </summary>
   <div class="cl-text">${esc(c.question)}</div>
-  <div class="cl-a">✅ ${esc(c.answer ?? '')}</div>
-  <form method="post" action="/project-status/clarifications/${c.id}/reopen" class="cl-actions"><button class="mini" type="submit">↩ reopen</button></form>
+  <form method="post" action="/project-status/clarifications/${c.id}/answer" class="cl-form">
+    <textarea name="answer" rows="3" maxlength="4000" placeholder="your clarification…" required>${esc(c.answer ?? '')}</textarea>
+    <div class="cl-actions">
+      <button type="submit">💾 update clarification</button>
+      ${rowLink ? `<a class="cl-up" href="#item-${rowLink}">↓ checklist row #${rowLink}</a>` : ''}
+    </div>
+  </form>
+  <form method="post" action="/project-status/clarifications/${c.id}/reopen" class="cl-actions" style="margin-top:4px"><button class="mini" type="submit">↩ send back to pending</button></form>
 </details>`;
 
 const askForm = (itemId: number | null, stage: string, label: string): string => `
@@ -110,17 +134,16 @@ ${it.doneWhen ? `<div class="v5-d"><b>Done when:</b> ${esc(it.doneWhen)}</div>` 
 </div>`
 							: '';
 						const cl = clarOv.byItem.get(id) ?? { pending: [], answered: [] };
-					const clarBadge = cl.pending.length
-						? `<span class="badge clarify">❔ ${cl.pending.length} awaiting clarification</span>`
-						: cl.answered.length
-							? `<span class="badge ok">💬 ${cl.answered.length} clarification${cl.answered.length === 1 ? '' : 's'} given</span>`
-							: '';
-					const clarHtml = [
-						...cl.pending.map(pendingBlock),
-						...cl.answered.map(answeredBlock),
-						askForm(id, it.grp, 'ask a clarification on this item'),
-					].join('\n');
-					return `<tr class="row-${esc(it.status)}${cl.pending.length ? ' row-clarify' : ''}">
+						const clarBadge = cl.pending.length
+							? pendingPointer(cl.pending.length)
+							: cl.answered.length
+								? `<span class="badge ok">💬 ${cl.answered.length} clarification${cl.answered.length === 1 ? '' : 's'} given</span>`
+								: '';
+						const clarHtml = [
+							...cl.answered.map((c) => answeredBlock(c, false, id)),
+							askForm(id, it.grp, 'ask a clarification on this item'),
+						].join('\n');
+						return `<tr id="item-${id}" class="row-${esc(it.status)}${cl.pending.length ? ' row-clarify' : ''}">
   <td class="num">${it.item_order}</td>
   <td><div>${esc(it.item)}</div>${v5detail}${it.note ? `<div class="note">📝 ${esc(it.note)}</div>` : ''}${clarBadge ? `<div class="cl-badges">${clarBadge}</div>` : ''}${clarHtml}</td>
   <td class="nowrap">${buttons}</td>
@@ -129,12 +152,15 @@ ${it.doneWhen ? `<div class="v5-d"><b>Done when:</b> ${esc(it.doneWhen)}</div>` 
 					})
 					.join('\n');
 				const done = g.stats.done ?? 0;
+				// A gate holding a pending question opens by itself: the yellow row and its
+				// "answer above" pointer must never sit behind a collapsed accordion.
+				const gatePending = g.items.reduce((n, it) => n + (clarOv.byItem.get(it.id)?.pending.length ?? 0), 0);
 				return `
-<details class="gate" ${g.grp.startsWith('GATE 0') || g.grp.startsWith('B.') ? 'open' : ''}>
+<details class="gate" id="gate-${esc(g.grp.replace(/[^A-Za-z0-9]+/g, '-').toLowerCase())}" ${g.grp.startsWith('GATE 0') || g.grp.startsWith('B.') || gatePending ? 'open' : ''}>
   <summary>
     <div class="ghead">
       <span class="gtitle">${esc(g.grp)}</span>
-      <span class="gmeta">${done}/${g.items.length} done · ${bar(done, g.items.length)}</span>
+      <span class="gmeta">${done}/${g.items.length} done · ${bar(done, g.items.length)}${gatePending ? ` · <b class="cl-wait">${gatePending} awaiting clarification</b>` : ''}</span>
     </div>
     ${g.goal ? `<div class="ggoal">${esc(g.goal)}</div>` : ''}
   </summary>
@@ -146,7 +172,26 @@ ${it.doneWhen ? `<div class="v5-d"><b>Done when:</b> ${esc(it.doneWhen)}</div>` 
 			})
 			.join('\n');
 
-		const unattached = clarOv.unattachedPending.map(pendingBlock).join('\n');
+		/**
+		 * The clarification panel: the ONE place a question is answerable.
+		 * - every pending question (attached to a row or not) with its answer box
+		 * - every answered question that no checklist row renders (null / stale itemId)
+		 *   with its stored answer prefilled and editable
+		 * Nothing here is duplicated in the gates: a row only points up to this panel.
+		 */
+		const liveIds = new Set([...clarOv.byItem.keys()]);
+		const rowLinkOf = (c: ProjectClarification): number | null =>
+			c.itemId != null && liveIds.has(c.itemId) ? c.itemId : null;
+		const pendingHtml = clarOv.allPending.length
+			? clarOv.allPending.map((c) => pendingBlock(c, rowLinkOf(c))).join('\n')
+			: '<div class="meta">nothing awaiting your clarification 🎉</div>';
+		const detachedAnswered = clarOv.unattached.answered;
+		const answeredHtml = detachedAnswered.length
+			? `<details class="cl-history" open>
+  <summary>💬 ${detachedAnswered.length} clarification${detachedAnswered.length === 1 ? '' : 's'} given outside a checklist row — review or correct any of them here</summary>
+  ${detachedAnswered.map((c) => answeredBlock(c, false, null)).join('\n')}
+</details>`
+			: '';
 		const clarCard = `
 <div class="card" id="clarifications">
   <div class="ghead">
@@ -158,8 +203,12 @@ ${it.doneWhen ? `<div class="v5-d"><b>Done when:</b> ${esc(it.doneWhen)}</div>` 
     <div><div class="meta">Clarifications given</div><b class="ok">${clarOv.stats.answered}</b></div>
     <div><div class="meta">Total filed</div><b class="dim">${clarOv.stats.total}</b></div>
   </div>
+  <div class="cl-panel">
+    <div class="cl-head">${clarOv.stats.pending ? `❓ ${clarOv.stats.pending} awaiting your clarification` : '❓ no clarification pending'} — answer here; every answer stays editable after saving.</div>
+    ${pendingHtml}
+  </div>
+  ${answeredHtml}
   ${stageCounts(clarOv.byStage)}
-  ${unattached ? `<div class="meta" style="margin-top:10px">Not tied to a single checklist row (open them where they belong when you answer):</div>${unattached}` : ''}
   ${askForm(null, '', 'file a new clarification against a stage')}
 </div>`;
 
@@ -227,6 +276,15 @@ textarea:focus{outline:none;border-color:var(--dim)}
 details.ask{margin-top:6px}
 details.ask summary{color:var(--dim);font-size:11.5px;padding:2px 0}
 details.ask summary:hover{color:var(--clarify)}
+/* The clarification panel is the single place a question is answerable, so it is
+   always on screen above the gates and never hidden behind a collapsed section. */
+.cl-panel{margin-top:10px;border-top:1px solid var(--line);padding-top:10px}
+.cl-head{font-size:12.5px;color:var(--clarify);font-weight:600;margin-bottom:4px}
+.cl-history{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+.cl-history>summary{color:var(--ok);font-size:12.5px;padding:2px 0}
+.cl-up{color:var(--clarify);font-size:11.5px;text-decoration:none;border-bottom:1px dotted var(--clarify)}
+.cl-up:hover{color:#fff}
+.cl-box:target,.cl-history:target{outline:2px solid var(--clarify);outline-offset:2px}
 ul.stages{margin:8px 0 0;padding-left:18px;font-size:12.5px}
 ul.stages li{margin:2px 0}
 .v5{margin-top:4px;font-size:12px;color:var(--dim);border-left:2px solid var(--line);padding-left:8px}
@@ -304,23 +362,25 @@ ${gateHtml}
 		res.redirect(303, '/project-status#clarifications');
 	}
 
-	/** Store the operator's clarification: the row's yellow clears and the item counts it. */
+	/** Store the operator's answer (also used to EDIT a saved one). */
 	@Post('clarifications/:id/answer')
 	async answerClarification(@Param('id') id: string, @Body('answer') answer: string, @Res() res: Response) {
 		const row = await this.clar.answer(Number(id), String(answer ?? ''));
 		res.type('html');
 		if (!row) {
-			res.status(400).send('<p>unknown clarification or empty answer</p><p><a href="/project-status">← back</a></p>');
+			res.status(400).send('<p>unknown clarification or empty answer</p><p><a href="/project-status#clarifications">← back</a></p>');
 			return;
 		}
-		res.redirect(303, '/project-status');
+		// Land on the panel, not the top of a 500KB page: the saved answer sits there
+		// prefilled in its own editable box (attached rows also carry it, collapsed).
+		res.redirect(303, `/project-status#clar-${row.id}`);
 	}
 
 	/** Send a question back to pending (the answer was not enough). */
 	@Post('clarifications/:id/reopen')
 	async reopenClarification(@Param('id') id: string, @Res() res: Response) {
 		await this.clar.reopen(Number(id));
-		res.redirect(303, '/project-status');
+		res.redirect(303, `/project-status#clar-${id}`);
 	}
 
 	// ---- machine-readable view of the same store (agent CLI / cron) ----
