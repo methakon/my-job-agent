@@ -249,4 +249,12 @@ assert.ok(/find\(\{\s*order: \{\s*updatedAt: 'DESC'\s*\},\s*take: 1\s*\}\)/.test
 assert.ok(authSrc.includes('AUTH_REQUIRED'), 'token service reports AUTH_REQUIRED when no valid row exists');
 console.log('✔ 15: token lookup is TypeORM-0.3 safe (newest row via find/take)');
 
+// ── 16. SPA fallback must not swallow imported-module API routes ──────────────
+const fallbackSrc = fs.readFileSync(path.join(ROOT, 'src/app-fallback.controller.ts'), 'utf8');
+assert.ok(fallbackSrc.includes('@Next()'), 'fallback hands unmatched API paths back to the router');
+assert.ok(/DELEGATED_PREFIXES\s*=\s*\[[^\]]*'\/api\/'/.test(fallbackSrc), 'fallback delegates /api/ (OAuth + desk API)');
+assert.ok(fallbackSrc.includes("'/upstox-live-paper/'"), 'fallback delegates the upstox desk API');
+assert.ok(fallbackSrc.includes("'dashboard.html'"), 'fallback still serves the dashboard shell for page paths');
+console.log('✔ 16: SPA fallback delegates API sub-paths (desk API + OAuth reachable)');
+
 console.log('\n✅ upstox-live-paper safety + execution + report tests complete');
