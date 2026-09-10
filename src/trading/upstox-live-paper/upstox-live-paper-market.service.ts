@@ -327,11 +327,30 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
 
   private async fetchMarketStatus(): Promise<void> {
     if (!this.config.liveCredentialsPresent) return;
+    // Upstox v2 requires the exchange segment in the path — /v2/market/status/{exchange}.
+    // A bare /v2/market/status answers 404 UDAPI100060 (Resource not Found).
+    const exchange = this.marketStatusExchange();
+    if (!exchange) return;
     try {
       const headers = await this.liveAuthHeaders(); if (!headers) return;
-      const res = await this.fetchJson<UpstoxMarketStatusResponse>(`${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_MARKET_STATUS}`, {method:'GET',headers});
-      this.optionChainFetchedAt = nowUtc(); this.logger.log(`[UPSTOX-LIVE] market status: ${res?.status??'unknown'}`);
+      const res = await this.fetchJson<UpstoxMarketStatusResponse>(`${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_MARKET_STATUS}/${encodeURIComponent(exchange)}`, {method:'GET',headers});
+      // A market-status probe is not an option-chain fetch: it must not stamp
+      // optionChainFetchedAt (that made a metadata call look like quote data).
+      this.logger.log(`[UPSTOX-LIVE] market status (${exchange}): ${res?.data?.marketStatus ?? res?.status ?? 'unknown'}`);
     } catch (err) { this.logger.warn(`[UPSTOX-LIVE] market status failed: ${this.errorMessage(err)}`); }
+  }
+
+  /**
+   * Exchange segment for /v2/market/status/{exchange}, derived from the tracked
+   * underlyings (never hard-coded): 'BSE_INDEX|SENSEX' → 'BSE', 'NSE_FO|…' →
+   * 'NSE_FO'. Index segments lose their _INDEX suffix (Upstox uses the plain
+   * exchange for index market status).
+   */
+  private marketStatusExchange(): string {
+    const first = String(this.config.liveInstruments?.[0] ?? '').trim();
+    const segment = first.split('|')[0].trim().toUpperCase();
+    if (!segment) return 'NSE';
+    return segment.replace(/_INDEX$/, '');
   }
 
   private async startWebSocket(): Promise<void> {

@@ -257,4 +257,12 @@ assert.ok(fallbackSrc.includes("'/upstox-live-paper/'"), 'fallback delegates the
 assert.ok(fallbackSrc.includes("'dashboard.html'"), 'fallback still serves the dashboard shell for page paths');
 console.log('✔ 16: SPA fallback delegates API sub-paths (desk API + OAuth reachable)');
 
+// ── 17. market-status call must carry the exchange segment (Upstox v2) ───────
+const mktSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-market.service.ts'), 'utf8');
+assert.ok(mktSrc.includes('marketStatusExchange()'), 'exchange segment is derived from tracked underlyings');
+assert.ok(/MARKET_STATUS\}\/\$\{encodeURIComponent\(exchange\)\}/.test(mktSrc), 'market-status URL carries /{exchange}');
+assert.ok(/return segment\.replace\(\/_INDEX\$\/, ''\)/.test(mktSrc), 'index segments map to the plain exchange (BSE_INDEX → BSE)');
+assert.ok(/market status \(\$\{exchange\}\)/.test(mktSrc), 'market-status log names the exchange it probed');
+console.log('✔ 17: market status probes /v2/market/status/{exchange} (no bare 404 path)');
+
 console.log('\n✅ upstox-live-paper safety + execution + report tests complete');
