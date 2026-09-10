@@ -8,3 +8,5 @@ export { UpstoxLivePaperMarketSnapshot } from './upstox-live-paper-market-snapsh
 export { UpstoxLivePaperWeeklyReport } from './upstox-live-paper-weekly-report.entity';
 export { UpstoxLivePaperToken } from './upstox-live-paper-token.entity';
 export { UpstoxLivePaperInstruction } from './upstox-live-paper-instruction.entity';
+export { UpstoxLivePaperSession } from './upstox-live-paper-session.entity';
+export { UpstoxLivePaperCandidate } from './upstox-live-paper-candidate.entity';

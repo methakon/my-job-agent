@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { RiskPolicy, clampCapital, riskPolicyFromEnv } from './paper-risk';
 
 /**
  * Upstox LIVE paper-trading configuration + safety model.
@@ -36,6 +37,12 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
 
   readonly tradingModeLabel: string;
   readonly paperCapital: number;
+  /**
+   * The configurable risk envelope for a NEW account. Each account's own
+   * configured capital overrides `configuredCapital`; the percentages and caps
+   * below are the single source of truth for how limits scale.
+   */
+  readonly riskPolicy: RiskPolicy;
   readonly defaultSlippageBps: number;
   readonly staleQuoteMaxAgeMs: number;
   readonly abnormalSpreadPctThreshold: number;
@@ -78,7 +85,11 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
     this.paperOnly = true;
 
     this.tradingModeLabel = this.realOrderAllowed ? 'REAL (permitted)' : 'PAPER';
-    this.paperCapital = Math.max(1000, Number(config.get<string>('UPSTOX_LIVE_PAPER_CAPITAL') ?? 5000));
+    // Configurable, never hard-coded to ₹5,000: the env value is only the
+    // DEFAULT for accounts that do not carry their own capital. Every limit in
+    // this module scales from the account's configured capital.
+    this.paperCapital = clampCapital(config.get<string>('UPSTOX_LIVE_PAPER_CAPITAL'));
+    this.riskPolicy = riskPolicyFromEnv(process.env);
     this.defaultSlippageBps = Math.max(0, Number(config.get<string>('UPSTOX_LIVE_PAPER_SLIPPAGE_BPS') ?? 20));
     this.staleQuoteMaxAgeMs = Math.max(5_000, Number(config.get<string>('UPSTOX_LIVE_STALE_MAX_AGE_MS') ?? 15_000));
     this.abnormalSpreadPctThreshold = Math.max(0.1, Number(config.get<string>('UPSTOX_LIVE_ABNORMAL_SPREAD_PCT') ?? 15));
@@ -131,7 +142,7 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
       `EXECUTION: PAPER`,
       `REAL ORDERS: ${lock ? 'DISABLED' : 'DISABLED (safety lock, module is paper-only)'}`,
       `SAFETY LOCK: UPSTOX_SANDBOX_ENABLED=${lock ? 'true' : 'false'}`,
-      `PAPER CAPITAL: ₹${this.paperCapital.toLocaleString('en-IN')}`,
+      `PAPER CAPITAL (default): ₹${this.paperCapital.toLocaleString('en-IN')} · RISK/TRADE ${this.riskPolicy.maxRiskPerTradePct}% · MAX ${this.riskPolicy.maxOpenPositions} POS · ${this.riskPolicy.mode}`,
       `SLIPPAGE ASSUMPTION: ${this.defaultSlippageBps} bps`,
       `STALE QUOTE MAX AGE: ${this.staleQuoteMaxAgeMs} ms`,
       `ABNORMAL SPREAD THRESHOLD: ${this.abnormalSpreadPctThreshold}%`,

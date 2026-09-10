@@ -13,6 +13,8 @@ import {
   UpstoxLivePaperWeeklyReport,
   UpstoxLivePaperToken,
   UpstoxLivePaperInstruction,
+  UpstoxLivePaperSession,
+  UpstoxLivePaperCandidate,
 } from './upstox-live-paper-entities';
 import { UpstoxLivePaperMarketService } from './upstox-live-paper-market.service';
 import { UpstoxLivePaperMarketStabilityService } from './upstox-live-paper-market-stability.service';
@@ -22,6 +24,9 @@ import { UpstoxLivePaperScheduledService } from './upstox-live-paper-scheduled.s
 import { UpstoxLivePaperInstructionService } from './upstox-live-paper-instruction.service';
 import { UpstoxLivePaperService } from './upstox-live-paper.service';
 import { UpstoxLivePaperWeeklyReportService } from './upstox-live-paper-weekly-report.service';
+import { UpstoxLivePaperRiskService } from './upstox-live-paper-risk.service';
+import { UpstoxLivePaperLearningService } from './upstox-live-paper-learning.service';
+import { UpstoxLivePaperAutoEntryService } from './upstox-live-paper-autoentry.service';
 import { UpstoxLivePaperController } from './upstox-live-paper.controller';
 import { EncryptionService } from '../../auth/encryption.service';
 import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-data.module';
@@ -41,6 +46,8 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
       UpstoxLivePaperWeeklyReport,
       UpstoxLivePaperToken,
       UpstoxLivePaperInstruction,
+      UpstoxLivePaperSession,
+      UpstoxLivePaperCandidate,
     ]),
   ],
   controllers: [UpstoxLivePaperTokenController, UpstoxLivePaperController],
@@ -53,6 +60,9 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperInstructionService,
     UpstoxLivePaperService,
     UpstoxLivePaperWeeklyReportService,
+    UpstoxLivePaperRiskService,
+    UpstoxLivePaperLearningService,
+    UpstoxLivePaperAutoEntryService,
     EncryptionService, // token/credential AES (same convention as FYERS/fnF)
   ],
   exports: [
@@ -61,6 +71,9 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperTokenService,
     UpstoxLivePaperService,
     UpstoxLivePaperInstructionService,
+    UpstoxLivePaperRiskService,
+    UpstoxLivePaperLearningService,
+    UpstoxLivePaperAutoEntryService,
   ],
 })
 export class UpstoxLivePaperModule implements OnModuleInit {

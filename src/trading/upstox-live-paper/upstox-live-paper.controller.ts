@@ -26,6 +26,10 @@ import {
 } from './upstox-live-paper.service';
 import { UpstoxLivePaperPortfolio } from './upstox-live-paper-entities';
 import { UpstoxLivePaperMarketService } from './upstox-live-paper-market.service';
+import { UpstoxLivePaperRiskService } from './upstox-live-paper-risk.service';
+import { UpstoxLivePaperLearningService } from './upstox-live-paper-learning.service';
+import { UpstoxLivePaperAutoEntryService } from './upstox-live-paper-autoentry.service';
+import { describeEntryPolicy } from './upstox-live-paper-entry-policy';
 
 @Controller('upstox-live-paper')
 export class UpstoxLivePaperController {
@@ -38,6 +42,9 @@ export class UpstoxLivePaperController {
     private readonly weeklyReport: UpstoxLivePaperWeeklyReportService,
     private readonly token: UpstoxLivePaperTokenService,
     private readonly instructions: UpstoxLivePaperInstructionService,
+    private readonly risk: UpstoxLivePaperRiskService,
+    private readonly learning: UpstoxLivePaperLearningService,
+    private readonly autoEntry: UpstoxLivePaperAutoEntryService,
   ) {}
 
   // ── safety / auth status ────────────────────────────────────────────────────
@@ -221,5 +228,79 @@ export class UpstoxLivePaperController {
   @Get()
   async summary(@Query('portfolioId') portfolioId?: string) {
     return this.service.summary(portfolioId);
+  }
+
+  // ── configurable paper capital + risk envelope ──────────────────────────────
+
+  /** Every account with the limits its OWN configured capital produces. */
+  @Get('risk')
+  async riskOverview() {
+    return { riskPolicyVersion: this.service.getConfig().riskPolicy.version, accounts: await this.risk.overview() };
+  }
+
+  /** One account's live envelope + the capital configuration of each session. */
+  @Get('risk/:portfolioId')
+  async riskFor(@Param('portfolioId') portfolioId: string, @Query('sessions') sessions?: string) {
+    const { policy, snapshot, session } = await this.risk.snapshotFor(portfolioId);
+    const limit = sessions ? parseInt(sessions, 10) || 30 : 30;
+    return {
+      policy,
+      snapshot,
+      today: session,
+      // Each session records the capital it STARTED with, so a later cap change
+      // never rewrites what an earlier session was actually run at.
+      sessions: await this.risk.listSessions(portfolioId, limit),
+    };
+  }
+
+  /**
+   * Change an account's configured paper capital (₹2,000 / ₹5,000 / ₹10,000 / any
+   * value) without a code change. Audited via a CAPITAL_CHANGED event; history is
+   * never rewritten. FNF funds and FNF accounts are not touched.
+   */
+  @Post('portfolios/:portfolioId/capital')
+  async setCapital(
+    @Param('portfolioId') portfolioId: string,
+    @Body() body: { capital?: number; reason?: string; actor?: string },
+  ) {
+    const capital = this.risk.validateCapitalRequested(body?.capital);
+    const updated = await this.risk.updateCapital(portfolioId, capital, { reason: body?.reason, actor: body?.actor });
+    const { snapshot } = await this.risk.snapshotFor(portfolioId);
+    return {
+      portfolioId,
+      configuredCapital: Number(updated.capital),
+      snapshot,
+      note: 'historical trades, P&L and sessions keep the capital configuration they were produced under',
+    };
+  }
+
+  // ── V1 policy + learning journal ────────────────────────────────────────────
+
+  /** The live V1 thresholds and version (a hypothesis set, adjustable). */
+  @Get('entry-policy')
+  async entryPolicy() {
+    return { ...this.autoEntry.policyDescription(), thresholdsDetail: describeEntryPolicy() };
+  }
+
+  /** Run one V1 cycle now (management first, then at most one entry). */
+  @Post('auto-entry/run')
+  async runAutoEntry() {
+    return this.autoEntry.runOnce();
+  }
+
+  /** Every candidate of a session — executed AND refused — with its outcome. */
+  @Get('journal')
+  async journal(@Query('portfolioId') portfolioId: string, @Query('sessionDate') sessionDate?: string) {
+    if (!portfolioId) throw new BadRequestException('portfolioId is required');
+    const date = sessionDate ?? (await this.risk.todayIst());
+    return this.learning.sessionJournal(portfolioId, date);
+  }
+
+  /** (Re)label one candidate once its 5/10/15/30/60-minute tape has arrived. */
+  @Post('journal/:candidateId/label')
+  async labelCandidate(@Param('candidateId') candidateId: string) {
+    const row = await this.learning.labelOutcomeFor(candidateId);
+    if (!row) throw new BadRequestException('no quote tape for this candidate yet — nothing was extrapolated');
+    return { candidateId, classification: row.classification, outcomeStatus: row.outcomeStatus };
   }
 }

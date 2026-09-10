@@ -17,6 +17,7 @@ import {
   LiveOptionTick,
   LiveMarketTick,
 } from './upstox-live-paper-market.service';
+import { entryGuards, paperRiskSnapshot, riskPolicyFromEnv } from './paper-risk';
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -473,6 +474,36 @@ export class UpstoxLivePaperService {
     const headroom = (Number(portfolio.ceiling) || Number(portfolio.capital)) - Number(portfolio.deployed);
     if (outlay > headroom) {
       throw new BadRequestException(`premium outlay ₹${outlay.toFixed(2)} exceeds headroom ₹${headroom.toFixed(2)}`);
+    }
+
+    // ── account risk envelope ─────────────────────────────────────────────────
+    // Enforced for EVERY entry path — manual, pattern dispatch or V1 — so no
+    // caller can exceed the account's own limits. Everything below is scaled
+    // from THIS account's configured capital; nothing assumes a fixed amount.
+    const envelope = paperRiskSnapshot(
+      {
+        capital: Number(portfolio.capital),
+        deployed: Number(portfolio.deployed),
+        netPnl: Number(portfolio.netPnl),
+        unrealisedPnl: Number(portfolio.unrealisedPnl),
+        openPositionCount: await this.trades.count({ where: { portfolioId: portfolio.id, status: 'OPEN' } }),
+        peakEquity: Number(portfolio.capital) + Math.max(0, Number(portfolio.netPnl)),
+      },
+      riskPolicyFromEnv(process.env, { configuredCapital: Number(portfolio.capital) }),
+    );
+    const alreadyOpen = envelope.openPositionCount > 0
+      ? await this.trades.findOne({ where: { portfolioId: portfolio.id, instrument: dto.instrument, status: 'OPEN' } })
+      : null;
+    const guards = entryGuards({
+      snapshot: envelope,
+      openSameContract: alreadyOpen ? `${alreadyOpen.instrument}:${alreadyOpen.side}` : null,
+      side: dto.side,
+      outlay,
+    });
+    if (!guards.allowed) {
+      throw new BadRequestException(
+        `risk envelope refused the entry (capital ₹${envelope.configuredCapital.toFixed(2)}, max ${envelope.maxOpenPositions} position(s)) — ${guards.refusals.join('; ')}`,
+      );
     }
 
     // Compute cost (entry leg only for now; round-trip cost added on close).

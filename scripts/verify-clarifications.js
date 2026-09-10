@@ -74,7 +74,14 @@ const decrypt = (enc) => {
 	);
 	ok(seeded.length > 0, 'seeded clarifications exist', `${seeded.length} rows`);
 	const pending = seeded.filter((r) => r.status !== 'answered');
-	ok(pending.length > 0, 'seeded questions are pending', `${pending.length} pending`);
+	// The pending/answered mix depends on what the operator has already answered,
+	// so the invariant is the STATE, not the count: every question is one or the
+	// other, and the page must serve both states correctly.
+	ok(
+		seeded.every((r) => r.status === 'answered' || r.status === 'pending'),
+		'every clarification is in a known state',
+		`${pending.length} pending, ${seeded.length - pending.length} answered`,
+	);
 	ok(
 		seeded.every((r) => r.itemId === null || r.item !== null),
 		'every item-linked question points at a real checklist row',
@@ -91,7 +98,11 @@ const decrypt = (enc) => {
 		'the checklist rows with a PENDING question are yellow (row-clarify)',
 		`${linked.length} row(s)`,
 	);
-	ok(p0.html.includes('awaiting clarification'), 'page shows the awaiting-clarification badge');
+	ok(
+		pending.length === 0 || p0.html.includes('awaiting clarification'),
+		'page shows the awaiting-clarification badge when something is pending',
+		`${pending.length} pending`,
+	);
 	ok(!/row-clarify[^>]*>\s*<td class="num">\s*<\/td>/.test(p0.html), 'no malformed yellow row markup');
 
 	// ── 3. JSON view of the same store ─────────────────────────────────────────
@@ -183,9 +194,19 @@ const decrypt = (enc) => {
 	const p3 = await page();
 	const pendingIds = (await q(`SELECT id FROM project_clarifications WHERE status <> 'answered' ORDER BY id`)).map((r) => r.id);
 	ok(
-		pendingIds.length > 0 && pendingIds.every((pid) => p3.html.includes(`/project-status/clarifications/${pid}/answer`)),
+		pendingIds.length === 0 || pendingIds.every((pid) => p3.html.includes(`/project-status/clarifications/${pid}/answer`)),
 		'every pending question has a reachable answer box on the page',
 		`${pendingIds.length} pending`,
+	);
+
+	// The other half of the GATE-19 fix, and the state the store is in once the
+	// operator has answered: an ANSWERED question must stay editable in place.
+	const answeredIds = (await q(`SELECT id FROM project_clarifications WHERE status = 'answered' ORDER BY id`)).map((r) => r.id);
+	ok(
+		answeredIds.length === 0 ||
+			answeredIds.every((aid) => p3.html.includes(`/project-status/clarifications/${aid}/answer`)),
+		'every answered question keeps a reachable edit box on the page',
+		`${answeredIds.length} answered`,
 	);
 	const panelAt = p3.html.indexOf('id="clarifications"');
 	const firstGateAt = p3.html.indexOf('<details class="gate"');
