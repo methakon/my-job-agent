@@ -67,6 +67,19 @@ th{background:var(--card);color:var(--dim);font-weight:600;text-transform:upperc
   <div class="row"><span class="label">UPSTOX TOKEN STATUS</span><span class="value" id="safety-token">—</span></div>
 </div>
 
+<div class="card" id="token-card">
+  <div class="card-title">🔑 Upstox LIVE access token</div>
+  <div class="kv">
+    <div><span>Token status</span><b id="tok-status">—</b></div>
+    <div><span>Expires</span><b class="small" id="tok-expiry">—</b></div>
+    <div><span>Time left</span><b class="small" id="tok-age">—</b></div>
+    <div><span>Client ID</span><b class="small" id="tok-client">—</b></div>
+  </div>
+  <p class="small dim">Upstox tokens are single-issue and expire daily at 03:30 IST, so re-issue one each morning before the 09:00 window — a dead token means no LIVE market data and the pre-open capture refuses to run. The token is written straight into the encrypted store by the server; it is never pasted into chat, a terminal or .env.</p>
+  <p><a class="btn" href="/api/upstox/token/init">🔑 GET THE TOKEN — authorize on Upstox</a></p>
+  <div id="tok-banner" class="small" style="display:none"></div>
+</div>
+
 <div id="status" class="empty">Loading status…</div>
 
 <script>
@@ -93,7 +106,41 @@ th{background:var(--card);color:var(--dim);font-weight:600;text-transform:upperc
 
     const tokenEl = document.getElementById('safety-token');
     tokenEl.textContent = [auth.status, auth.expiresAt ? 'expires '+new Date(auth.expiresAt).toLocaleString('en-IN') : 'no expiry'].filter(Boolean).join(' · ') || '—';
-    tokenEl.className = 'value ' + ((auth.status === 'TOKEN_VALID' || auth.status === 'AUTHENTICATED') ? 'ok' : (auth.status === 'TOKEN_MISSING' || auth.status === 'AUTH_REQUIRED') ? 'bad' : 'warn'));
+    tokenEl.className = 'value ' + ((auth.status === 'TOKEN_VALID' || auth.status === 'AUTHENTICATED') ? 'ok' : (auth.status === 'TOKEN_MISSING' || auth.status === 'AUTH_REQUIRED') ? 'bad' : 'warn');
+
+    // Token card: status, expiry and the outcome of an OAuth round trip
+    const isGood = (s) => s === 'TOKEN_VALID' || s === 'AUTHENTICATED';
+    const isBad = (s) => s === 'TOKEN_MISSING' || s === 'AUTH_REQUIRED' || s === 'TOKEN_EXPIRY' || s === 'TOKEN_EXPIRED';
+    const tokStatusEl = document.getElementById('tok-status');
+    tokStatusEl.textContent = auth.status || 'UNKNOWN';
+    tokStatusEl.className = isGood(auth.status) ? 'ok' : isBad(auth.status) ? 'bad' : 'warn';
+
+    const tokenExpiry = auth.expiresAt ? new Date(auth.expiresAt) : null;
+    document.getElementById('tok-expiry').textContent = tokenExpiry && !isNaN(tokenExpiry)
+      ? tokenExpiry.toLocaleString('en-IN')
+      : '—';
+    const minutesLeft = tokenExpiry && !isNaN(tokenExpiry) ? Math.round((tokenExpiry.getTime() - Date.now()) / 60000) : null;
+    const ageEl = document.getElementById('tok-age');
+    ageEl.textContent = minutesLeft == null ? '—' : (minutesLeft > 0 ? minutesLeft + ' min left' : 'expired');
+    ageEl.className = 'small ' + (minutesLeft == null ? 'dim' : minutesLeft > 0 ? 'ok' : 'bad');
+    document.getElementById('tok-client').textContent = auth.clientId || auth.client_id || '—';
+
+    const bannerEl = document.getElementById('tok-banner');
+    const oauthParams = new URLSearchParams(location.search);
+    const oauth = oauthParams.get('upstox');
+    if (oauth === 'ok') {
+      const expParam = oauthParams.get('expires');
+      bannerEl.style.display = 'block';
+      bannerEl.className = 'small ok';
+      bannerEl.textContent = '✓ Authorization complete — a new Upstox token was stored'
+        + (expParam && !isNaN(new Date(expParam)) ? ' (expires ' + new Date(expParam).toLocaleString('en-IN') + ')' : '')
+        + '. The desk and the pre-open capture pick it up automatically.';
+    } else if (oauth === 'error') {
+      const reason = oauthParams.get('reason');
+      bannerEl.style.display = 'block';
+      bannerEl.className = 'small bad';
+      bannerEl.textContent = '✗ Token not stored: ' + (reason || 'unknown error') + ' — click GET THE TOKEN to try again.';
+    }
 
     const feed = s.feed || {};
     const monitoring = s.monitoring || {};

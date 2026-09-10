@@ -35,6 +35,21 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
 
   private randomBytes: (n: number) => Buffer;
 
+  /**
+   * Pending OAuth authorization states. Single-use + TTL-bounded so a callback
+   * cannot be replayed and a code cannot be injected by a third party.
+   */
+  private readonly pendingStates = new Map<string, { createdAt: number; used: boolean }>();
+
+  /** Upstox's documented login dialog (Step 1 of the code flow). */
+  private static readonly AUTH_DIALOG_URL = 'https://api.upstox.com/v2/login/authorization/dialog';
+
+  /** Upstox's documented code → access_token exchange (Step 3). */
+  private static readonly TOKEN_EXCHANGE_URL = 'https://api.upstox.com/v2/login/authorization/token';
+
+  /** Authorization states live 5 minutes — same envelope as the FYERS flow. */
+  private static readonly STATE_TTL_MS = 5 * 60 * 1000;
+
   constructor(
     config: ConfigService,
     @InjectRepository(UpstoxLivePaperToken)
@@ -174,17 +189,143 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
     const redirectUri = (this.config.get<string>('UPSTOX_LIVE_REDIRECT_URI') ?? '').trim();
     if (!redirectUri) throw new Error('UPSTOX_LIVE_REDIRECT_URI not configured — cannot initiate token request');
     const state = Buffer.from(this.randomBytes ? this.randomBytes(18).toString('hex') : Math.random().toString(36).slice(2)).toString('base64');
+    this.registerState(state);
     const params = new URLSearchParams({
-      client_id: clientId,
       response_type: 'code',
+      client_id: clientId,
       redirect_uri: redirectUri,
       state,
     });
-    return { url: `https://apps.upstox.com/authorization?${params.toString()}`, state };
+    // Upstox's documented dialog host. The previous value
+    // (apps.upstox.com/authorization) does not resolve at all, so the
+    // "Authorize" link led to a dead page.
+    return { url: `${UpstoxLivePaperTokenService.AUTH_DIALOG_URL}?${params.toString()}`, state };
   }
 
+  /**
+   * Validate and burn an authorization state. Single-use and TTL-bounded, so a
+   * replayed callback or an injected code is refused before anything reaches
+   * Upstox.
+   */
+  consumeState(state: string | undefined): { ok: true } | { ok: false; reason: string } {
+    const key = (state ?? '').trim();
+    if (!key) return { ok: false, reason: 'Missing OAuth state — this callback was not started from the desk' };
+    const entry = this.pendingStates.get(key);
+    if (!entry) return { ok: false, reason: 'Unknown or already-used OAuth state — start again from the desk' };
+    if (entry.used) return { ok: false, reason: 'OAuth state already used — start again from the desk' };
+    if (Date.now() - entry.createdAt > UpstoxLivePaperTokenService.STATE_TTL_MS) {
+      this.pendingStates.delete(key);
+      return { ok: false, reason: 'OAuth state expired (5 minute limit) — start again from the desk' };
+    }
+    entry.used = true;
+    this.pendingStates.delete(key);
+    return { ok: true };
+  }
+
+  /**
+   * Step 3 of the documented flow: exchange the single-use authorization code
+   * for an access token server-side, then persist it. The token is never
+   * returned to the caller and never logged.
+   */
+  async completeAuthorization(code: string): Promise<{ clientId: string; expiresAt: Date | null; tokenType: string }> {
+    const clientId = (this.config.get<string>('UPSTOX_LIVE_API_KEY') ?? '').trim();
+    const clientSecret = (this.config.get<string>('UPSTOX_LIVE_API_SECRET') ?? '').trim();
+    const redirectUri = (this.config.get<string>('UPSTOX_LIVE_REDIRECT_URI') ?? '').trim();
+    if (!clientId) throw new Error('UPSTOX_LIVE_API_KEY not configured — cannot exchange the authorization code');
+    if (!clientSecret) throw new Error('UPSTOX_LIVE_API_SECRET not configured — cannot exchange the authorization code');
+    if (!redirectUri) throw new Error('UPSTOX_LIVE_REDIRECT_URI not configured — cannot exchange the authorization code');
+    if (!code.trim()) throw new Error('empty authorization code');
+
+    const body = new URLSearchParams({
+      code: code.trim(),
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    });
+
+    const response = await fetch(UpstoxLivePaperTokenService.TOKEN_EXCHANGE_URL, {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    const raw = await response.text();
+    let parsed: Record<string, any> | null = null;
+    try {
+      parsed = JSON.parse(raw) as Record<string, any>;
+    } catch {
+      parsed = null;
+    }
+
+    const accessToken = typeof parsed?.access_token === 'string' ? parsed.access_token.trim() : '';
+    if (!response.ok || !accessToken) {
+      const detail =
+        parsed?.errors?.[0]?.message ?? parsed?.error_description ?? parsed?.message ?? `HTTP ${response.status}`;
+      throw new Error(`Upstox token exchange failed: ${detail}`);
+    }
+
+    const claims = this.decodeJwtClaims(accessToken);
+    const expiresAt = this.expiryFromClaims(claims, parsed);
+    if (!expiresAt) {
+      throw new Error(
+        'Upstox returned no token expiry (no exp claim / expires_in) — refusing to store a token of unknown lifetime',
+      );
+    }
+
+    const saved = await this.persistToken({
+      clientId,
+      accessToken,
+      tokenType: typeof parsed?.token_type === 'string' ? parsed.token_type : 'Bearer',
+      issuedAt: typeof claims?.iat === 'number' ? claims.iat : undefined,
+      expiresAt: expiresAt.toISOString(),
+    });
+
+    this.logger.log(
+      `[UPSTOX-LIVE-PAPER] authorization code exchanged; token stored for client_id=${saved.clientId} exp=${expiresAt.toISOString()}`,
+    );
+    return { clientId: saved.clientId, expiresAt: saved.expiresAt ?? expiresAt, tokenType: saved.tokenType ?? 'Bearer' };
+  }
 
   // ── internal ───────────────────────────────────────────────────────────────
+
+  private registerState(state: string): void {
+    this.pruneStates();
+    this.pendingStates.set(state, { createdAt: Date.now(), used: false });
+  }
+
+  private pruneStates(): void {
+    const cutoff = Date.now() - UpstoxLivePaperTokenService.STATE_TTL_MS;
+    for (const [key, entry] of this.pendingStates) {
+      if (entry.used || entry.createdAt < cutoff) this.pendingStates.delete(key);
+    }
+  }
+
+  /** Decode (never verify) a JWT payload — used only to read the token's own exp claim. */
+  private decodeJwtClaims(token: string): Record<string, any> | null {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    try {
+      const payload = Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+      const claims = JSON.parse(payload) as Record<string, any>;
+      return claims && typeof claims === 'object' ? claims : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private expiryFromClaims(
+    claims: Record<string, any> | null,
+    response: Record<string, any> | null,
+  ): Date | null {
+    if (claims && typeof claims.exp === 'number' && Number.isFinite(claims.exp)) {
+      return new Date(claims.exp * 1000);
+    }
+    const expiresIn = response?.expires_in;
+    if (typeof expiresIn === 'number' && Number.isFinite(expiresIn) && expiresIn > 0) {
+      return new Date(Date.now() + expiresIn * 1000);
+    }
+    return this.parseTs(response?.expires_at ?? undefined);
+  }
 
   private async ensureSeedRow(): Promise<void> {
     const configuredClientId = (this.config.get<string>('UPSTOX_LIVE_API_KEY') ?? '').trim().toUpperCase();

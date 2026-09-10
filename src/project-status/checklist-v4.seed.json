@@ -2686,5 +2686,17 @@
 "instr": "",
 "doneWhen": "",
 "note": ""
+},
+{
+"grp": "UPSTOX AUTO TRADING",
+"grp_order": 25,
+"goal": "Upstox Auto Trading integrated feature - broker authentication and token lifecycle for the LIVE capability. Standalone area: rows here belong to no GATE row and must never be filed under one.",
+"item_order": 1,
+"item": "Portal-native Upstox LIVE access-token acquisition (self-service): the Upstox desk shows a token card with a GET THE TOKEN button; /api/upstox/token/init opens the documented Upstox login dialog and /api/upstox/callback exchanges the single-use authorization code server-side and stores the token. The operator never pastes a token into chat, a terminal or .env.",
+"status": "in_progress",
+"edition": "v5",
+"instr": "1) Fix the dialog URL to https://api.upstox.com/v2/login/authorization/dialog (apps.upstox.com/authorization does not resolve - live-probed). 2) Implement the code->token exchange in the callback: POST https://api.upstox.com/v2/login/authorization/token (x-www-form-urlencoded: code, client_id=UPSTOX_LIVE_API_KEY, client_secret=UPSTOX_LIVE_API_SECRET, redirect_uri=UPSTOX_LIVE_REDIRECT_URI, grant_type=authorization_code); derive expiry from the token's own exp claim, never guess it. 3) Validate state as single-use with a TTL so a callback cannot be replayed or injected. 4) Add the FYERS-parity token card and banner on the desk page. 5) Keep POST /api/upstox/notifier working as the scripted fallback - do not weaken the operator-password wall for status writes.",
+"doneWhen": "The operator clicks GET THE TOKEN on the Upstox desk, authorizes on Upstox, and lands back on the desk with a success banner while upstox_live_paper_tokens holds a fresh row (TOKEN_VALID, expiry from the token's exp claim, 03:30 IST next day); a live Upstox v3 read using that stored token returns market data (probe recorded as evidence); the desk surfaces status and expiry so a stale token is obvious before 09:00 IST; tests cover dialog URL construction, state single-use/TTL, exchange parsing against a mocked HTTP layer and expiry derivation; /fnf-trading, the paper desk and the pre-open capture are unaffected.",
+"note": "Created 2026-09-11 on operator instruction: standalone row under the Upstox Auto Trading integrated feature only - not nested under any GATE row. Reason: no row in the 224-item roadmap covered Upstox token acquisition; the capability was reachable only by a manual/scripted POST to /api/upstox/notifier with the operator password. Coverage gap flagged by the drift guard; row created by operator decision."
 }
 ]

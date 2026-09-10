@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Query, Res, BadRequestException } from '@nestjs/common';
 import type { Response } from 'express';
+import { BypassAuth } from '../../auth/bypass-auth.decorator';
 import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
 
 /**
@@ -27,8 +28,9 @@ export class UpstoxLivePaperTokenController {
       <h2>Upstox LIVE — authorize this app</h2>
       <p>Click the button to open the Upstox authorization page and approve token access.</p>
       <p><a class="btn" href="${url}">Authorize Upstox LIVE</a></p>
+      <p style="color:#9aa0aa;font-size:13px">After you approve, Upstox redirects straight back to this app and the token is stored automatically — there is nothing to copy or paste. This link is single-use and expires in 5 minutes.</p>
       <p>-or- copy this URL:<br><code>${url}</code></p>
-      <p><a href="/upstox-live-paper">← Back to Upstox LIVE paper desk</a></p>
+      <p><a href="/upstox-live-paper.html">← Back to Upstox LIVE paper desk</a></p>
       </body></html>`;
       return res.type('html').send(html);
     } catch (err) {
@@ -36,21 +38,55 @@ export class UpstoxLivePaperTokenController {
     }
   }
 
-  /** OAuth callback: receive single-use authorization code, exchange + persist. */
+  /**
+   * OAuth callback (Step 2 + 3 of Upstox's documented flow): receive the
+   * single-use authorization code, validate the state this desk minted, exchange
+   * the code server-side and persist the token.
+   *
+   * Public by design — the redirect arrives from Upstox's domain — so the
+   * single-use, TTL-bounded state is what authorizes the exchange, never the
+   * caller's identity. The code and the token are never logged.
+   */
   @Get('callback')
-  async callback(@Query() q: { code?: string; state?: string; error?: string }, @Res() res: Response) {
+  @BypassAuth()
+  async callback(
+    @Query() q: { code?: string; state?: string; error?: string; error_description?: string; format?: string },
+    @Res() res: Response,
+  ) {
+    const desk = '/upstox-live-paper.html';
+    const finish = (outcome: Record<string, string>) => {
+      if (q.format === 'json') {
+        return res.status(outcome.upstox === 'ok' ? 200 : 400).json(outcome);
+      }
+      return res.redirect(`${desk}?${new URLSearchParams(outcome).toString()}`);
+    };
+
     if (q.error) {
-      return res.send(`Authorization failed: ${q.error}`);
+      return finish({ upstox: 'error', reason: q.error_description || q.error });
     }
     if (!q.code) {
-      return res.status(400).send('Missing authorization code');
+      return finish({ upstox: 'error', reason: 'missing authorization code' });
     }
-    // The actual code exchange is performed here (server-side) or delegated to
-    // a configured exchange service. For now we document the flow and persist
-    // a token if one is supplied via the notifier path; the callback records a
-    // pending state so the operator knows a code was received.
-    this.token.log?.(`[UPSTOX-LIVE-PAPER] OAuth callback received code=${q.code?.slice(0, 8)}… state=${q.state ?? 'none'}`);
-    return res.send(`Upstox authorization code received. The server will exchange it for an access token. Return to <a href="/upstox-live-paper">the Upstox LIVE paper desk</a> to check token status.`);
+
+    const stateCheck = this.token.consumeState(q.state);
+    if (!stateCheck.ok) {
+      this.token.log(`[UPSTOX-LIVE-PAPER] OAuth callback refused: ${stateCheck.reason}`);
+      return finish({ upstox: 'error', reason: stateCheck.reason });
+    }
+
+    try {
+      this.token.log(`[UPSTOX-LIVE-PAPER] OAuth callback: exchanging authorization code (length ${q.code.length})`);
+      const stored = await this.token.completeAuthorization(q.code);
+      return finish({
+        upstox: 'ok',
+        client_id: stored.clientId,
+        expires: stored.expiresAt ? stored.expiresAt.toISOString() : '',
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.token.log(`[UPSTOX-LIVE-PAPER] OAuth callback failed: ${reason}`);
+      return finish({ upstox: 'error', reason });
+    }
   }
 
   /** Upstox notifier: validate + securely persist the live token. */
