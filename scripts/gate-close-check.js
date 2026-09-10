@@ -144,27 +144,22 @@ const log = (...a) => {
 	if (referenced.length) {
 		try {
 			const gateAuth = require('./lib/gate-auth');
-			const auth = await gateAuth.session(BASE);
-			if (!auth.cookie) {
+			const authHeaders = await gateAuth.authHeaders();
+			const res = await fetch(`${BASE}/project-status`, { headers: authHeaders });
+			if (res.status === 401 || res.status === 403 || res.status === 429) {
+				// Auth problem, NOT evidence drift: say so loudly, do not block.
 				renderWarn = true;
-				renderNote = `render check SKIPPED — ${auth.detail} (DB evidence verified; page read unavailable)`;
+				renderNote = `render check SKIPPED — page refused the operator auth (HTTP ${res.status}); this is not evidence drift`;
 			} else {
-				const res = await fetch(`${BASE}/project-status`, { headers: { cookie: auth.cookie } });
-				if (res.status === 401 || res.status === 403 || res.status === 429) {
-					// Auth/limiter problem, NOT evidence drift: say so loudly, do not block.
-					renderWarn = true;
-					renderNote = `render check SKIPPED — page refused the operator session (HTTP ${res.status}); this is not evidence drift`;
-				} else {
-					const html = (await res.text()).replace(/<[^>]*>/g, ' ');
-					const missing = referenced.filter((c) => !html.includes(c.sha) && !html.includes(c.short));
-					renderBad = res.status !== 200 || missing.length > 0;
-					renderNote =
-						res.status !== 200
-							? `GET /project-status returned HTTP ${res.status}`
-							: missing.length
-								? `${missing.length} recorded commit(s) not visible on the rendered page: ${missing.map((m) => m.short).join(', ')}`
-								: `${referenced.length} recorded commit(s) visible on the rendered page (HTTP 200)`;
-				}
+				const html = (await res.text()).replace(/<[^>]*>/g, ' ');
+				const missing = referenced.filter((c) => !html.includes(c.sha) && !html.includes(c.short));
+				renderBad = res.status !== 200 || missing.length > 0;
+				renderNote =
+					res.status !== 200
+						? `GET /project-status returned HTTP ${res.status}`
+						: missing.length
+							? `${missing.length} recorded commit(s) not visible on the rendered page: ${missing.map((m) => m.short).join(', ')}`
+							: `${referenced.length} recorded commit(s) visible on the rendered page (HTTP 200)`;
 			}
 		} catch (e) {
 			renderNote = `render check skipped: ${e.message}`;

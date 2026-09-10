@@ -63,10 +63,11 @@ Only `DRIFT` blocks. Appending new entries to
 `docs/gate-close-legacy-baseline.json` to silence real drift is forbidden; sync
 the row instead.
 
-Both tools share one cached operator cookie (`scripts/lib/gate-auth.js`) because
-`/auth/login` allows only 10 attempts / 15 min. If a page read reports a `401` /
-`403` / `429`, that is an auth/limiter problem, not evidence drift: the tools say
-so loudly and fail open. Wait out the window; do not loop logins.
+Both tools authenticate with `x-operator-password` (the password is decrypted
+from `portal_users.passwordEnc`, never read from `.env` or logged). They never use
+`POST /auth/login`, which allows only 10 attempts / 15 min and would lock the
+tooling out of its own control plane. If a page read reports `401` / `403` / `429`,
+that is an auth problem, not evidence drift: the tools say so loudly and fail open.
 
 ## 3. Standing constraints (unchanged)
 

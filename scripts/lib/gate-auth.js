@@ -1,50 +1,22 @@
 /**
- * Shared operator session for the /project-status gate tooling.
+ * Shared operator auth for the /project-status gate tooling.
  *
- * Why this exists: `/auth/login` is strictly rate limited (10 attempts / 15 min —
- * see src/main.ts). The writer and the drift guard both need a session cookie, so
- * hammering `/auth/login` on every run locks the tooling out of its own control
- * plane. Both scripts therefore share ONE cached cookie.
+ * Why this exists: the tooling must authenticate exactly the way the app allows
+ * for server-to-server callers. `src/auth/conditional-auth.guard.ts` accepts a
+ * correct operator password in the `x-operator-password` header on ANY protected
+ * route (and mints a session for it), while `POST /auth/login` is strictly rate
+ * limited to 10 attempts / 15 min (src/main.ts). Using the header therefore needs
+ * no session juggling and cannot lock the tooling out of its own control plane.
  *
- * Never hard-codes a credential: the operator password is decrypted from
- * `portal_users.passwordEnc` (AES-256-CBC under ENCRYPTION_KEY) — the same
- * database-first contract the app's login page uses.
+ * Never hard-codes a credential: the password is decrypted from the
+ * `portal_users.passwordEnc` row (AES-256-CBC under ENCRYPTION_KEY) — the same
+ * database-first contract the login page uses. The value is never logged.
  */
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const crypto = require('crypto');
 
-const CACHE_PATH = process.env.GATE_COOKIE_CACHE || path.join(os.homedir(), '.hermes', '.gate-cookie.json');
-const TTL_MS = Number(process.env.GATE_COOKIE_TTL_MS || 10 * 60 * 1000);
+const AUTH_HEADER = 'x-operator-password';
 
-function loadCookie(base) {
-	try {
-		const j = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
-		if (j && j.cookie && j.base === base && Date.now() - j.at < TTL_MS) return j.cookie;
-	} catch {
-		/* no cache yet */
-	}
-	return null;
-}
-
-function storeCookie(base, cookie) {
-	try {
-		fs.mkdirSync(path.dirname(CACHE_PATH), { recursive: true });
-		fs.writeFileSync(CACHE_PATH, JSON.stringify({ base, at: Date.now(), cookie }), { mode: 0o600 });
-	} catch {
-		/* cache is an optimisation only */
-	}
-}
-
-function clearCookie() {
-	try {
-		fs.unlinkSync(CACHE_PATH);
-	} catch {
-		/* nothing cached */
-	}
-}
-
+/** Decrypt the operator password from the DB row the app itself verifies against. */
 async function operatorPassword() {
 	const mysql = require('mysql2/promise');
 	const conn = await mysql.createConnection({
@@ -68,37 +40,9 @@ async function operatorPassword() {
 	}
 }
 
-/**
- * @returns {Promise<{cookie: string|null, source: 'cache'|'login', detail: string, loginStatus?: number}>}
- */
-async function session(base, { force = false } = {}) {
-	if (!force) {
-		const cached = loadCookie(base);
-		if (cached) return { cookie: cached, source: 'cache', detail: 'cached session cookie (login rate limit spared)' };
-	}
-	const password = await operatorPassword();
-	const res = await fetch(`${base}/auth/login`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ password }),
-	});
-	const cookie = ((res.headers.getSetCookie && res.headers.getSetCookie()) || [])
-		.map((cp) => cp.split(';')[0])
-		.join('; ');
-	const rate = res.status === 429 ? ' — /auth/login allows 10 attempts / 15 min (src/main.ts)' : '';
-	if (!cookie) {
-		return {
-			cookie: null,
-			source: 'login',
-			loginStatus: res.status,
-			detail: `login HTTP ${res.status} returned no session cookie${rate}`,
-		};
-	}
-	if (res.status >= 400) {
-		return { cookie, source: 'login', loginStatus: res.status, detail: `login HTTP ${res.status}${rate}` };
-	}
-	storeCookie(base, cookie);
-	return { cookie, source: 'login', loginStatus: res.status, detail: `fresh operator login (HTTP ${res.status})` };
+/** Headers that authenticate a server-to-server call — no login, no rate limit. */
+async function authHeaders() {
+	return { [AUTH_HEADER]: await operatorPassword() };
 }
 
-module.exports = { session, clearCookie, CACHE_PATH };
+module.exports = { operatorPassword, authHeaders, AUTH_HEADER };

@@ -141,31 +141,20 @@ const stripTags = (html) => html.replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&')
 		return;
 	}
 
-	// ── 3. operator session (the existing authenticated API path) ─────────────
+	// ── 3. operator auth (the app's own server-to-server path) ───────────────
+	// `x-operator-password` is verified by ConditionalAuthGuard on any protected
+	// route; /auth/login is rate limited to 10/15min, so we never use it here.
 	const gateAuth = require('./lib/gate-auth');
-	const auth = await gateAuth.session(BASE);
-	if (!auth.cookie) die(`operator login failed: ${auth.detail} (is the app up on ${BASE}?)`);
-	let cookie = auth.cookie;
-	// A cached cookie can go stale (app restart/secrets change). Refresh exactly
-	// once — /auth/login allows only 10 attempts / 15 min.
-	const resync = async () => {
-		gateAuth.clearCookie();
-		const again = await gateAuth.session(BASE, { force: true });
-		if (!again.cookie) die(`operator session refused: ${again.detail}`);
-		cookie = again.cookie;
-	};
+	const authHeaders = await gateAuth.authHeaders();
 
-	const post = async (route, body, retry = true) => {
+	const post = async (route, body) => {
 		const res = await fetch(`${BASE}/project-status/item/${row.id}/${route}`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/x-www-form-urlencoded', cookie },
+			headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...authHeaders },
 			body: new URLSearchParams(body).toString(),
 			redirect: 'manual',
 		});
-		if ((res.status === 401 || res.status === 403) && retry) {
-			await resync();
-			return post(route, body, false);
-		}
+		if (res.status === 401) die('operator auth refused (x-operator-password) — check portal_users.passwordEnc vs ENCRYPTION_KEY.');
 		if (res.status >= 400) die(`POST ${route} failed: HTTP ${res.status} ${await res.text()}`);
 		return res.status;
 	};
@@ -176,11 +165,7 @@ const stripTags = (html) => html.replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&')
 	console.log(`wrote : POST /project-status/item/${row.id}/note   -> HTTP ${noteHttp}`);
 
 	// ── 4. independent verification through the rendered page ─────────────────
-	let res = await fetch(`${BASE}/project-status`, { headers: { cookie } });
-	if (res.status === 401 || res.status === 403) {
-		await resync();
-		res = await fetch(`${BASE}/project-status`, { headers: { cookie } });
-	}
+	let res = await fetch(`${BASE}/project-status`, { headers: authHeaders });
 	const html = await res.text();
 	const chunk = html.split('<tr ').find((c) => c.includes(`/project-status/item/${row.id}/status`)) ?? '';
 	const marker = tag;
