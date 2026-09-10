@@ -36,6 +36,11 @@ MANDATORY, on every meaningful task or gate progression:
    non-zero if the page does not reflect the write.
 8. **Report nothing as complete to the operator until the row is synced and
    independently render-verified.** Say the row id and status when you report.
+9. **Roadmap coverage missing → flag it and ask, never invent a row.** If a
+   substantial workstream is not represented in the roadmap, say so explicitly in
+   your report as `roadmap coverage missing` and ask the operator before creating
+   a row. Rows are created by operator decision only; the drift guard must never
+   be silenced by inventing a row.
 
 ## 2. Commands
 
