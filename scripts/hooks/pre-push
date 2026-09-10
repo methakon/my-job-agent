@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# pre-push guard: no code leaves this machine while /project-status lags it.
+#
+# Installed by: npm run gate:hooks:install   (git config core.hooksPath scripts/hooks)
+# Rationale (2026-09-10): implementation/tests/git were current while
+# project_checklist_items sat a day behind, because the control-plane write
+# depended on an agent session remembering to do it. This hook makes the check
+# run for every push, on every model/session, with no memory required.
+#
+# Bypass (must be reported to the operator, never silent):
+#   GATE_CLOSE_SKIP=1 git push ...
+set -uo pipefail
+
+if [ "${GATE_CLOSE_SKIP:-0}" = "1" ]; then
+	echo "gate-close: check BYPASSED via GATE_CLOSE_SKIP=1 — report this to the operator."
+	exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+if ! command -v node >/dev/null 2>&1 || [ ! -f scripts/gate-close-check.js ]; then
+	echo "gate-close: checker unavailable — push allowed (control-plane sync UNVERIFIED)."
+	exit 0
+fi
+
+if node scripts/gate-close-check.js; then
+	exit 0
+fi
+
+cat <<'EOF'
+
+push BLOCKED — /project-status has not been synchronized with the commits being pushed.
+Sync the row this work actually moved (resolve it by the row's own item text/doneWhen,
+never by a conversational gate number), then push again:
+
+  npm run gate:status -- --find "<substring of the item text>" --status in_progress \
+      --evidence "test: <suite result>; commit: <sha>; runtime: <endpoint/render check>" \
+      --gap "<what is still missing>"
+
+  npm run gate:status -- --find "..." --status done --evidence "test: ...; commit: <sha>; verified: <how>"
+
+Deliberate exemption for a no-gate/docs commit: node scripts/gate-close-check.js --allow <sha>
+Emergency bypass (must be reported): GATE_CLOSE_SKIP=1 git push ...
+EOF
+exit 1

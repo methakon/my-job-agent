@@ -1,0 +1,27 @@
+{
+	"_policy": [
+		"Commits that landed BEFORE the gate-close guard existed (2026-09-10) and for which the",
+		"v5 roadmap has NO row to belong to. Listed here so the guard can enforce every commit",
+		"from here on without inventing checklist rows (AGENTS.md forbids inserting rows) and",
+		"without marking an unrelated row as evidence.",
+		"",
+		"These entries are NOT evidence, NOT verification and NOT a statement that the work is",
+		"complete. Never add a sha here to silence a real drift, and never extend this file for",
+		"work done after 2026-09-10 — sync the real row instead (npm run gate:status)."
+	],
+	"_created": "2026-09-10",
+	"_created_by": "gate-close guard rollout (docs/GATE_CLOSE_STATUS_SYNC.md)",
+	"commits": {
+		"4931a84": "control-plane UI work on /project-status itself (clarification reachability/editability) — the checklist tracks the trading/research roadmap, it has no row for the status page's own features",
+		"01b20e0": "control-plane UI work on /project-status itself (clarification store: yellow rows, operator answers, counts) — no roadmap row exists",
+		"b72e2bd": "control-plane ops script: files the day's data gaps into the clarification store — tooling, no roadmap row",
+		"c85dc3e": "diagnostics script (fnf-entry-audit: traces who opens /fnf-trading trades from the engine DB) — tooling, no roadmap row",
+		"5d554eb": "test-harness tolerance (pm2 restart landing between isolation suite runs) — test infrastructure, no roadmap row",
+		"60d2458": "HTTP routing fix (SPA fallback no longer swallows imported-module GET routes) — web plumbing, no roadmap row",
+		"20f759d": "Upstox live-desk operations: pre-cleared instructions, session auto-start, lot size from broker master — the roadmap has no row for live-desk infrastructure",
+		"96d0759": "Upstox live-desk plumbing: real v2 option-chain adapter, DB token storage, today-expiry scope — no roadmap row for broker adapters",
+		"b9e69bb": "Upstox live-desk fix: market status must use the exchange segment — no roadmap row",
+		"d807712": "FNF engine read-path fix (live engine DB + honest engine-feed row) — diagnostics/plumbing, no roadmap row",
+		"6d974f4": "live-desk safety gate: feed-health gate + pause-new-trading on stale/down data — relates to GATE 16 #269 (stale-quote/decision protection) but that row is scoped to the independent risk engine, so the mapping was left to the operator rather than asserted here"
+	}
+}

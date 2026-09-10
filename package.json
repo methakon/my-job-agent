@@ -16,7 +16,10 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "test:learning": "node scripts/option-trade-learning.js --selfcheck",
-    "test:entry-policy": "node scripts/entry-policy.test.js"
+    "test:entry-policy": "node scripts/entry-policy.test.js",
+    "gate:status": "node scripts/gate-status.js",
+    "gate:check": "node scripts/gate-close-check.js",
+    "gate:hooks:install": "chmod +x scripts/hooks/pre-push && git config core.hooksPath scripts/hooks && echo 'gate-close pre-push guard installed (core.hooksPath=scripts/hooks)'"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1127.0",
