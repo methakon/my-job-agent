@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./var/preopen-build",
+    "rootDir": "./src",
+    "incremental": false,
+    "noEmitOnError": true,
+    "sourceMap": false
+  },
+  "include": [
+    "src/trading/pre-open/**/*",
+    "src/trading/upstox-live-paper/upstox-live-paper.config.ts",
+    "src/trading/upstox-live-paper/upstox-live-paper-auth.service.ts",
+    "src/trading/upstox-live-paper/upstox-live-paper-token.entity.ts",
+    "src/shared/db.config.ts"
+  ]
+}

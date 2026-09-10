@@ -109,7 +109,12 @@ export class PreOpenCaptureService implements OnModuleInit, OnModuleDestroy {
     this.postOpenSampleMs = Math.max(0, Math.min(30, Number(configService.get<string>('PRE_OPEN_POST_OPEN_SAMPLE_MIN') ?? 5) || 5)) * 60_000;
     // OFF by default. During runtime verification this fallback returned the
     // CURRENT session's close as "previous close" for the index, because the known
-    // wall-clock IST/UTC anomaly in unified_market_snapshots makes a session-bo...[truncated]
+    // wall-clock IST/UTC anomaly in unified_market_snapshots makes a
+    // session-boundary comparison unreliable. Until that anomaly is fixed and
+    // this path is proven point-in-time, a source that does not publish a
+    // previous close leaves the gap UNAVAILABLE rather than risking look-ahead
+    // (item 4 / item 17).
+    this.prevCloseFromStore = bool('PRE_OPEN_PREVCLOSE_FROM_STORE', false);
     const explicit = (configService.get<string>('PRE_OPEN_INSTRUMENTS') ?? '')
       .split(',').map((s) => s.trim()).filter(Boolean);
     this.instruments = explicit.length ? explicit.slice(0, 100) : this.config.liveInstruments.slice(0, 100);

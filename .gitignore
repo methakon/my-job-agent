@@ -47,5 +47,8 @@ node_modules/
 # Build output / Python caches
 node_modules/
 dist/
+
+# runtime artefacts: isolated pre-open build + window evidence (never committed)
+var/
 __pycache__/
 *.pyc
