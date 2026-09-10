@@ -265,4 +265,40 @@ assert.ok(/return segment\.replace\(\/_INDEX\$\/, ''\)/.test(mktSrc), 'index seg
 assert.ok(/market status \(\$\{exchange\}\)/.test(mktSrc), 'market-status log names the exchange it probed');
 console.log('✔ 17: market status probes /v2/market/status/{exchange} (no bare 404 path)');
 
+// ── 18. Evidence labelling is session-clamped and runs outside market hours ──
+{
+  const autoentrySrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-autoentry.service.ts'), 'utf8');
+  const learningSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-learning.service.ts'), 'utf8');
+  const rulesSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-instruction.rules.ts'), 'utf8');
+
+  // The session close is defined once and shared — not re-typed per file.
+  assert.ok(/IST_SESSION_CLOSE_MINUTES\s*=\s*15 \* 60 \+ 30/.test(rulesSrc), 'the IST close is declared once, in the rules module');
+  assert.ok(autoentrySrc.includes('IST_SESSION_CLOSE_MINUTES') && !/SESSION_CLOSE_MINUTES\s*=\s*15 \* 60 \+ 30/.test(autoentrySrc),
+    'the auto-entry loop reuses the shared close instead of restating 15:30');
+  assert.ok(rulesSrc.includes('istSessionCloseMs'), 'a helper resolves the close of the IST date containing a timestamp');
+
+  // Labelling has its own tick, and that tick is NOT gated on the market session.
+  const labelTick = autoentrySrc.slice(autoentrySrc.indexOf('async labellingTick'));
+  assert.ok(labelTick.length > 0, 'the labelling tick exists');
+  const body = labelTick.slice(0, labelTick.indexOf('\n  }\n'));
+  assert.ok(body.includes('labelStaleCandidates'), 'the labelling tick actually labels');
+  assert.ok(/if \(this\.withinSession\(Date\.now\(\)\)\) return;/.test(body),
+    'the labelling tick returns early WHILE the session is open (the entry cycle labels then)');
+  assert.ok(body.indexOf('withinSession') < body.indexOf('labelStaleCandidates'),
+    'the session check cannot block labelling — it only avoids duplicating the in-session pass');
+  assert.ok(!/if \(!this\.withinSession[\s\S]{0,80}return;[\s\S]{0,40}labelStale/.test(body),
+    'labelling is never wrapped in a "must be in session" guard');
+
+  // The V1 label path clamps to the close and records the coverage provenance.
+  assert.ok(learningSrc.includes('istSessionCloseMs('), 'the learning path derives the session close from the entry timestamp');
+  assert.ok(/sessionCloseTs,/.test(learningSrc), 'the close is passed into the outcome windows');
+  assert.ok(learningSrc.includes('coverage: h.coverage') && learningSrc.includes('_coverage'),
+    'per-horizon coverage and the summary are journalled');
+  assert.ok(learningSrc.includes("every((h) => h.coverage === 'FULL')"),
+    'a candidate is COMPLETE only when every horizon is a full-width measurement');
+  assert.ok(/Math\.min\(requestedTo, sessionCloseTs\)/.test(learningSrc),
+    'the quote fetch itself stops at the close, so junk prints never even reach labelling');
+}
+console.log('✔ 18: labelling clamped to 15:30 IST, runs outside the session, provenance journalled');
+
 console.log('\n✅ upstox-live-paper safety + execution + report tests complete');

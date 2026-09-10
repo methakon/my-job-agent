@@ -332,6 +332,138 @@ console.log('  9 OI behaviour ok');
 }
 console.log('  10 forward labelling ok');
 
+// ── 10b. Session-close clamp: evidence windows may never read past the bell ──
+{
+  const { istSessionCloseMs, IST_SESSION_CLOSE_MINUTES } = require('../dist/trading/upstox-live-paper/upstox-live-paper-instruction.rules');
+  const IST = 5.5 * 3_600_000;
+  /** Wall-clock IST → epoch ms, so the fixtures read like the trading day. */
+  const istClock = (d, h, mi) => Date.UTC(2026, 8, d, h, mi) - IST;
+  const SESSION_CLOSE = istSessionCloseMs(istClock(10, 15, 15));
+  assert.equal(SESSION_CLOSE, istClock(10, 15, 30), 'the IST close is 15:30 on the entry date');
+  assert.equal(SESSION_CLOSE % 60_000, 0, 'the close lands on a whole epoch minute');
+  assert.equal(IST_SESSION_CLOSE_MINUTES, 15 * 60 + 30);
+  // IST is UTC+05:30 with no DST: an entry at 01:30 IST belongs to that IST date,
+  // so its close is that same date's 15:30 — not the previous UTC day's.
+  assert.equal(istSessionCloseMs(Date.UTC(2026, 8, 10, 20, 0)), Date.UTC(2026, 8, 11, 10, 0),
+    'the close follows the IST calendar, not the host UTC date');
+
+  const tape = (from, to, stepMin, fn) => {
+    const out = [];
+    for (let t = from; t <= to; t += stepMin * 60_000) out.push({ ts: t, price: fn(t) });
+    return out;
+  };
+  /** The junk the quote store really holds after the bell (thin, degenerate prints). */
+  const afterHours = [
+    { ts: istClock(10, 15, 35), price: 0.05 },
+    { ts: istClock(10, 16, 0), price: 0.05 },
+    { ts: istClock(10, 16, 34), price: 0.05 },
+  ];
+
+  // (1) A 15:15 candidate with a 60-minute horizon must never read past 15:30.
+  {
+    const entryTs = istClock(10, 15, 15);
+    const sessionTape = tape(entryTs + 60_000, SESSION_CLOSE, 1, (t) => 100 + (t - entryTs) / 60_000);
+    const out = labelOutcomes({
+      entryPrice: 100, entryTs, futureTicks: [...sessionTape, ...afterHours], sessionCloseTs: SESSION_CLOSE,
+    });
+    assert.equal(out.length, 5, 'every horizon is reported, so a gap is visible rather than absent');
+    for (const h of out) {
+      assert.ok(Number.isFinite(h.measuredUntilTs),
+        `horizon ${h.horizonMinutes} must stamp the window end it measured (got ${h.measuredUntilTs})`);
+      assert.ok(h.measuredUntilTs <= SESSION_CLOSE,
+        `horizon ${h.horizonMinutes} measured to ${h.measuredUntilTs} — at or before the close`);
+      assert.ok(h.minPrice === null || h.minPrice >= 100,
+        `horizon ${h.horizonMinutes} saw the 0.05 after-hours print (min ${h.minPrice})`);
+    }
+    assert.ok(out.filter((h) => h.coverage === 'FULL').every((h) => h.measuredUntilTs === entryTs + h.horizonMinutes * 60_000),
+      'full-width horizons end exactly at their own horizon');
+    const five = out.find((h) => h.horizonMinutes === 5);
+    assert.equal(five.coverage, 'FULL', '15:15 + 5m fits inside the session');
+    assert.equal(five.covered, true);
+    const sixty = out.find((h) => h.horizonMinutes === 60);
+    assert.equal(sixty.coverage, 'SESSION_CLAMPED', '15:15 + 60m runs past the close');
+    assert.equal(sixty.covered, false, 'a clamped window is not a measurement of 60 minutes');
+    assert.equal(sixty.measuredUntilTs, SESSION_CLOSE, 'the clamped window stops exactly at the bell');
+    assert.equal(sixty.measuredMinutes, 15, 'only the 15 minutes to the close were measured');
+    const thirty = out.find((h) => h.horizonMinutes === 30);
+    assert.equal(thirty.coverage, 'SESSION_CLAMPED');
+    assert.equal(thirty.measuredMinutes, 15);
+  }
+
+  // (2) A candidate near the bell is marked incomplete, not completed with a stub.
+  {
+    const entryTs = istClock(10, 15, 29);
+    const sessionTape = tape(entryTs + 15_000, SESSION_CLOSE, 15 / 60, () => 101);
+    const out = labelOutcomes({
+      entryPrice: 100, entryTs, futureTicks: [...sessionTape, ...afterHours], sessionCloseTs: SESSION_CLOSE,
+    });
+    assert.ok(out.length === 5 && out.every((h) => h.coverage === 'SESSION_CLAMPED'),
+      'a 15:29 candidate cannot fill any horizon inside the session');
+    assert.ok(out.every((h) => h.covered === false), 'nothing is covered near the bell');
+    assert.equal(out[0].measuredMinutes, 1, 'the 5-minute window only got the last minute');
+  }
+
+  // (3) Post-close ticks alone can never produce a valid outcome.
+  {
+    const entryTs = istClock(10, 15, 20);
+    const out = labelOutcomes({ entryPrice: 100, entryTs, futureTicks: afterHours, sessionCloseTs: SESSION_CLOSE });
+    assert.ok(out.length === 5 && out.every((h) => h.coverage === 'UNAVAILABLE'),
+      'with no same-session tape every horizon is unavailable');
+    assert.ok(out.every((h) => h.covered === false && h.maxPrice === null && h.returnPct === null),
+      'no measurement is fabricated from after-hours prints');
+    assert.ok(out.every((h) => h.label === 'PENDING'), 'and no outcome label is drawn from them');
+    // A candidate that is itself after the bell is equally unusable.
+    const late = labelOutcomes({
+      entryPrice: 100, entryTs: istClock(10, 15, 45), futureTicks: afterHours, sessionCloseTs: SESSION_CLOSE,
+    });
+    assert.ok(late.every((h) => h.coverage === 'UNAVAILABLE' && !h.covered));
+  }
+
+  // (4) Labelling after 15:30 completes from valid same-session stored data.
+  {
+    const entryTs = istClock(10, 9, 20);
+    const sessionTape = tape(entryTs + 60_000, SESSION_CLOSE, 5, (t) => 100 + (t - entryTs) / 60_000 * 0.02);
+    const out = labelOutcomes({
+      entryPrice: 100, entryTs, futureTicks: [...sessionTape, ...afterHours], sessionCloseTs: SESSION_CLOSE,
+    });
+    assert.equal(out.length, 5);
+    assert.ok(out.every((h) => h.coverage === 'FULL' && h.covered === true),
+      'every horizon fits inside the session, so all five are full-width measurements');
+    assert.ok(out.every((h) => h.minPrice >= 100), 'the stored after-hours prints stayed out of every window');
+    assert.equal(out[4].measuredMinutes, 60, 'the 60-minute horizon really measured 60 minutes');
+    // 0.02%/min over 60 minutes: measured from the session tape, not from junk.
+    assert.ok(Math.abs(out[4].maxFavourablePct - 0.012) < 0.001,
+      `the 60-minute window measured the session tape (got ${out[4].maxFavourablePct})`);
+  }
+
+  // (5) Normal intraday labelling keeps its existing behaviour.
+  {
+    const entryTs = istClock(10, 10, 0);
+    const ticks = tape(entryTs + 60_000, entryTs + 20 * 60_000, 1, (t) => 100 + (t - entryTs) / 60_000);
+    const uncapped = labelOutcomes({ entryPrice: 100, entryTs, futureTicks: ticks, targetPct: 0.15, stopPct: 0.08 });
+    assert.equal(uncapped.length, 5, 'no cap: horizons without data are still omitted');
+    assert.deepEqual(uncapped.map((h) => h.covered), [true, true, true, false, false],
+      'unchanged: only the horizons the 20-minute tape reaches are covered');
+    assert.equal(uncapped[0].label, 'PENDING');
+    assert.equal(uncapped.find((h) => h.horizonMinutes === 60).coverage, 'INSUFFICIENT',
+      'an uncapped short tape is insufficient, not session-clamped');
+    // Where the cap does not bite, a capped call must be identical to an uncapped
+    // one (sessionCloseTs is the only difference — it is bookkeeping, not a result).
+    const capped = labelOutcomes({
+      entryPrice: 100, entryTs, futureTicks: ticks, targetPct: 0.15, stopPct: 0.08, sessionCloseTs: SESSION_CLOSE,
+    });
+    const measurable = ({ sessionCloseTs, ...rest }) => rest;
+    for (const h of [5, 10, 15]) {
+      assert.deepEqual(
+        measurable(capped.find((x) => x.horizonMinutes === h)),
+        measurable(uncapped.find((x) => x.horizonMinutes === h)),
+        `the ${h}-minute horizon is untouched by the cap when it fits inside the session`,
+      );
+    }
+  }
+}
+console.log('  10b session-close clamp ok');
+
 // ── 11. NO_TRADE always explains itself (failed signals are recorded) ───────
 {
   const flat = series(Array.from({ length: 10 }, () => [200, 201, 199, 200, 100]));

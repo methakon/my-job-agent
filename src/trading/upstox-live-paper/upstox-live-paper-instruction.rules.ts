@@ -46,6 +46,18 @@ export const istMinutesOfDay = (nowMs: number): number => {
   const shifted = new Date(nowMs + IST_OFFSET_MS);
   return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
 };
+/** The cash session closes at 15:30 IST (the desk's own session boundary). */
+export const IST_SESSION_CLOSE_MINUTES = 15 * 60 + 30;
+/**
+ * Epoch ms of the 15:30 IST close of the IST trading date that contains `atMs`.
+ * Stored quotes live on in the hours after the bell, so this is what evidence
+ * windows are clamped to: a measurement may never read past it.
+ */
+export const istSessionCloseMs = (atMs: number): number => {
+  const shifted = new Date(atMs + IST_OFFSET_MS);
+  const istMidnightAsUtc = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());
+  return istMidnightAsUtc + IST_SESSION_CLOSE_MINUTES * 60_000 - IST_OFFSET_MS;
+};
 
 /**
  * When the auto-start may act, in IST wall-clock minutes. Session open is 09:15;

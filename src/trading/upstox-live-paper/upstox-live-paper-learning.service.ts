@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { HorizonOutcome, labelOutcomes } from '../pattern-engine/pattern-features';
+import { IST_OFFSET_MS, istSessionCloseMs } from './upstox-live-paper-instruction.rules';
 import { UpstoxLivePaperCandidate } from './upstox-live-paper-candidate.entity';
 import { UpstoxLivePaperOptionQuote } from './upstox-live-paper-option-quote.entity';
 import { ENTRY_STRATEGY_VERSION } from './upstox-live-paper-entry-policy';
@@ -185,13 +186,29 @@ export class UpstoxLivePaperLearningService {
     return this.candidates.findOne({ where: { tradeId } });
   }
 
+  /**
+   * Candidates whose label is not final yet. A label is final once every horizon
+   * is settled: FULL (the tape reached it), SESSION_CLAMPED (the horizon runs past
+   * the close, so it can never become full) or UNAVAILABLE (no tape for that window
+   * at all). A horizon still marked INSUFFICIENT can improve from stored quotes —
+   * which is exactly why labelling is allowed to run after 15:30, when the
+   * session's tape is finally complete. Settled rows drop out on their own, so a
+   * clamped horizon is never re-labelled as if it could still fill in.
+   */
+  private isLabelFinal(row: UpstoxLivePaperCandidate): boolean {
+    const coverage = (row.forwardOutcomes ?? {})['_coverage'] as { insufficient?: unknown } | undefined;
+    return Array.isArray(coverage?.insufficient) && coverage.insufficient.length === 0;
+  }
+
   /** Candidates still waiting on a label (post-exit horizons not yet reachable). */
   async pendingLabelling(limit = 50): Promise<UpstoxLivePaperCandidate[]> {
-    return this.candidates.find({
-      where: { outcomeStatus: 'PENDING' },
+    const take = Math.min(500, Math.max(1, limit));
+    const rows = await this.candidates.find({
+      where: [{ outcomeStatus: 'PENDING' }, { outcomeStatus: 'PARTIAL' }],
       order: { evaluatedAt: 'ASC' },
-      take: Math.min(500, Math.max(1, limit)),
+      take,
     });
+    return rows.filter((row) => row.outcomeStatus === 'PENDING' || !this.isLabelFinal(row));
   }
 
   /** Post-exit labelling for one candidate. */
@@ -217,8 +234,13 @@ export class UpstoxLivePaperLearningService {
     const anchorPrice = Number(row.entryPrice ?? row.ltp);
     if (!(anchorPrice > 0) || !anchorTs) return null;
 
+    // Evidence is session-scoped: the tape ends at the 15:30 IST close. Stores
+    // keep receiving after-hours prints (thin, degenerate prices), and those must
+    // never be read into an outcome — so both the fetch and the windows stop here.
+    const sessionCloseTs = istSessionCloseMs(anchorTs.getTime());
     const from = new Date(anchorTs.getTime() - 60_000);
-    const to = new Date(anchorTs.getTime() + (hoursBack * 60 + 60) * 60_000);
+    const requestedTo = anchorTs.getTime() + (hoursBack * 60 + 60) * 60_000;
+    const to = new Date(Math.min(requestedTo, sessionCloseTs));
     const ticks = await this.quotes.find({
       where: { contractSymbol: row.contractSymbol, ts: Between(from, to) },
       order: { ts: 'ASC' },
@@ -232,6 +254,7 @@ export class UpstoxLivePaperLearningService {
       futureTicks: series,
       targetPct: row.plannedTarget ? (Number(row.plannedTarget) - anchorPrice) / anchorPrice : null,
       stopPct: row.plannedStop ? (Number(row.plannedStop) - anchorPrice) / anchorPrice : null,
+      sessionCloseTs,
     });
 
     // Post-exit window: strictly after the exit — for a candidate that never
@@ -262,7 +285,11 @@ export class UpstoxLivePaperLearningService {
       plannedStop: row.plannedStop === null ? null : Number(row.plannedStop),
     });
 
-    const allCovered = horizons.length > 0 && horizons.every((h) => h.covered);
+    // A candidate is COMPLETE only when every horizon is a full-width measurement.
+    // A session-clamped horizon is recorded (so the partial tape is not thrown
+    // away) but it stays PARTIAL by name — a missing measurement must never pass
+    // as a complete one.
+    const allFull = horizons.length > 0 && horizons.every((h) => h.coverage === 'FULL');
     const forward: Record<string, unknown> = {};
     for (const h of horizons) {
       forward[String(h.horizonMinutes)] = {
@@ -271,6 +298,22 @@ export class UpstoxLivePaperLearningService {
         maxAdversePct: h.maxAdversePct,
         label: h.label,
         covered: h.covered,
+        // Provenance: only coverage FULL is a full-window result. Anything else is
+        // shorter than the horizon asked for and must be excluded from evidence.
+        coverage: h.coverage,
+        measuredMinutes: h.measuredMinutes,
+        // The window end actually measured — proves nothing read past the close.
+        measuredUntilTs: h.measuredUntilTs,
+      };
+    }
+    if (horizons.length) {
+      forward._coverage = {
+        sessionCloseTs,
+        sessionCloseIst: new Date(sessionCloseTs + IST_OFFSET_MS).toISOString().slice(11, 16),
+        full: horizons.filter((h) => h.coverage === 'FULL').map((h) => h.horizonMinutes),
+        sessionClamped: horizons.filter((h) => h.coverage === 'SESSION_CLAMPED').map((h) => h.horizonMinutes),
+        insufficient: horizons.filter((h) => h.coverage === 'INSUFFICIENT').map((h) => h.horizonMinutes),
+        unavailable: horizons.filter((h) => h.coverage === 'UNAVAILABLE').map((h) => h.horizonMinutes),
       };
     }
 
@@ -289,7 +332,7 @@ export class UpstoxLivePaperLearningService {
       postExitOutcomes: peakAfterExit === null ? null : { peakAfterExit, troughAfterExit, missedOpportunityPct },
       forwardOutcomes: forward,
       classification,
-      outcomeStatus: allCovered ? 'COMPLETE' : 'PARTIAL',
+      outcomeStatus: allFull ? 'COMPLETE' : 'PARTIAL',
       labelledAt: new Date(),
     });
   }

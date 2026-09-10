@@ -805,6 +805,8 @@ export type OutcomeHorizonMinutes = (typeof OUTCOME_HORIZONS_MIN)[number];
 export const OUTCOME_LABELS = ['TARGET_REACHED', 'STOP_REACHED', 'FAILED_BREAKOUT', 'CONTINUATION', 'EXTENSION', 'REVERSAL', 'PENDING'] as const;
 export type OutcomeLabel = (typeof OUTCOME_LABELS)[number];
 
+export type HorizonCoverage = 'FULL' | 'SESSION_CLAMPED' | 'INSUFFICIENT' | 'UNAVAILABLE';
+
 export type HorizonOutcome = {
   horizonMinutes: number;
   maxFavourablePct: number | null;
@@ -815,6 +817,20 @@ export type HorizonOutcome = {
   /** True only when the tape actually reaches this horizon (no extrapolation). */
   covered: boolean;
   label: OutcomeLabel;
+  /**
+   * How much of the requested window the tape really covered. FULL is the only
+   * coverage a full-width measurement may be read from; SESSION_CLAMPED means the
+   * horizon runs past the session close so only the pre-close part was measured;
+   * INSUFFICIENT means the tape stops short of the horizon (it may still fill in);
+   * UNAVAILABLE means there was no usable tape for that window at all.
+   */
+  coverage: HorizonCoverage;
+  /** End of the window actually measured (epoch ms); the session close when clamped. */
+  measuredUntilTs: number | null;
+  /** Minutes of tape actually measured — below horizonMinutes when clamped. */
+  measuredMinutes: number | null;
+  /** Session close this horizon was clamped to, when a cap was supplied. */
+  sessionCloseTs: number | null;
 };
 
 /**
@@ -830,12 +846,21 @@ export const labelOutcomes = (input: {
   targetPct?: number | null;
   stopPct?: number | null;
   horizons?: readonly number[];
+  /**
+   * Optional session close (epoch ms). When supplied, every outcome window is
+   * clamped to it: after-hours prints are never read into a horizon and a window
+   * that would run past the close is reported as SESSION_CLAMPED rather than as a
+   * full-width result. Omit it and the behaviour is exactly as before — the cap is
+   * opt-in so the pattern engine's default measurement is unchanged.
+   */
+  sessionCloseTs?: number | null;
 }): HorizonOutcome[] => {
   const entryPrice = input.entryPrice;
   if (!(entryPrice > 0)) return [];
   const targetPct = input.targetPct ?? null;
   const stopPct = input.stopPct ?? null;
   const horizons = input.horizons ?? OUTCOME_HORIZONS_MIN;
+  const sessionCloseTs = input.sessionCloseTs ?? null;
   const points = input.futureTicks
     .map((t) => ({
       at: t.ts instanceof Date ? t.ts.getTime() : new Date(t.ts).getTime(),
@@ -846,9 +871,33 @@ export const labelOutcomes = (input: {
 
   const out: HorizonOutcome[] = [];
   for (const horizonMinutes of horizons) {
-    const until = input.entryTs + horizonMinutes * 60_000;
+    const requestedUntil = input.entryTs + horizonMinutes * 60_000;
+    // The window can never extend past the session close: a print after the bell
+    // belongs to no session, so it may not mark an outcome as covered.
+    const clamped = sessionCloseTs !== null && requestedUntil > sessionCloseTs;
+    const until = clamped ? sessionCloseTs : requestedUntil;
     const window = points.filter((p) => p.at > input.entryTs && p.at <= until);
-    if (!window.length) continue;
+    if (!window.length) {
+      // Uncapped behaviour is unchanged: a horizon without data is omitted. With a
+      // cap the gap is recorded explicitly, so a missing measurement stays visible
+      // instead of being invented.
+      if (sessionCloseTs === null) continue;
+      out.push({
+        horizonMinutes,
+        maxFavourablePct: null,
+        maxAdversePct: null,
+        maxPrice: null,
+        minPrice: null,
+        returnPct: null,
+        covered: false,
+        label: 'PENDING',
+        coverage: 'UNAVAILABLE',
+        measuredUntilTs: null,
+        measuredMinutes: null,
+        sessionCloseTs,
+      });
+      continue;
+    }
     const maxPrice = Math.max(...window.map((p) => p.price));
     const minPrice = Math.min(...window.map((p) => p.price));
     const maxFavourablePct = (maxPrice - entryPrice) / entryPrice;
@@ -875,15 +924,25 @@ export const labelOutcomes = (input: {
               : returnPct > 0.5 ? 'EXTENSION'
                 : returnPct > 0.1 ? 'CONTINUATION'
                   : returnPct < 0 ? 'REVERSAL' : 'PENDING';
+    // Covered only when the tape reaches the horizon: a 60-minute label built
+    // from 20 minutes of ticks would not be a measurement. A clamped horizon can
+    // never be covered — the session ended before the horizon did.
+    const reachesHorizon = points[points.length - 1].at >= requestedUntil - 60_000;
+    const covered = reachesHorizon && !clamped;
+    const coverage: HorizonCoverage = covered
+      ? 'FULL'
+      : clamped ? 'SESSION_CLAMPED' : 'INSUFFICIENT';
     out.push({
       horizonMinutes,
       maxFavourablePct: round4(maxFavourablePct),
       maxAdversePct: round4(maxAdversePct),
       maxPrice, minPrice, returnPct: round4(returnPct),
-      // Covered only when the tape reaches the horizon: a 60-minute label built
-      // from 20 minutes of ticks would not be a measurement.
-      covered: points[points.length - 1].at >= until - 60_000,
+      covered,
       label,
+      coverage,
+      measuredUntilTs: until,
+      measuredMinutes: round4((until - input.entryTs) / 60_000),
+      sessionCloseTs,
     });
   }
   return out;

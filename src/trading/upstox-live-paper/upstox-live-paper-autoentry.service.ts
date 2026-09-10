@@ -28,12 +28,12 @@ import { UpstoxLivePaperService } from './upstox-live-paper.service';
 import { UpstoxLivePaperRiskService } from './upstox-live-paper-risk.service';
 import { UpstoxLivePaperLearningService } from './upstox-live-paper-learning.service';
 import { UpstoxLivePaperConfig } from './upstox-live-paper.config';
-import { IST_OFFSET_MS } from './upstox-live-paper-instruction.rules';
+import { IST_OFFSET_MS, IST_SESSION_CLOSE_MINUTES } from './upstox-live-paper-instruction.rules';
 import { PaperRiskSnapshot } from './paper-risk';
 
 /** The desk only evaluates inside the Indian cash session (IST). */
 const SESSION_OPEN_MINUTES = 9 * 60 + 15;
-const SESSION_CLOSE_MINUTES = 15 * 60 + 30;
+const SESSION_CLOSE_MINUTES = IST_SESSION_CLOSE_MINUTES;
 const BUCKET_MS = 5 * 60_000;
 
 /**
@@ -111,6 +111,25 @@ export class UpstoxLivePaperAutoEntryService {
       await this.runOnce();
     } catch (err) {
       this.logger.error(`[UPSTOX-AUTO-V1] tick failed: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  /**
+   * Evidence labelling keeps its own clock and is NOT bound to the market
+   * session: it only reads quotes already stored, so a label can be completed
+   * after 15:30 from the same session's tape. Windows are clamped to the close,
+   * so running after the bell can never turn an after-hours print into an
+   * outcome. While the session is open the entry cycle already labels, so this
+   * tick stays out of its way rather than doing the same work twice.
+   */
+  @Cron('*/30 * * * * *', { name: 'upstox-live-paper-v1-labelling' })
+  async labellingTick(): Promise<void> {
+    if (!this.enabled) return;
+    if (this.withinSession(Date.now())) return;
+    try {
+      await this.labelStaleCandidates();
+    } catch (err) {
+      this.logger.error(`[UPSTOX-AUTO-V1] labelling tick failed: ${err instanceof Error ? err.message : err}`);
     }
   }
 

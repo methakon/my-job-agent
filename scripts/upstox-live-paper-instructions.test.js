@@ -119,11 +119,14 @@ console.log('  4 sizing/cap filter ok');
   const rulesSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-instruction.rules.ts'), 'utf8');
   assert.ok(!/5000|5_000/.test(rulesSrc), 'the rules module holds no rupee cap of its own');
   assert.ok(rulesSrc.includes('SESSION_OPEN_MINUTES') && rulesSrc.includes('SESSION_LAST_ENTRY_MINUTES'), 'session window is explicit, not implicit');
-  // Strip comments, then require that the ONLY multi-digit literal in the rules is
-  // the IST offset. Everything else a decision depends on is an input.
+  // Strip comments, then require that the ONLY multi-digit literals in the rules
+  // are unit conversions. Everything else a decision depends on is an input.
   const noComments = rulesSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   const literals = noComments.match(/\b\d[\d_]*(?:\.\d+)?\b/g) ?? [];
-  const suspicious = literals.filter((s) => s.replace(/[_.]/g, '').length >= 3 && !/^3_?600_?000$/.test(s));
+  // Time units are not trading constants: ms in an hour / minute / second, and the
+  // seconds in a day. A rupee cap, a lot size or a threshold still fails this.
+  const TIME_UNITS = /^(?:3_?600_?000|60_?000|1_?000|86_?400_?000)$/;
+  const suspicious = literals.filter((s) => s.replace(/[_.]/g, '').length >= 3 && !TIME_UNITS.test(s));
   assert.equal(suspicious.length, 0, `unexpected numeric constants in the rules: ${suspicious.join(', ')}`);
   assert.ok(!/\blotSize\s*=\s*\d/.test(noComments), 'no hard-coded lot size');
   assert.ok(rulesSrc.includes('never guessed'), 'the refusal rule states why it refuses');
