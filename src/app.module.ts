@@ -71,6 +71,9 @@ import { ProjectStatusService } from './project-status/project-status.service';
 import { ProjectStatusPageController } from './project-status/project-status-page.controller';
 import { ProjectClarification } from './project-status/project-clarification.entity';
 import { ProjectClarificationService } from './project-status/project-clarification.service';
+import { JobApplicationRoadmapModule } from './job-application-roadmap/job-application-roadmap.module';
+import { JobApplicationRoadmapPageController } from './job-application-roadmap/job-application-roadmap-page.controller';
+import { JobApplicationRoadmapItem } from './job-application-roadmap/job-application-roadmap-item.entity';
 import { AgentTodoLog } from './shared/agent-todo-log.entity';
 import { Session } from './shared/session.entity';
 import { SideIncomeOpportunity } from './side-income/side-income-opportunity.entity';
@@ -156,7 +159,7 @@ import {
       InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem,
       FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote,
       FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport,
-      SandboxTick, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session,
+      SandboxTick, JobApplicationRoadmapItem, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session,
       ProjectClarification,
       SideIncomeOpportunity, DatabaseSyncAudit, UpstoxPortfolio, UpstoxTrade,
       // Upstox LIVE paper entities (isolated)
@@ -175,6 +178,7 @@ import {
     UpstoxLivePaperModule,
     UnifiedMarketDataModule,
     PreOpenModule,
+    JobApplicationRoadmapModule,
   ],
   controllers: [
     ProfileController, LeadController, ApplicationController, SettingsController, InterviewPrepController,
@@ -182,7 +186,8 @@ import {
     BrowserFormController, LearningController, ApplicationsPageController, LinkedInController, SandboxController,
     VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController,
     OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController,
-    FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController,
+    FnfOptionChainController, FailedApplicationsPageController, JobApplicationRoadmapPageController,
+    ProjectStatusPageController, QuickQuestionsController,
     CvRegionFormatController, FyersAuthController, FyersOAuthController, UpstoxTradingPageController,
     PatternEngineController,
     AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)

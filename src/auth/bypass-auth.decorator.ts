@@ -11,7 +11,7 @@ import { BYPASS_AUTH_KEY, IpWhitelistKey, AI_TEST_TOKEN_KEY } from './conditiona
  * Also used on the auth endpoints themselves (login/me/forgot/change/logout),
  * which must be reachable before any session exists.
  */
-export const BypassAuth = () => SetMetadata(BYPASS_AUTH_KEY, true);
+export const BypassAuth = (): MethodDecorator & ClassDecorator => SetMetadata(BYPASS_AUTH_KEY, true);
 
 /**
  * Allow specific caller IPs through the wall without a password/session.

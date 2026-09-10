@@ -3,7 +3,10 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "assets": [{ "include": "project-status/*.json", "watchAssets": true }],
+    "assets": [
+      { "include": "project-status/*.json", "watchAssets": true },
+      { "include": "job-application-roadmap/*.json", "watchAssets": true }
+    ],
     "deleteOutDir": true
   }
 }
