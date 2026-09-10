@@ -2,6 +2,8 @@ import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { ProjectChecklistItem } from './project-checklist-item.entity';
 import { ProjectStatusService } from './project-status.service';
+import { ProjectClarification } from './project-clarification.entity';
+import { ProjectClarificationService, AskClarificationInput, StageClarificationCount } from './project-clarification.service';
 
 const esc = (s: unknown): string =>
 	String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -21,13 +23,66 @@ const badge = (status: string): string => {
 
 const STATUS_BUTTONS = ['pending', 'in_progress', 'done', 'blocked'];
 
+const istWhen = (d: Date | null | undefined): string =>
+	d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : '';
+
+/** Yellow block: a question the agent needs answered, with the operator's save box. */
+const pendingBlock = (c: ProjectClarification): string => `
+<div class="cl-box">
+  <div class="cl-q">❓ needs clarification${c.stage ? ` · <span class="cl-stage">${esc(c.stage)}</span>` : ''} · filed ${esc(istWhen(c.createdAt))} by ${esc(c.askedBy)} · <code>#${c.id}</code></div>
+  <div class="cl-text">${esc(c.question)}</div>
+  <form method="post" action="/project-status/clarifications/${c.id}/answer" class="cl-form">
+    <textarea name="answer" rows="2" maxlength="4000" placeholder="your clarification…" required></textarea>
+    <div class="cl-actions"><button type="submit">💾 save clarification</button></div>
+  </form>
+</div>`;
+
+/** Collapsed history of an answered question (the row keeps its normal colour). */
+const answeredBlock = (c: ProjectClarification): string => `
+<details class="cl-box ok">
+  <summary><span class="cl-q ok">💬 clarification given · ${esc(istWhen(c.answeredAt))}</span> — ${esc(c.question.slice(0, 110))}${c.question.length > 110 ? '…' : ''}</summary>
+  <div class="cl-text">${esc(c.question)}</div>
+  <div class="cl-a">✅ ${esc(c.answer ?? '')}</div>
+  <form method="post" action="/project-status/clarifications/${c.id}/reopen" class="cl-actions"><button class="mini" type="submit">↩ reopen</button></form>
+</details>`;
+
+const askForm = (itemId: number | null, stage: string, label: string): string => `
+<details class="ask">
+  <summary>❓ ${esc(label)}</summary>
+  <form method="post" action="/project-status/clarifications" class="cl-form">
+    ${itemId != null ? `<input type="hidden" name="itemId" value="${itemId}"/>` : ''}
+    ${itemId != null
+		? `<input type="hidden" name="stage" value="${esc(stage)}"/>`
+		: `<input type="text" name="stage" value="${esc(stage)}" placeholder="stage label (e.g. LIVE PAPER DESK)" maxlength="160"/>`}
+    <textarea name="question" rows="2" maxlength="4000" placeholder="what needs clarifying?" required></textarea>
+    <div class="cl-actions"><button type="submit">💾 file clarification</button></div>
+  </form>
+</details>`;
+
+const stageCounts = (byStage: StageClarificationCount[]): string =>
+	byStage.length
+		? `<ul class="stages">${byStage
+				.map(
+					(s) =>
+						`<li><span class="cl-stage">${esc(s.stage)}</span> — ${s.pending ? `<b class="cl-wait">${s.pending} awaiting clarification</b>` : ''}${s.pending && s.answered ? ' · ' : ''}${s.answered ? `<span class="ok">${s.answered} given</span>` : ''}</li>`,
+				)
+				.join('')}</ul>`
+		: '<div class="meta">no clarifications filed yet</div>';
+
 @Controller('project-status')
 export class ProjectStatusPageController {
-	constructor(private readonly status: ProjectStatusService) {}
+	constructor(
+		private readonly status: ProjectStatusService,
+		private readonly clar: ProjectClarificationService,
+	) {}
 
 	@Get()
 	async page(@Res() res: Response) {
-		const [groups, overall] = await Promise.all([this.status.grouped(), this.status.overallStats()]);
+		const [groups, overall, clarOv] = await Promise.all([
+			this.status.grouped(),
+			this.status.overallStats(),
+			this.clar.overview(),
+		]);
 
 		const bar = (done: number, total: number): string => {
 			const pct = total ? Math.round((done / total) * 100) : 0;
@@ -54,9 +109,20 @@ ${it.instr ? `<div class="v5-i"><b>Implementation:</b> ${esc(it.instr)}</div>` :
 ${it.doneWhen ? `<div class="v5-d"><b>Done when:</b> ${esc(it.doneWhen)}</div>` : ''}
 </div>`
 							: '';
-						return `<tr class="row-${esc(it.status)}">
+						const cl = clarOv.byItem.get(id) ?? { pending: [], answered: [] };
+					const clarBadge = cl.pending.length
+						? `<span class="badge clarify">❔ ${cl.pending.length} awaiting clarification</span>`
+						: cl.answered.length
+							? `<span class="badge ok">💬 ${cl.answered.length} clarification${cl.answered.length === 1 ? '' : 's'} given</span>`
+							: '';
+					const clarHtml = [
+						...cl.pending.map(pendingBlock),
+						...cl.answered.map(answeredBlock),
+						askForm(id, it.grp, 'ask a clarification on this item'),
+					].join('\n');
+					return `<tr class="row-${esc(it.status)}${cl.pending.length ? ' row-clarify' : ''}">
   <td class="num">${it.item_order}</td>
-  <td><div>${esc(it.item)}</div>${v5detail}${it.note ? `<div class="note">📝 ${esc(it.note)}</div>` : ''}</td>
+  <td><div>${esc(it.item)}</div>${v5detail}${it.note ? `<div class="note">📝 ${esc(it.note)}</div>` : ''}${clarBadge ? `<div class="cl-badges">${clarBadge}</div>` : ''}${clarHtml}</td>
   <td class="nowrap">${buttons}</td>
   <td class="nowrap">${noteForm}</td>
 </tr>`;
@@ -80,12 +146,29 @@ ${it.doneWhen ? `<div class="v5-d"><b>Done when:</b> ${esc(it.doneWhen)}</div>` 
 			})
 			.join('\n');
 
+		const unattached = clarOv.unattachedPending.map(pendingBlock).join('\n');
+		const clarCard = `
+<div class="card" id="clarifications">
+  <div class="ghead">
+    <span class="gtitle">❔ Clarifications — what the agent needs from you</span>
+    <span class="meta">stored in <code>project_clarifications</code> · a pending question paints its checklist row <span class="cl-wait">yellow</span></span>
+  </div>
+  <div class="summary">
+    <div><div class="meta">Awaiting your clarification</div><b class="${clarOv.stats.pending ? 'cl-wait' : 'dim'}">${clarOv.stats.pending}</b></div>
+    <div><div class="meta">Clarifications given</div><b class="ok">${clarOv.stats.answered}</b></div>
+    <div><div class="meta">Total filed</div><b class="dim">${clarOv.stats.total}</b></div>
+  </div>
+  ${stageCounts(clarOv.byStage)}
+  ${unattached ? `<div class="meta" style="margin-top:10px">Not tied to a single checklist row (open them where they belong when you answer):</div>${unattached}` : ''}
+  ${askForm(null, '', 'file a new clarification against a stage')}
+</div>`;
+
 		const html = `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Project Status — Hermes F&O v4 Checklist</title>
 <style>
-:root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c}
+:root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--clarify:#f2c94c}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:20px}
 h1{font-size:22px;margin:0 0 4px}
@@ -121,6 +204,31 @@ form.noteform{display:flex;gap:6px}
 input[type=text]{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:4px 8px;font-size:12px;width:180px}
 input:focus{outline:none;border-color:var(--dim)}
 .row-done td{opacity:.55}
+/* Clarifications: a pending question paints its checklist row yellow; once the
+   operator gives the clarification the row returns to its normal colour and the
+   item just shows how many clarifications have been given. */
+tr.row-clarify td{background:rgba(242,201,76,.10);opacity:1}
+tr.row-clarify td:first-child{border-left:3px solid var(--clarify)}
+.cl-badges{margin-top:5px}
+.badge.clarify{background:rgba(242,201,76,.18);color:var(--clarify)}
+.cl-box{background:rgba(242,201,76,.08);border:1px solid rgba(242,201,76,.42);border-radius:8px;padding:7px 9px;margin:6px 0;font-size:12.5px}
+.cl-box.ok{background:rgba(63,185,111,.07);border-color:rgba(63,185,111,.35)}
+.cl-box.ok summary{padding:0}
+.cl-q{color:var(--clarify);font-weight:600;font-size:12px}
+.cl-q.ok{color:var(--ok)}
+.cl-stage{color:var(--dim);font-weight:400}
+.cl-wait{color:var(--clarify)}
+.cl-text{margin:3px 0;white-space:pre-wrap}
+.cl-a{margin:3px 0;color:var(--ok);white-space:pre-wrap}
+.cl-form{margin-top:6px;display:flex;flex-direction:column;gap:5px;max-width:760px}
+.cl-actions{display:flex;gap:6px}
+textarea{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:5px 8px;font:12px/1.45 ui-monospace,monospace;width:100%;resize:vertical}
+textarea:focus{outline:none;border-color:var(--dim)}
+details.ask{margin-top:6px}
+details.ask summary{color:var(--dim);font-size:11.5px;padding:2px 0}
+details.ask summary:hover{color:var(--clarify)}
+ul.stages{margin:8px 0 0;padding-left:18px;font-size:12.5px}
+ul.stages li{margin:2px 0}
 .v5{margin-top:4px;font-size:12px;color:var(--dim);border-left:2px solid var(--line);padding-left:8px}
 .v5-i{margin:2px 0}
 .v5-d{margin:2px 0;color:var(--ok)}
@@ -141,6 +249,7 @@ code{font:11.5px ui-monospace,monospace;color:#e0a83c}
   <div><div class="meta">Pending</div><b class="dim">${overall.pending}</b></div>
   <div style="min-width:220px">${bar(overall.done, overall.total)}</div>
 </div>
+${clarCard}
 ${gateHtml}
 <div class="footer">
   <a href="/">← dashboard</a> · <a href="/fnf-trading">F&amp;O desk</a> · <a href="/option-trading">option trading</a> · <a href="/docs">swagger</a><br/>
@@ -171,5 +280,81 @@ ${gateHtml}
 			return;
 		}
 		res.redirect(303, '/project-status');
+	}
+
+	/** File a clarification (against a checklist item, or a free stage label). */
+	@Post('clarifications')
+	async clarify(
+		@Body('itemId') itemId: string,
+		@Body('stage') stage: string,
+		@Body('question') question: string,
+		@Res() res: Response,
+	) {
+		const row = await this.clar.ask({
+			itemId: itemId ? Number(itemId) : null,
+			stage: String(stage ?? ''),
+			question: String(question ?? ''),
+			askedBy: 'operator',
+		});
+		res.type('html');
+		if (!row) {
+			res.status(400).send('<p>a clarification needs a question</p><p><a href="/project-status">← back</a></p>');
+			return;
+		}
+		res.redirect(303, '/project-status#clarifications');
+	}
+
+	/** Store the operator's clarification: the row's yellow clears and the item counts it. */
+	@Post('clarifications/:id/answer')
+	async answerClarification(@Param('id') id: string, @Body('answer') answer: string, @Res() res: Response) {
+		const row = await this.clar.answer(Number(id), String(answer ?? ''));
+		res.type('html');
+		if (!row) {
+			res.status(400).send('<p>unknown clarification or empty answer</p><p><a href="/project-status">← back</a></p>');
+			return;
+		}
+		res.redirect(303, '/project-status');
+	}
+
+	/** Send a question back to pending (the answer was not enough). */
+	@Post('clarifications/:id/reopen')
+	async reopenClarification(@Param('id') id: string, @Res() res: Response) {
+		await this.clar.reopen(Number(id));
+		res.redirect(303, '/project-status');
+	}
+
+	// ---- machine-readable view of the same store (agent CLI / cron) ----
+
+	@Get('clarifications.json')
+	async clarificationsJson(@Query('status') status: string, @Res() res: Response) {
+		const [ov, all] = await Promise.all([this.clar.overview(), this.clar.all()]);
+		const want = String(status ?? '').trim();
+		const items = want ? all.filter((r) => (want === 'pending' ? r.status !== 'answered' : r.status === want)) : all;
+		res.json({ stats: ov.stats, byStage: ov.byStage, items });
+	}
+
+	@Post('clarifications.json')
+	async askJson(@Body() body: AskClarificationInput, @Res() res: Response) {
+		const row = await this.clar.ask({
+			itemId: body?.itemId ?? null,
+			stage: body?.stage,
+			question: String(body?.question ?? ''),
+			askedBy: body?.askedBy === 'operator' ? 'operator' : 'hermes',
+		});
+		if (!row) {
+			res.status(400).json({ ok: false, error: 'question is required' });
+			return;
+		}
+		res.json({ ok: true, id: row.id, itemId: row.itemId, stage: row.stage, status: row.status });
+	}
+
+	@Post('clarifications/:id/answer.json')
+	async answerJson(@Param('id') id: string, @Body('answer') answer: string, @Res() res: Response) {
+		const row = await this.clar.answer(Number(id), String(answer ?? ''));
+		if (!row) {
+			res.status(400).json({ ok: false, error: 'unknown clarification id or empty answer' });
+			return;
+		}
+		res.json({ ok: true, id: row.id, status: row.status, answeredAt: row.answeredAt });
 	}
 }

@@ -1,0 +1,49 @@
+[
+  {
+    "match": "Keep universe-wide candidate ranking",
+    "stage": "GATE 0 - PROTECT THE CURRENT OPTION-ONLY PAPER DESK",
+    "askedBy": "hermes",
+    "itemIdNote": "which entry rule may trade unattended",
+    "question": "Which entry rule may the Rs 5,000 Upstox paper desk trade UNATTENDED? I will not invent one. Evidence today: 45 in-session assessments, 0 qualified (best confidence 0.5062 vs the 0.60 gate; reversal peaked 0.38 vs 0.55). Options: (a) reuse FNF's option-candidate-rank-v1 - 1 lot of the ATM CE/PE of the registered underlying, same as the FNF session driver; (b) a rule you write in this box; (c) no unattended entries at all - the desk only ever fires the pre-cleared contract instructions I file for 09:15."
+  },
+  {
+    "match": "Use explicit PAPER / SHADOW",
+    "stage": "GATE 16 - INDEPENDENT RISK ENGINE",
+    "askedBy": "hermes",
+    "itemIdNote": "what the desk auto-starts from at 09:15",
+    "question": "What should the Rs 5,000 desk auto-start from at 09:15 IST tomorrow? The runner is built and armed: POST /upstox-live-paper/instructions stores your instruction once (contract, side, lots or capital cap, one-shot or every session) and the desk opens it by itself at the open. Nothing fires while the instruction list is empty - today it is empty, because I refuse to guess the contract. Tell me the contract (or the rule) and it trades tomorrow without you repeating it."
+  },
+  {
+    "match": "duplicate-order, stale-decision",
+    "stage": "GATE 16 - INDEPENDENT RISK ENGINE",
+    "askedBy": "hermes",
+    "itemIdNote": "double entry on one signal",
+    "question": "FNF recorded NSE:NIFTY26SEP23900CE TWICE for what looks like one signal: two rows, orderedAt 0.75s apart (2026-09-09 10:21:46 IST), identical entry 120, identical exit 82.15, both from algoSource option-candidate-rank-v1 - so the -Rs 2,513.37 loss is counted twice and the total closed P&L (-Rs 2,110.73) is wrong by one lot. The driver's open-loop reads its open-trades list ONCE before iterating signals, so a duplicated signal in the same cycle can open twice. Was the second lot deliberate, or is this a double-insert defect I should fix?"
+  },
+  {
+    "match": "Persist contract, expiry, strike",
+    "stage": "GATE 1 - POINT-IN-TIME DECISION RECORD",
+    "askedBy": "hermes",
+    "itemIdNote": "registered lot size",
+    "question": "FNF's registered option contracts carry lot_size = 65 for BOTH NIFTY and BANKNIFTY options (fnf_option_contract: 2 rows, symbols NSE:NIFTY26SEP23900CE and NSE:BANKNIFTY26SEP58500CE). One value across two different underlyings is a smell, and the trade quantity follows it. The Upstox desk now takes lot size from the broker's own contract master (/v2/option/contract reported SENSEX lot = 20) instead of any env or registered constant. Shall I verify every FNF contract against the broker master and correct mismatches (read-only until you approve)?"
+  },
+  {
+    "match": "Show capital, ceiling",
+    "stage": "GATE 19 - OBSERVABILITY",
+    "askedBy": "hermes",
+    "itemIdNote": "three disagreeing P&L numbers",
+    "question": "Three P&L numbers disagree for the FNF portfolio (sandbox-live, capital Rs 10,000): the /fnf-trading page shows Net P&L -Rs 3,886.01 and Deployed Rs 6,757 (95%); the DB sum of closed trades is -Rs 2,110.73 with 8,089.25 deployed; the portfolio row's netPnl is -Rs 1,085.46. The page figure equals the DB sum minus the newest closed trade (+1,775.28), so the page looks one close behind. Which number is authoritative for the display, and may I make the page read the same source as the API so the three cannot drift?"
+  },
+  {
+    "stage": "FNF ENGINE - PROCESS OWNERSHIP",
+    "askedBy": "hermes",
+    "itemIdNote": "which engine is the live writer",
+    "question": "Two engines can write FNF trades. On this desktop the pm2 process trading-agent is STOPPED (crashed OOM near the 2 GB heap limit; its log ends 05:16 IST today) and the web app never loads the session driver, yet FNF opened trades today at 10:58 IST and 15:01 IST, kept cycling the decision journal until 15:29 IST and kept writing fnf_option_quotes until 15:40 IST. So the driver that is actually running is somewhere else (the Dhargest worker, which also owns the FYERS feed). Confirm that the remote engine is the single intended owner so I keep the desktop copy retired instead of letting both race on the same tables."
+  },
+  {
+    "stage": "ASTRO - BIRTH DATA",
+    "askedBy": "hermes",
+    "itemIdNote": "unresolved date of birth",
+    "question": "Birth data conflict on file: the PAN and the 10th certificate both read 09/12/1982, while the chart data used so far reads 09-12-1981. Which is correct? I have changed neither and will not guess, because every dasha, transit and muhurta window downstream depends on it."
+  }
+]

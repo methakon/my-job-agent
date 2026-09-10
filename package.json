@@ -11,6 +11,7 @@
     "test:upstox-live-paper": "npm run build && node scripts/upstox-live-paper.test.js",
     "test:pattern": "npm run build && node scripts/feed-arbitration.test.js && node scripts/pattern-engine.test.js",
     "test:precleared": "npm run build && node scripts/upstox-live-paper-instructions.test.js",
+    "test:clarifications": "npm run build && node scripts/verify-clarifications.js",
     "test:desks": "npm run build && node scripts/upstox-live-paper.test.js && node scripts/upstox-live-paper-instructions.test.js && node scripts/feed-arbitration.test.js && node scripts/pattern-engine.test.js",
     "start": "nest start",
     "start:dev": "nest start --watch"

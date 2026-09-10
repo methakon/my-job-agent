@@ -69,6 +69,8 @@ import { FnfOptionChainController } from './trading/fnf-option-chain.controller'
 import { ProjectChecklistItem } from './project-status/project-checklist-item.entity';
 import { ProjectStatusService } from './project-status/project-status.service';
 import { ProjectStatusPageController } from './project-status/project-status-page.controller';
+import { ProjectClarification } from './project-status/project-clarification.entity';
+import { ProjectClarificationService } from './project-status/project-clarification.service';
 import { AgentTodoLog } from './shared/agent-todo-log.entity';
 import { Session } from './shared/session.entity';
 import { SideIncomeOpportunity } from './side-income/side-income-opportunity.entity';
@@ -154,6 +156,7 @@ import {
       FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote,
       FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport,
       SandboxTick, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session,
+      ProjectClarification,
       SideIncomeOpportunity, DatabaseSyncAudit, UpstoxPortfolio, UpstoxTrade,
       // Upstox LIVE paper entities (isolated)
       UpstoxLivePaperPortfolio, UpstoxLivePaperTrade, UpstoxLivePaperOrder, UpstoxLivePaperPosition,
@@ -192,6 +195,7 @@ import {
     AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService,
     FnfTradingService, FnoMarketDataService, FnfOptionChainService, MarketDataInspectionService, FeatureEngineService,
     UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, FyersTokenService,
+    ProjectClarificationService,
     PatternEngineService, PatternSignalDispatchService,
   ],
 })
