@@ -558,7 +558,9 @@ export class UpstoxLivePaperAutoEntryService {
       intervalSeconds: this.intervalSeconds,
       lookbackMinutes: this.lookbackMinutes,
       sessionWindowIst: '09:15–15:30',
-      portfolioWindow: [`UPSTOX_AUTO_PAPER_LOOKBACK_MIN`, 'UPSTOX_AUTO_PAPER_INTERVAL_SEC'],
+      // The env keys that govern this loop, so the operator can see what to edit
+      // to change it (values are read per run; a pm2 restart applies an .env edit).
+      configKeys: ['UPSTOX_AUTO_PAPER_ENTRY_ENABLED', 'UPSTOX_AUTO_PAPER_LOOKBACK_MIN', 'UPSTOX_AUTO_PAPER_INTERVAL_SEC'],
       thresholds,
     };
   }

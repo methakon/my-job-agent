@@ -138,3 +138,19 @@ behaviour, the REAL-mode interface, and a static check that the desk's strategy 
 references no FNF account/fund state.
 
 Regression: `test:desks`, `test:pattern`, `test:precleared`, `test:clarifications`.
+
+## 5. Changing a value (no code change, no rebuild)
+
+1. Edit `.env` — all keys are listed in `.env.example` under "Upstox PAPER capital +
+   auto-entry V1". The live `.env` carries them explicitly (36 keys).
+2. `pm2 restart my-job-agent` — the knobs are read per run from `process.env`, so an `.env`
+   edit takes effect on the next restart. No build required.
+3. Verify against the running app (this is the in-force truth, not the file):
+   `GET /upstox-live-paper/entry-policy` and `GET /upstox-live-paper/risk/:portfolioId`.
+
+Capital is per-account and needs no restart at all:
+`POST /upstox-live-paper/portfolios/:id/capital {capital, reason}`.
+
+Proven live 2026-09-10: `UPSTOX_V1_ATM_WINDOW=1` → app reported `atmStrikeWindow: 1`;
+reverted to `0` → `0`. Values are validated/clamped by the loader, so a bad value cannot
+produce a nonsense envelope (e.g. `capital: -25` → HTTP 400).
