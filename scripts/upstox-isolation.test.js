@@ -56,8 +56,18 @@ async function api(path, opts = {}) {
     cookie = (login.headers.get('set-cookie') || '').split(';')[0];
   }
   if (cookie) headers['cookie'] = cookie;
-  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
-  return res.json();
+  // Test L pm2-restarts the app; a run started right after can catch it booting,
+  // which surfaces as UND_ERR_SOCKET. One short retry keeps the suite honest
+  // without hiding real endpoint failures.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${path}`, { ...opts, headers });
+      return res.json();
+    } catch (err) {
+      if (attempt >= 3 || !/fetch failed|ECONNREFUSED/i.test(String(err?.message))) throw err;
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+  }
 }
 
 const uuid = () => crypto.randomUUID();
