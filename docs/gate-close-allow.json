@@ -19,6 +19,15 @@
       "recorded": "2026-09-11T03:0x+05:30 (session syncing Upstox token acquisition, roadmap row 876)",
       "evidence": "git show --name-only d80e0ba lists only job-application-roadmap module files; the workstream's own table holds 40 rows; project_checklist_items correctly holds 0 rows for it.",
       "expires_hint": "Entry can be deleted once d80e0ba leaves the guard's commit window (default: last 15 code commits)."
+    },
+    "4d65f3a511a2e5f0b5116e50e54c95f3bcb58844": {
+      "short": "4d65f3a",
+      "reason": "Same separate Job Application workstream, same module path: Cloudflare Email Routing configuration for the JA pipeline (swarna.sekhar@berhampore.in -> swarna.s.jobs@gmail.com), committed with changes only under src/job-application-roadmap/* (page controller, seed, service). No project_checklist_items row exists for it (verified: 0 rows matching email routing / reply tracking / mailbox in checklist-v4.seed.json), and the workstream is intentionally tracked in job_application_roadmap_items.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream ('existing legitimate separate-workstream commit, not missing trading roadmap coverage. Do not invent a roadmap row.') applied to the same module; operator may revoke by deleting this entry.",
+      "recorded": "2026-09-11T04:0x+05:30 (session handling the operator's LIVE Upstox token intake, roadmap row 876)",
+      "evidence": "git show --name-only 4d65f3a lists only src/job-application-roadmap/* files; author/committer bapay.9@gmail.com; email-routing is infrastructure for the JA workstream, not a trading roadmap item.",
+      "expires_hint": "Entry can be deleted once 4d65f3a leaves the guard's commit window (default: last 15 code commits)."
     }
   }
 }

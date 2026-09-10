@@ -22,6 +22,7 @@ const GUARD = path.join(ROOT, 'scripts', 'gate-close-check.js');
 const ALLOW_FILE = path.join(ROOT, 'docs', 'gate-close-allow.json');
 const LEGACY_FILE = path.join(ROOT, 'docs', 'gate-close-legacy-baseline.json');
 const JA_SHA = 'd80e0bad00747b54a7c85574be78b1af1b98d57c';
+const JA2_SHA = '4d65f3a511a2e5f0b5116e50e54c95f3bcb58844';
 
 const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit } = require(LIB);
 
@@ -54,22 +55,25 @@ t('the committed allow-list loads with no problems', () => {
 	assert.ok(live.exists, 'docs/gate-close-allow.json must exist (tracked, reviewable)');
 });
 
-t('it exempts exactly ONE commit, by full SHA — the JA workstream commit', () => {
-	assert.equal(live.entries.size, 1, `expected exactly 1 exemption, found ${live.entries.size}`);
-	assert.ok(live.entries.has(JA_SHA), `expected ${JA_SHA} to be the exempt commit`);
+t('it exempts exactly the audited JA SHAs — the file cannot silently grow', () => {
+	const expected = [JA_SHA, JA2_SHA].sort();
+	assert.deepEqual([...live.entries.keys()].sort(), expected, `expected exactly ${expected.length} exemptions`);
 });
 
-t('the entry is auditable: reason + workstream + authority all present', () => {
-	const e = live.entries.get(JA_SHA);
-	assert.ok(e.reason && e.reason.length > 40, 'reason must be substantive');
-	assert.match(e.workstream, /job-application/i);
-	assert.match(e.authority, /operator/i);
-	assert.ok(e.recorded, 'a recorded date/timestamp must be present');
+t('EVERY entry is auditable: reason + workstream + authority + recorded', () => {
+	for (const [sha, e] of live.entries) {
+		assert.ok(e.reason && e.reason.length > 40, `${sha}: reason must be substantive`);
+		assert.match(e.workstream, /job-application/i, `${sha}: workstream must name the separate workstream`);
+		assert.match(e.authority, /operator/i, `${sha}: authority must cite the operator`);
+		assert.ok(e.recorded, `${sha}: a recorded date/timestamp must be present`);
+	}
 });
 
 t('the exemption does NOT route through the forbidden legacy baseline', () => {
 	const legacy = JSON.parse(fs.readFileSync(LEGACY_FILE, 'utf8')).commits || {};
-	assert.ok(!legacy[JA_SHA] && !legacy[JA_SHA.slice(0, 7)], 'd80e0ba must never be silenced as "legacy baseline"');
+	for (const sha of [JA_SHA, JA2_SHA]) {
+		assert.ok(!legacy[sha] && !legacy[sha.slice(0, 7)], `${sha.slice(0, 7)} must never be silenced as "legacy baseline"`);
+	}
 });
 
 // ── narrowness: exact matches only ───────────────────────────────────────────
