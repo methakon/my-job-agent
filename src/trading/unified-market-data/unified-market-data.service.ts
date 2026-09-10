@@ -59,6 +59,28 @@ const tsOf = (value: unknown): Date | null => {
 };
 
 /**
+ * 'YYYY-MM-DD HH:MM:SS' in the process's own timezone — the same wall-clock
+ * label mysql2 writes into DATETIME columns (connection timezone 'local').
+ * Used ONLY for store-side "recent rows" counts; feed age is always derived
+ * from JS Date differences.
+ */
+const wallClockStamp = (ms: number): string => {
+  const d = new Date(ms);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+
+/** Freshness of the common store (see storeFreshness()). */
+export type StoreFreshness = {
+  lastTs: Date | null;
+  ageMs: number | null;
+  source: string | null;
+  quotesLast5m: number;
+  snapshotsLast5m: number;
+  symbolsLast5m: number;
+};
+
+/**
  * Broker-independent common market-data pipeline (brief s4/s5/s7).
  * No broker SDK, no auth, no order code — only normalize → stamp → persist →
  * cache/broadcast. Writes the common tables once per observation; engines and
@@ -244,6 +266,45 @@ export class UnifiedMarketDataService {
       if (stats.lastAt && now - stats.lastAt.getTime() <= staleMs) return true;
     }
     return false;
+  }
+
+  /**
+   * Freshness of the common store, readable from ANY process — including one
+   * that runs no feed socket of its own (the web app displays ticks the
+   * headless engine writes; brief s4/s12: one store, many readers).
+   * Ages are computed in JS on purpose: DATETIME columns carry wall clock in
+   * the writers' timezone (IST on both hosts) while the DB server's NOW() /
+   * UTC_TIMESTAMP() is UTC, so SQL-side time maths on them is skewed ~5.5 h.
+   */
+  async storeFreshness(now = Date.now()): Promise<StoreFreshness> {
+    const [quotes, snapshots] = await Promise.all([
+      this.quotes.find({ order: { receivedTimestamp: 'DESC' }, take: 1 }),
+      this.snapshots.find({ order: { receivedTimestamp: 'DESC' }, take: 1 }),
+    ]);
+    const newest = [quotes[0] as UnifiedOptionQuote | undefined, snapshots[0] as UnifiedMarketSnapshot | undefined]
+      .filter((row): row is UnifiedOptionQuote | UnifiedMarketSnapshot => Boolean(row?.receivedTimestamp))
+      .sort((a, b) => b.receivedTimestamp.getTime() - a.receivedTimestamp.getTime())[0] ?? null;
+    const lastTs = newest?.receivedTimestamp ?? null;
+
+    const cutoff = wallClockStamp(now - 5 * 60_000);
+    const [quotesLast5m, snapshotsLast5m, symbolsRaw] = await Promise.all([
+      this.quotes.createQueryBuilder('q').where('q.receivedTimestamp > :cutoff', { cutoff }).getCount(),
+      this.snapshots.createQueryBuilder('s').where('s.receivedTimestamp > :cutoff', { cutoff }).getCount(),
+      this.quotes
+        .createQueryBuilder('q')
+        .select('COUNT(DISTINCT q.instrumentKey)', 'n')
+        .where('q.receivedTimestamp > :cutoff', { cutoff })
+        .getRawOne<{ n: string }>(),
+    ]);
+
+    return {
+      lastTs,
+      ageMs: lastTs ? Math.max(0, now - lastTs.getTime()) : null,
+      source: newest?.source ?? null,
+      quotesLast5m,
+      snapshotsLast5m,
+      symbolsLast5m: Number(symbolsRaw?.n ?? 0),
+    };
   }
 
   reset(): void {

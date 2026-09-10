@@ -3,10 +3,22 @@ import type { Response } from 'express';
 import { FnfTradingService, WEEKDAY_NAMES, DECAY_DEFAULTS } from './fnf-trading.service';
 import { FnoMarketDataService } from './fno-market-data.service';
 import { FyersTokenService } from './fyers-token.service';
+import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
 import { BypassAuth, AllowIps } from '../auth/bypass-auth.decorator';
 
 const esc = (s: unknown): string =>
-	String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
+	String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
+/**
+ * NSE/BSE session window, evaluated in IST. Used only so a stale tick feed
+ * outside trading hours is reported as "market closed" instead of "feed DOWN".
+ */
+const marketClosedIst = (now = Date.now()): boolean => {
+	const ist = new Date(now + 5.5 * 3_600_000); // IST wall clock, read as UTC fields
+	const dow = ist.getUTCDay();
+	const minutes = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+	return dow === 0 || dow === 6 || minutes < 9 * 60 + 15 || minutes > 15 * 60 + 45;
+};
 
 const fmt = (n: unknown, digits = 2): string => {
 	const v = Number(n ?? 0);
@@ -30,6 +42,7 @@ export class FnfTradingPageController {
 		private readonly trading: FnfTradingService,
 		private readonly fyersTokens: FyersTokenService,
 		private readonly feed: FnoMarketDataService,
+		private readonly unifiedStore: UnifiedMarketDataService,
 	) {}
 
 	@Get()
@@ -59,6 +72,10 @@ export class FnfTradingPageController {
 				: '';
 		const tokenInfo = await this.fyersTokens.getActiveTokenInfo();
 		const feedStatus = this.feed.status();
+		// Tick source of truth: this web app holds no broker socket of its own
+		// (one writer only — the headless trading engine), so the honest "is the
+		// desk blind?" signal is the age of the shared market-data store.
+		const store = await this.unifiedStore.storeFreshness();
 		const fmtIst = (d: Date | null): string =>
 			d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 		const tokenExpired = !!tokenInfo?.expiresAt && tokenInfo.expiresAt.getTime() < Date.now();
@@ -68,7 +85,7 @@ export class FnfTradingPageController {
 				? ['bad', 'EXPIRED — click GET THE TOKEN below']
 				: ['ok', 'ACTIVE (stored in DB, encrypted)'];
 		let feedCls = 'dim';
-		let feedLabel = 'not enabled';
+		let feedLabel = 'no ticks in the shared market-data store yet';
 		if (feedStatus.enabled) {
 			if (feedStatus.connected && !feedStatus.fallbackActive) {
 				feedCls = 'ok';
@@ -80,6 +97,25 @@ export class FnfTradingPageController {
 				feedCls = 'warn';
 				feedLabel = esc(feedStatus.lastMessage ?? feedStatus.provider);
 			}
+		} else if (store.ageMs === null) {
+			feedCls = 'warn';
+			feedLabel = 'no ticks in the shared market-data store yet — the trading engine is not writing';
+		} else {
+			const ageSec = Math.round(store.ageMs / 1000);
+			const ageTxt = ageSec < 90 ? `${ageSec}s ago` : `${(ageSec / 60).toFixed(1)} min ago`;
+			if (ageSec <= 60) {
+				feedCls = 'ok';
+				feedLabel = `FYERS via the trading engine — live (last tick ${ageTxt})`;
+			} else if (ageSec <= 300) {
+				feedCls = 'warn';
+				feedLabel = `trading-engine feed lagging — last tick ${ageTxt}`;
+			} else if (marketClosedIst()) {
+				feedCls = 'dim';
+				feedLabel = `market closed — last tick ${ageTxt} (${fmtIst(store.lastTs)})`;
+			} else {
+				feedCls = 'bad';
+				feedLabel = `trading-engine feed DOWN — last tick ${ageTxt} (${fmtIst(store.lastTs)})`;
+			}
 		}
 		const fyersCard = `
 <div class="card token-card">
@@ -88,6 +124,8 @@ export class FnfTradingPageController {
     <div><span>Stored token</span><b class="${tokenCls}">${tokenLabel}</b></div>
     <div><span>Expires (IST)</span><b>${fmtIst(tokenInfo?.expiresAt ?? null)}</b></div>
     <div><span>Live feed</span><b class="${feedCls}">${feedLabel}</b></div>
+    <div><span>Ticks in store (5 min)</span><b>${(store.quotesLast5m + store.snapshotsLast5m).toLocaleString('en-IN')} rows · ${store.symbolsLast5m} contracts${store.source ? ` · ${esc(store.source)}` : ''}</b></div>
+    <div><span>Tick writer</span><b class="dim">${feedStatus.enabled ? 'this web app + trading engine' : 'trading engine (this web app holds no socket)'}</b></div>
   </div>
   <p style="margin:12px 0 2px"><a class="btn" href="/auth/fyers/login">🔑 GET THE TOKEN — log in at FYERS</a></p>
   <div class="hint">Opens FYERS in this tab (FY ID + password + TOTP + PIN — typed only into FYERS, never stored by this app). On success FYERS returns you here automatically: the token is saved in the database (single row, encrypted) and the FYERS feed reconnects on its own. No .env edits, no restart.</div>
