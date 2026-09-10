@@ -19,6 +19,11 @@
  *   node scripts/gate-close-check.js --limit 30 --since 2026-09-01T00:00:00+05:30
  *   node scripts/gate-close-check.js --allow 4d3a500,7351d79     # explicit exemptions
  *   GATE_CLOSE_SKIP=1 <command>                                  # documented bypass
+ *
+ * Persistent exemptions (a push runs this from the pre-push hook, where no
+ * operator flag exists): docs/gate-close-allow.json, exact SHAs with
+ * reason/workstream/authority, loaded into the SAME allow set via
+ * scripts/lib/gate-exemptions.js. It never disables drift detection.
  */
 const path = require('path');
 const fs = require('fs');
@@ -47,6 +52,13 @@ const ALLOW = new Set(
 		.map((s) => s.trim())
 		.filter(Boolean)),
 );
+
+// Persistent exemptions — the committed source for the SAME allow set. A push runs
+// this from scripts/hooks/pre-push, where no --allow flag can be supplied, so an
+// exemption covering a separately-tracked workstream has to live in the repo.
+const { loadExemptions, findExemption, classifyCommit } = require('./lib/gate-exemptions');
+const FILE_EXEMPTIONS = loadExemptions();
+for (const sha of FILE_EXEMPTIONS.entries.keys()) ALLOW.add(sha);
 
 // Commits that predate the guard and have NO roadmap row to belong to. Documented,
 // labelled and NOT evidence — they are excluded from DRIFT so the guard can enforce
@@ -125,15 +137,26 @@ const log = (...a) => {
 	const unsynced = [];
 	for (const c of commits) {
 		const owner = rows.find((r) => (r.note || '').includes(c.sha) || (r.note || '').includes(c.short));
-		const exempt = ALLOW.has(c.short) || ALLOW.has(c.sha);
 		const legacy = legacyReason(c);
-		if (legacy) {
+		const exemption =
+			findExemption(FILE_EXEMPTIONS.entries, c) ||
+			(ALLOW.has(c.sha) || ALLOW.has(c.short)
+				? { sha: c.sha, reason: 'explicit --allow / GATE_CLOSE_ALLOW at invocation time', workstream: 'operator-supplied', authority: 'invocation flag' }
+				: null);
+		const kind = classifyCommit({ hasOwner: !!owner, isControlPlane: c.controlPlane, legacyReason: legacy, exemption });
+		if (kind === 'legacy') {
 			c.owner = { id: 'legacy' };
 			c.legacy = legacy;
-		} else if (c.controlPlane && !owner) {
+		} else if (kind === 'cp') {
 			c.owner = { id: 'cp' };
-		} else if (!owner && !exempt) unsynced.push(c);
-		else c.owner = owner || { id: 'allowed' };
+		} else if (kind === 'allowed') {
+			c.owner = { id: 'allowed' };
+			c.exemption = exemption;
+		} else if (kind === 'synced') {
+			c.owner = owner;
+		} else {
+			unsynced.push(c);
+		}
 	}
 
 	// ── 4. the recorded evidence must still RENDER on the live page ───────────
@@ -186,7 +209,7 @@ const log = (...a) => {
 				: kind === 'cp'
 					? 'control-plane tooling only (guard / docs / AGENTS.md)'
 					: kind === 'allowed'
-						? 'deliberate --allow exemption'
+						? `allow-listed exemption (${String((c.exemption && c.exemption.reason) || '').slice(0, 58)})`
 						: c.owner
 							? `row [${c.owner.id}] ${String(c.owner.item).slice(0, 46)}`
 							: 'NO checklist row records this commit';
@@ -207,6 +230,14 @@ const log = (...a) => {
 				`exempt, documented as NOT evidence in docs/gate-close-legacy-baseline.json`,
 		);
 	}
+	if (FILE_EXEMPTIONS.entries.size || FILE_EXEMPTIONS.problems.length) {
+		log(
+			`allow-list: ${FILE_EXEMPTIONS.entries.size} commit(s) exempt via the committed source ` +
+				`(${path.relative(ROOT, FILE_EXEMPTIONS.file)}) — each entry carries reason/workstream/authority; ` +
+				'drift detection stays on for every commit not listed there',
+		);
+		for (const p of FILE_EXEMPTIONS.problems) console.error(`WARN: allow-list ${p}`);
+	}
 
 	if (unsynced.length) {
 		console.error(`
@@ -222,6 +253,8 @@ resolve it by the row's own item text/doneWhen, never by a conversational gate n
 
 Only use --status done once that row's doneWhen is genuinely satisfied.
 Deliberate exemption (docs-only/no-gate commit): --allow ${unsynced.map((c) => c.short).join(',')}
+A commit that belongs to a SEPARATE, separately-tracked workstream: add an exact-SHA entry
+carrying reason/workstream/authority to docs/gate-close-allow.json — never to silence real drift.
 Emergency bypass: GATE_CLOSE_SKIP=1
 `);
 		process.exit(1);
@@ -233,7 +266,8 @@ Emergency bypass: GATE_CLOSE_SKIP=1
 	log(
 		`\nIN SYNC — every recent code commit is recorded on a checklist row (and renders on the page),` +
 			` or is control-plane tooling (${commits.filter((c) => c.owner && c.owner.id === 'cp').length} cp-plan),` +
-			` or is documented in the legacy baseline (${commits.filter((c) => c.owner && c.owner.id === 'legacy').length} exempt, NOT evidence).\n`,
+			` or is documented in the legacy baseline (${commits.filter((c) => c.owner && c.owner.id === 'legacy').length} exempt, NOT evidence),` +
+			` or is allow-listed for a separate workstream (${commits.filter((c) => c.owner && c.owner.id === 'allowed').length}).\n`,
 	);
 })().catch((e) => {
 	console.error('ERR', e && e.message ? e.message : e);

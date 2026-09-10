@@ -10,6 +10,7 @@
     "test:trading-ai": "npm run build && node scripts/trading-ai.test.js",
     "test:upstox-live-paper": "npm run build && node scripts/upstox-live-paper.test.js",
     "test:upstox-token": "npm run build && node scripts/upstox-token-oauth.test.js",
+    "test:gate-exemptions": "node scripts/gate-exemptions.test.js",
     "test:pattern": "npm run build && node scripts/feed-arbitration.test.js && node scripts/pattern-engine.test.js",
     "test:pre-open": "npm run build && node scripts/pre-open-capture.test.js",
     "test:precleared": "npm run build && node scripts/upstox-live-paper-instructions.test.js",
