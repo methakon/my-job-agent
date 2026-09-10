@@ -6,8 +6,14 @@ import { BsmGreeks, BsmInputs, localGreeks, bsmGreeks } from '../bsm-greeks';
 import { UpstoxLivePaperConfig } from './upstox-live-paper.config';
 import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
 import { FeedHealthService } from '../unified-market-data/feed-health.service';
+import { FeedArbitrationService } from '../unified-market-data/feed-arbitration.service';
+import { UnifiedMarketDataService } from '../unified-market-data/unified-market-data.service';
+import { ownedUniverses, shortUniverse, trackedUniversesFromSymbols } from '../unified-market-data/feed-arbitration.state';
 import { UPSTOX_LIVE_DATA_ISOLATION } from './upstox-live-paper.const';
 import { UpstoxLivePaperOptionQuote, UpstoxLivePaperMarketSnapshot } from './upstox-live-paper-entities';
+
+/** Feed name this desk's REST poll registers under with the arbiter. */
+const UPSTOX_REST_FEED = 'UPSTOX_REST';
 
 const UPSTOX_LIVE_API_BASE = 'https://api.upstox.com';
 const UPSTOX_LIVE_V2_OPTION_CHAIN = '/v2/option/chain';
@@ -31,7 +37,10 @@ interface UpstoxV2ChainRow {
   strike_price?: number; expiry?: string; underlying_key?: string; underlying_spot_price?: number;
   call_options?: UpstoxV2Leg; put_options?: UpstoxV2Leg; [k: string]: unknown;
 }
-interface UpstoxV2ContractRow { expiry?: string; strike_price?: number; instrument_key?: string; underlying_key?: string; [k: string]: unknown; }
+interface UpstoxV2ContractRow {
+  expiry?: string; strike_price?: number; instrument_key?: string; underlying_key?: string;
+  lot_size?: number; lotSize?: number; trading_symbol?: string; [k: string]: unknown;
+}
 interface UpstoxV2Envelope<T> { status?: string; data?: T; code?: string; message?: string; errors?: unknown; }
 
 interface UpstoxApiError { status?: number; code?: string; message?: string; details?: string; }
@@ -62,6 +71,13 @@ export interface LiveOptionTick {
   bidQty: number | null; askQty: number | null; volume: number; openInterest: number; oiChange: number;
   impliedVolatility: number | null; underlyingPrice: number | null; ts: Date; upstoxRef: string | null;
   dataSource: string; executionMode: string;
+  /**
+   * TRUE producer of this price: 'UPSTOX_LIVE' when this desk's own REST poll
+   * produced it, or the other feed's label (e.g. 'FYERS_LIVE') when the tick was
+   * CONSUMED from the common store (brief s12 — desks share ticks, never
+   * relabelled). Optional so existing producers stay valid.
+   */
+  feedSource?: string;
 }
 
 export interface LiveMarketTick {
@@ -76,6 +92,16 @@ export interface LiveFeedStatus {
   optionChainFetchedAt: string | null; lastOptionQuoteTs: string | null; lastMarketSnapshotTs: string | null;
   staleBlockedTrades: number; wsConnected: boolean; wsLastError: string | null; restLastError: string | null;
   lastError: string | null; instrumentsTracked: number; quotesPersistedToday: number;
+  /** Single-active-feed role for this desk's own REST producer (brief s2/s6). */
+  feedRole: 'ACTIVE' | 'STANDBY' | 'DISABLED';
+  /** Universe → owning feed, as elected by the arbiter. */
+  activeFeedByUniverse: Record<string, string | null>;
+  /** Why this desk's feed is standing by (null when it is active/disabled). */
+  standbyReason: string | null;
+  /** Ticks for this desk's instruments consumed from the common store. */
+  sharedTicksUsed: number;
+  /** Repeated observations dropped by the common store's ingest dedupe. */
+  duplicateTicksSuppressed: number;
 }
 
 const nowUtc = () => new Date();
@@ -130,8 +156,27 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   private authCacheUntilMs = 0;
   /** Expiry currently used per underlying key, resolved from the broker's contract list. */
   private readonly expiryByUnderlyingKey = new Map<string, string>();
+  /**
+   * Lot size per underlying key, read from the broker's OWN contract master
+   * (/v2/option/contract). Never hard-coded; unknown stays null.
+   */
+  private readonly lotSizeByUnderlyingKey = new Map<string, number>();
+  /** Why the contract master has no lot size yet (null when it does). */
+  private contractMasterNote: string | null = 'contract master not read yet';
   /** Last time the AUTH_REQUIRED warning was logged (throttled to 5 min). */
   private lastAuthWarnMs = 0;
+  /** Single-active-feed role of THIS desk's REST producer (brief s2/s6). */
+  private feedRole: 'ACTIVE' | 'STANDBY' | 'DISABLED' = 'DISABLED';
+  /** Universe → owning feed (arbiter election), for status/UI. */
+  private activeFeedByUniverse: Record<string, string | null> = {};
+  private standbyReason: string | null = null;
+  private lastStandbyLogMs = 0;
+  /** Ticks consumed from the common store instead of this desk's own poll. */
+  private sharedTicksUsed = 0;
+  /** Last liveAuthHeaders() outcome — feeds the arbiter's credentialsOk. */
+  private lastAuthOk = false;
+  /** Mirror own ticks into the common store (UPSTOX_LIVE_DUAL_WRITE, default ON). */
+  private readonly dualWrite = !/^(0|false|no|off)$/i.test(process.env.UPSTOX_LIVE_DUAL_WRITE ?? 'true');
 
   slippageBps(): number { return this.config.defaultSlippageBps; }
   staleThresholdMs(): number { return this.config.staleQuoteMaxAgeMs; }
@@ -154,11 +199,71 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   }
   underlyingPriceCache(): Map<string, number> { return this.latestUnderlyingPriceByInstrument; }
 
+  /**
+   * Lot size for one of THIS desk's contracts, read from the broker's own
+   * contract master (/v2/option/contract — see captureContractMaster). Nothing
+   * is hard-coded and nothing is guessed: an unresolved contract returns null and
+   * the caller must skip the order rather than invent a size.
+   */
+  lotSizeForSymbol(instrument: string): number | null {
+    const wanted = String(instrument ?? '').trim().toUpperCase();
+    if (!wanted) return null;
+    let best: { short: string; size: number } | null = null;
+    for (const key of this.config.liveInstruments ?? []) {
+      const short = underlyingShortName(key);
+      const size = this.lotSizeByUnderlyingKey.get(key) ?? this.lotSizeByUnderlyingKey.get(short);
+      if (!short || !size || size < 1) continue;
+      if (!wanted.startsWith(short)) continue;
+      // Longest underlying name wins when two tracked keys share a prefix.
+      if (!best || short.length > best.short.length) best = { short, size };
+    }
+    return best ? best.size : null;
+  }
+
+  /** Contract-master state for status/UI — what was read, and what it said. */
+  contractMasterStatus(): { underlyings: Record<string, number>; note: string | null } {
+    const underlyings: Record<string, number> = {};
+    for (const [key, size] of this.lotSizeByUnderlyingKey.entries()) underlyings[key] = size;
+    return { underlyings, note: this.contractMasterNote };
+  }
+
+  /**
+   * Read lot sizes out of a /v2/option/contract response. Upstox returns one row
+   * per listed contract including `lot_size`; the modal (most frequent) value per
+   * underlying is used. A response without lot_size records WHY, so the UI can
+   * say "cannot size from the broker master" instead of guessing.
+   */
+  private captureContractMaster(key: string, rows: UpstoxV2ContractRow[], expiry: string | null): void {
+    const short = underlyingShortName(key);
+    const counts = new Map<number, number>();
+    for (const row of rows) {
+      const raw = finite(row.lot_size) ?? finite(row.lotSize);
+      if (raw === null || raw < 1) continue;
+      const size = Math.max(1, Math.trunc(raw));
+      counts.set(size, (counts.get(size) ?? 0) + 1);
+    }
+    if (!counts.size) {
+      this.contractMasterNote = `/option/contract returned no lot_size for ${key}`;
+      this.logger.warn(`[UPSTOX-LIVE] contract master: no lot size returned for ${key} (expiry ${expiry ?? '?'}) — orders cannot be sized from the broker master`);
+      return;
+    }
+    const [size] = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+    const previous = this.lotSizeByUnderlyingKey.get(key);
+    this.lotSizeByUnderlyingKey.set(key, size);
+    this.lotSizeByUnderlyingKey.set(short, size);
+    this.contractMasterNote = null;
+    if (previous !== size) {
+      this.logger.log(`[UPSTOX-LIVE] contract master: ${short} lot size ${size} across ${rows.length} contract rows (expiry ${expiry ?? '?'}) — source /v2/option/contract`);
+    }
+  }
+
   constructor(config: UpstoxLivePaperConfig,
     @InjectRepository(UpstoxLivePaperOptionQuote) optionQuotes: Repository<UpstoxLivePaperOptionQuote>,
     @InjectRepository(UpstoxLivePaperMarketSnapshot) marketSnapshots: Repository<UpstoxLivePaperMarketSnapshot>,
     private readonly feedHealth: FeedHealthService,
-    private readonly tokenService: UpstoxLivePaperTokenService) {
+    private readonly tokenService: UpstoxLivePaperTokenService,
+    private readonly arbitration: FeedArbitrationService,
+    private readonly unified: UnifiedMarketDataService) {
     this.config = config; this.optionQuotes = optionQuotes; this.marketSnapshots = marketSnapshots;
     this.paperOnly = config.paperOnly; this.safetyLockActive = config.safetyLockActive;
     // Feed-health gate registration (brief s6/s8): the Upstox desk's own REST
@@ -168,7 +273,27 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     this.feedHealth.registerFeed('UPSTOX_REST', 'upstox-paper', {
       ageMs: () => (this.lastLiveTickMs === null ? null : Math.max(0, Date.now() - this.lastLiveTickMs)),
     });
+    // Single-active-feed registration (brief s2/s6). This desk's REST poll is a
+    // SECONDARY producer (priority 1 by default): it only publishes ticks for a
+    // universe the arbiter has awarded it, so at most one feed drives a given
+    // universe at a time. Priority/config come from the environment so the desk
+    // can be demoted to pure consumer without a code change.
+    this.arbitration.register({
+      name: UPSTOX_REST_FEED,
+      priority: this.arbitrationPriority(),
+      universes: trackedUniversesFromSymbols(this.config.liveInstruments),
+      enabled: () => this.config.liveCredentialsPresent && this.config.liveInstruments.length > 0,
+      credentialsOk: () => this.lastAuthOk,
+      note: 'upstox-paper REST poll (secondary by default)',
+      ageMs: () => (this.lastLiveTickMs === null ? null : Math.max(0, Date.now() - this.lastLiveTickMs)),
+    });
   }
+
+  /** FEED_PRIORITY_UPSTOX_REST, fallback: secondary (1). */
+  private arbitrationPriority(): number { return this.arbitration.priorityFor(UPSTOX_REST_FEED, 1); }
+
+  /** Option universes this desk's poll prices, derived from UPSTOX_LIVE_INSTRUMENTS. */
+  private trackedUniverses(): string[] { return trackedUniversesFromSymbols(this.config.liveInstruments); }
 
   async onModuleInit(): Promise<void> {
     if (!this.config.liveInstruments.length) { this.logger.warn('[UPSTOX-LIVE] no instruments — market ingestion no-op'); return; }
@@ -191,15 +316,54 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       wsLastError: this.wsLastError, restLastError: this.restLastError,
       lastError: this.restLastError ?? this.wsLastError,
       instrumentsTracked: this.config.liveInstruments.length, quotesPersistedToday: this.quotesPersistedToday,
+      feedRole: this.config.liveCredentialsPresent && this.config.liveInstruments.length ? this.feedRole : 'DISABLED',
+      activeFeedByUniverse: this.activeFeedByUniverse,
+      standbyReason: this.standbyReason,
+      sharedTicksUsed: this.sharedTicksUsed,
+      duplicateTicksSuppressed: this.unified.duplicateCount(),
     };
   }
 
   async fetchOptionChain(): Promise<{fetched:number;errors:string[]}> {
     if (!this.config.liveCredentialsPresent) { this.restLastError='LIVE credentials missing'; this.logger.warn(this.restLastError); return {fetched:0,errors:[this.restLastError]}; }
-    const keys = this.config.liveInstruments.slice(0,50);
+    // Single-active-feed gate (brief s2/s6): at most ONE feed publishes ticks for
+    // a universe. If another producer owns SENSEX (e.g. the FYERS worker), this
+    // desk stays STANDBY and serves its decisions from the shared store instead
+    // of calling the broker — no duplicate ticks, no wasted API budget.
+    const universes = this.trackedUniverses();
+    const decisions = await this.arbitration.decisions();
+    this.activeFeedByUniverse = {};
+    for (const d of decisions) if (d?.universe) this.activeFeedByUniverse[d.universe] = d.owner ?? null;
+    const owned = ownedUniverses(UPSTOX_REST_FEED, universes, decisions);
+    // Stand down ONLY against a real competing owner. If nobody holds our
+    // universes (no lease yet, arbiter unavailable, universe not yet tracked)
+    // this desk is the only producer and must keep polling — standing down
+    // against nobody would silently starve the desk of its own feed.
+    const contested = universes.filter((u) => {
+      const owner = this.activeFeedByUniverse[u];
+      return Boolean(owner) && owner !== UPSTOX_REST_FEED;
+    });
+    const active = contested.length ? owned.length > 0 : universes.length > 0;
+    this.feedRole = active ? 'ACTIVE' : universes.length ? 'STANDBY' : 'DISABLED';
+    this.standbyReason = active ? null
+      : `feed arbitration awarded ${contested.join(', ') || universes.join(', ') || 'this universe'} to ${this.activeFeedByUniverse[contested[0]] ?? 'another producer'}`;
+    if (!active) {
+      const nowMs = Date.now();
+      if (nowMs - this.lastStandbyLogMs > 300_000) {
+        this.lastStandbyLogMs = nowMs;
+        this.logger.log(`[UPSTOX-LIVE] STANDBY — ${this.standbyReason}; consuming shared live ticks, not polling`);
+      }
+      await this.arbitration.beat(UPSTOX_REST_FEED, { state: 'STANDBY', note: this.standbyReason });
+      return { fetched: 0, errors: [] };
+    }
+    // Serve what the arbiter awarded, or — when nothing contests us — our own
+    // configured universes.
+    const wanted = owned.length ? owned : universes;
+    const keys = this.config.liveInstruments.filter((k) => wanted.includes(shortUniverse(k))).slice(0,50);
     if (!keys.length) return {fetched:0,errors:['no instruments']};
     const headers = await this.liveAuthHeaders();
     if (!headers) {
+      this.lastAuthOk = false;
       // No valid token row → nothing can be ingested. Say so out loud, but
       // throttled: the poll cycle retries every UPSTOX_LIVE_POLL_MS.
       this.restLastError = `AUTH_REQUIRED — ${this.restLastError ?? 'Upstox access token missing/expired'}; complete the login at /api/upstox/token/init`;
@@ -207,6 +371,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       if (nowMs - this.lastAuthWarnMs > 300_000) { this.lastAuthWarnMs = nowMs; this.logger.warn(`[UPSTOX-LIVE] ${this.restLastError}`); }
       return {fetched:0,errors:[this.restLastError]};
     }
+    this.lastAuthOk = true;
     const errors: string[] = []; let fetched = 0;
     for (const key of keys) {
       try {
@@ -214,6 +379,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
         if (!chain.ticks.length) { errors.push(`no tradable quotes for ${key}${chain.expiry?` (expiry ${chain.expiry})`:''}`); continue; }
         for (const tick of chain.ticks) {
           await this.persistOptionQuote(tick);
+          await this.publishSharedQuote(tick);
           this.markOptionQuoteTs(tick.contractSymbol, tick.ts.getTime());
           this.quotesPersistedToday++; fetched++;
         }
@@ -224,13 +390,121 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
             dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource, executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
           });
           this.markMarketSnapshotTs(chain.ticks[0].underlying, chain.ticks[0].ts.getTime());
+          // The underlying's tape is part of the COMMON observation too: the
+          // pattern engine cannot confirm a breakout without it, and the other
+          // desk must be able to read it (brief s4/s17).
+          await this.publishSharedSnapshot(shortUniverse(key), chain.spot, chain.ticks[0].ts);
         }
       } catch (err) { errors.push(`${key}: ${this.errorMessage(err)}`); this.logger.warn(`[UPSTOX-LIVE] fetch failed for ${key}: ${this.errorMessage(err)}`); }
     }
     this.optionChainFetchedAt = nowUtc();
     this.restLastError = errors.length ? errors.join('; ').slice(0,300) : null;
     this.logger.log(`[UPSTOX-LIVE] option chain: ${fetched} quotes persisted from ${keys.length} underlying(s)`);
+    // Publish liveness + what we just produced (cross-process: the FYERS worker
+    // reads this to know SENSEX is already covered).
+    await this.arbitration.beat(UPSTOX_REST_FEED, {
+      state: 'ACTIVE', note: null, universes: owned,
+      lastTickAt: this.lastLiveTickMs === null ? null : new Date(this.lastLiveTickMs),
+      credentialsOk: true,
+    });
     return { fetched, errors };
+  }
+
+  /**
+   * Mirror this desk's own live tick into the COMMON normalized store (brief
+   * s4/s7: one stream, many readers) so the pattern engine, the FNF page and the
+   * other desk consume the SAME observation of SENSEX. Safe by construction:
+   * this desk only publishes for universes the arbiter awarded it, so the mirror
+   * cannot duplicate another feed's rows, and repeated (instrument_key, ts)
+   * observations are dropped by the store's ingest dedupe.
+   *
+   * Flag-gated by UPSTOX_LIVE_DUAL_WRITE (default ON) and never fatal: a failed
+   * mirror must not cost the desk its own tick.
+   */
+  private async publishSharedQuote(tick: LiveOptionTick): Promise<void> {
+    if (!this.dualWrite) return;
+    try {
+      await this.unified.ingestQuote({
+        instrumentKey: tick.instrumentToken || `${tick.underlying}|${tick.contractSymbol}`,
+        underlying: tick.underlying,
+        segment: String(this.config.liveInstruments?.[0] ?? '').split('|')[0] || null,
+        instrumentType: 'OPT', expiry: tick.expiry, strike: tick.strike, optionType: tick.optionType,
+        ltp: tick.ltp, bid: tick.bid, ask: tick.ask, bidQty: tick.bidQty, askQty: tick.askQty,
+        volume: tick.volume, oi: tick.openInterest, changeOi: tick.oiChange,
+        iv: tick.impliedVolatility, source: UPSTOX_LIVE_DATA_ISOLATION.dataSource,
+        sourceTimestamp: tick.ts,
+      });
+    } catch (error) {
+      this.logger.warn(`[UPSTOX-LIVE] common-store mirror failed for ${tick.contractSymbol}: ${this.errorMessage(error)}`);
+    }
+  }
+
+  /**
+   * Mirror the underlying index tick into the common store. The desk's own
+   * snapshot table stays the desk's; this copy exists so the pattern engine (and
+   * any other reader) sees the SAME underlying tape the desk priced against.
+   */
+  private async publishSharedSnapshot(universe: string, price: number, ts: Date): Promise<void> {
+    if (!this.dualWrite) return;
+    try {
+      await this.unified.ingestSnapshot({
+        instrumentKey: universe, underlying: universe, exchange: 'BSE',
+        ltp: price, volume: 0, source: UPSTOX_LIVE_DATA_ISOLATION.dataSource, sourceTimestamp: ts,
+      });
+    } catch (error) {
+      this.logger.warn(`[UPSTOX-LIVE] common-store snapshot mirror failed for ${universe}: ${this.errorMessage(error)}`);
+    }
+  }
+
+  /**
+   * A tick for one of THIS desk's contracts, read from the common store instead
+   * of called in from the broker. Used when the desk is STANDBY for a universe
+   * (another feed owns the live slot) — the desks share observations while
+   * keeping separate trades, balances and P&L. The returned tick keeps the
+   * TRUE producer in `feedSource`, so the UI never presents another feed's
+   * price as this desk's own.
+   */
+  async sharedOptionTickFor(query: {
+    contractSymbol?: string | null; instrumentToken?: string | null; underlying?: string | null;
+    expiry?: string | null; strike?: number | null; optionType?: 'CE' | 'PE' | null;
+    maxAgeMs?: number;
+  }): Promise<LiveOptionTick | null> {
+    const maxAgeMs = query.maxAgeMs ?? this.config.staleQuoteMaxAgeMs;
+    const row = await this.unified.sharedQuote({
+      instrumentKey: query.instrumentToken ?? null,
+      contractSymbol: query.contractSymbol ?? null,
+      underlying: query.underlying ?? null,
+      expiry: query.expiry ?? null,
+      strike: query.strike ?? null,
+      optionType: query.optionType ?? null,
+    }, { maxAgeMs });
+    if (!row) return null;
+    const ltp = finite(row.ltp);
+    if (ltp === null || ltp <= 0) return null;
+    const instrumentKey = String(row.instrumentKey ?? '');
+    const underlying = String(row.underlying ?? query.underlying ?? '').toUpperCase();
+    const optionType = toOptionType(row.optionType) ?? query.optionType ?? null;
+    if (!optionType) return null;
+    const strike = finite(row.strike) ?? query.strike ?? 0;
+    const expiry = String(row.expiry ?? query.expiry ?? '');
+    const symbol = String(query.contractSymbol ?? instrumentKey.split(':').pop() ?? '').toUpperCase();
+    const source = String(row.source ?? '').toUpperCase();
+    this.sharedTicksUsed++;
+    return {
+      contractSymbol: symbol, instrumentToken: instrumentKey || String(query.instrumentToken ?? ''),
+      underlying, expiry, strike, optionType, ltp,
+      bid: finite(row.bid), ask: finite(row.ask), bidQty: finite(row.bidQty), askQty: finite(row.askQty),
+      volume: Math.max(0, Math.trunc(finite(row.volume) ?? 0)),
+      openInterest: Math.max(0, Math.trunc(finite(row.oi) ?? 0)),
+      oiChange: Math.trunc(finite(row.changeOi) ?? 0),
+      impliedVolatility: finite(row.iv),
+      underlyingPrice: this.latestUnderlyingPriceByInstrument.get(underlying) ?? null,
+      ts: row.receivedTimestamp ?? row.ts,
+      upstoxRef: instrumentKey || null,
+      dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource,
+      executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
+      feedSource: source || 'COMMON_STORE',
+    };
   }
 
   /**
@@ -296,6 +570,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     const picked = (this.config.livePreferTodayExpiry ? upcoming.find(e => e === today) : undefined) ?? upcoming[0] ?? null;
     if (picked) this.expiryByUnderlyingKey.set(key, picked);
     else this.logger.warn(`[UPSTOX-LIVE] no listed expiry on/after ${today} for ${key} (listed: ${expiries.join(', ') || 'none'})`);
+    // Same response carries the broker's own lot sizes — capture them here so
+    // order sizing never depends on a hand-set constant.
+    if (rows.length) this.captureContractMaster(key, rows, picked);
     return picked;
   }
 
@@ -363,7 +640,12 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   private startPeriodicRefresh(): void {
     if (this.wsTimer) return;
     const interval = Math.max(10000, Number(process.env.UPSTOX_LIVE_POLL_MS ?? 30000));
-    this.wsTimer = setInterval(() => { void this.fetchOptionChain().catch(e=>this.logger.warn(`[UPSTOX-LIVE] periodic fetch failed: ${this.errorMessage(e)}`)); void this.fetchMarketStatus().catch(()=>{}); }, interval);
+    this.wsTimer = setInterval(() => {
+      void this.fetchOptionChain().catch(e=>this.logger.warn(`[UPSTOX-LIVE] periodic fetch failed: ${this.errorMessage(e)}`));
+      // Market-status is a broker metadata call: only probe while this desk owns
+      // the live slot for its universe (a standby desk makes no Upstox calls).
+      if (this.feedRole !== 'STANDBY') void this.fetchMarketStatus().catch(()=>{});
+    }, interval);
     this.wsTimer.unref?.();
   }
   private stopPeriodicRefresh(): void { if (this.wsTimer) { clearInterval(this.wsTimer); this.wsTimer=null; } }

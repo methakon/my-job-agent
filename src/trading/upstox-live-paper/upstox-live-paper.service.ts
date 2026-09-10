@@ -154,6 +154,78 @@ export class UpstoxLivePaperService {
   getConfig(): UpstoxLivePaperConfig { return this.config; }
 
   /**
+   * Lot size for a contract, resolved without inventing a value. Priority:
+   *   1. an explicit size supplied by the caller (operator instruction),
+   *   2. UPSTOX_LIVE_PAPER_LOT_SIZE (this desk's own override),
+   *   3. PATTERN_LOT_SIZE (kept as an alias so the pattern engine's env still works),
+   *   4. the broker's OWN contract master, read from /v2/option/contract.
+   * When none of these resolve, the answer is null and the caller MUST skip the
+   * order — a fabricated lot size would silently mis-state the position.
+   */
+  lotSizeFor(instrument: string, explicit?: number | null): { lotSize: number | null; source: string } {
+    const explicitSize = Number(explicit);
+    if (Number.isFinite(explicitSize) && explicitSize >= 1) {
+      return { lotSize: Math.trunc(explicitSize), source: 'instruction' };
+    }
+    for (const [name, source] of [['UPSTOX_LIVE_PAPER_LOT_SIZE', 'env'], ['PATTERN_LOT_SIZE', 'env-alias']] as const) {
+      const raw = Number(process.env[name]);
+      if (Number.isFinite(raw) && raw >= 1) return { lotSize: Math.trunc(raw), source };
+    }
+    const fromMaster = this.market.lotSizeForSymbol(instrument);
+    if (fromMaster !== null) return { lotSize: fromMaster, source: 'broker-contract-master' };
+    return { lotSize: null, source: 'unresolved' };
+  }
+
+  /** Contract-master state (what the broker told us), for status/UI. */
+  contractMasterStatus(): { underlyings: Record<string, number>; note: string | null } {
+    return this.market.contractMasterStatus();
+  }
+
+  /**
+   * The premium an entry would actually fill at, from a LIVE quote — the same
+   * computation openTrade uses (ask for a BUY, bid for a SELL, else LTP, then the
+   * desk's slippage assumption). Reads this desk's own quotes first and falls
+   * back to the shared/common store, which is how a STANDBY desk still sees the
+   * one active tape. Returns null when there is no honest price to use.
+   */
+  async previewEntry(instrument: string, side: 'BUY' | 'SELL'): Promise<{
+    premium: number | null; reference: number | null; source: string; stale: boolean;
+    quoteTs: string | null; spreadPct: number | null; ageMs: number | null;
+  }> {
+    let quote: LiveOptionTick | null = null;
+    let source = 'desk-own';
+    try {
+      quote = await this.fetchLiveQuoteForInstrument(instrument);
+    } catch {
+      quote = null;
+    }
+    if (!quote) {
+      try {
+        quote = await this.market.sharedOptionTickFor({ contractSymbol: instrument });
+      } catch {
+        quote = null;
+      }
+      if (quote) source = 'common-store';
+    }
+    if (!quote) return { premium: null, reference: null, source: 'none', stale: true, quoteTs: null, spreadPct: null, ageMs: null };
+
+    // Age from the tick's OWN timestamp, so the same rule applies whether the
+    // price came from this desk's poll or from the shared store.
+    const quoteMs = quote.ts ? new Date(quote.ts).getTime() : NaN;
+    const ageMs = Number.isFinite(quoteMs) ? Date.now() - quoteMs : null;
+    const stale = ageMs === null || ageMs > this.config.staleQuoteMaxAgeMs;
+    const reference = (side === 'BUY' && quote.ask != null) ? quote.ask
+      : (side === 'SELL' && quote.bid != null) ? quote.bid : quote.ltp;
+    const premium = reference > 0 ? this.fillPriceForSide(side, reference, this.config.defaultSlippageBps) : null;
+    return {
+      premium, reference, source, stale,
+      quoteTs: quote.ts ? new Date(quote.ts).toISOString() : null,
+      spreadPct: this.computeSpreadPct(quote.bid, quote.ask),
+      ageMs,
+    };
+  }
+
+  /**
    * Public summary of the safety posture, for controllers / UI status.
    * Never exposes the raw env value beyond the derived DISPLAY form.
    */

@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Param,
   Query,
@@ -13,6 +14,10 @@ import { UpstoxLivePaperService } from './upstox-live-paper.service';
 import { UpstoxLivePaperMarketStabilityService } from './upstox-live-paper-market-stability.service';
 import { UpstoxLivePaperWeeklyReportService } from './upstox-live-paper-weekly-report.service';
 import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
+import {
+  CreateUpstoxLivePaperInstructionDto,
+  UpstoxLivePaperInstructionService,
+} from './upstox-live-paper-instruction.service';
 import {
   CreateUpstoxLivePaperPortfolioDto,
   CloseUpstoxLivePaperTradeDto,
@@ -32,6 +37,7 @@ export class UpstoxLivePaperController {
     private readonly stability: UpstoxLivePaperMarketStabilityService,
     private readonly weeklyReport: UpstoxLivePaperWeeklyReportService,
     private readonly token: UpstoxLivePaperTokenService,
+    private readonly instructions: UpstoxLivePaperInstructionService,
   ) {}
 
   // ── safety / auth status ────────────────────────────────────────────────────
@@ -47,6 +53,7 @@ export class UpstoxLivePaperController {
       safety: this.service.safetyStatusText(),
       feed,
       auth: tokenStatus,
+      contractMaster: this.service.contractMasterStatus(),
       monitoring: {
         wsReconnectCount: monitoring.wsReconnectCount,
         apiErrorCount: monitoring.apiErrorCount,
@@ -91,6 +98,47 @@ export class UpstoxLivePaperController {
   @Post('portfolios/:id/friday')
   async setFridayTrading(@Param('id') id: string, @Body() body: { enabled: boolean }) {
     return this.service.setFridayTrading(id, body.enabled);
+  }
+
+  // ── pre-cleared instructions (session auto-start) ───────────────────────────
+
+  /** What the desk is armed with: instructions, window, contract master, portfolios. */
+  @Get('instructions')
+  async instructionStatus() {
+    return this.instructions.status();
+  }
+
+  @Post('instructions')
+  async createInstruction(@Body() dto: CreateUpstoxLivePaperInstructionDto) {
+    return this.instructions.create(dto);
+  }
+
+  /** Evaluate every instruction that is due right now (idempotent per session). */
+  @Post('instructions/run-due')
+  async runDueInstructions() {
+    return { results: await this.instructions.runDue('manual') };
+  }
+
+  @Post('instructions/:id')
+  async updateInstruction(@Param('id') id: string, @Body() dto: Partial<CreateUpstoxLivePaperInstructionDto>) {
+    return this.instructions.update(id, dto);
+  }
+
+  @Delete('instructions/:id')
+  async removeInstruction(@Param('id') id: string) {
+    return this.instructions.remove(id);
+  }
+
+  /** Clear today's once-per-session guard (after correcting a failed attempt). */
+  @Post('instructions/:id/rearm')
+  async rearmInstruction(@Param('id') id: string) {
+    return this.instructions.rearm(id);
+  }
+
+  /** Run one instruction now. ?force=true also ignores the session window/guard. */
+  @Post('instructions/:id/run')
+  async runInstruction(@Param('id') id: string, @Query('force') force?: string) {
+    return this.instructions.runNow(id, /^(1|true|yes)$/i.test(String(force ?? '')));
   }
 
   // ── trades ──────────────────────────────────────────────────────────────────

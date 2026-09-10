@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { UnifiedOptionQuote } from './unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './unified-market-snapshot.entity';
 
@@ -98,13 +98,51 @@ export class UnifiedMarketDataService {
   private readonly latestQuotes = new Map<string, UnifiedOptionQuote>();
   /** Latest underlying/index observation per symbol. */
   private readonly latestSnapshots = new Map<string, UnifiedMarketSnapshot>();
+  /**
+   * Idempotency window for repeated observations (source|instrument|source ts).
+   * A producer that sends the same broker tick twice (doubled SDK subscription
+   * after a token rebuild, or a restarted socket replaying its snapshot) must
+   * NOT write a second row: measured on 2026-09-10 this produced ~39 % duplicate
+   * rows in unified_option_quotes. The latest-observation cache is still updated,
+   * so consumers always see the newest values.
+   */
+  private readonly recentIngestKeys = new Map<string, number>();
+  private readonly dedupeWindowMs: number;
+  private duplicatesSuppressed = 0;
 
   constructor(
     @InjectRepository(UnifiedOptionQuote)
     private readonly quotes: Repository<UnifiedOptionQuote>,
     @InjectRepository(UnifiedMarketSnapshot)
     private readonly snapshots: Repository<UnifiedMarketSnapshot>,
-  ) {}
+  ) {
+    this.dedupeWindowMs = Math.max(0, Number(process.env.UNIFIED_INGEST_DEDUPE_MS ?? 5_000));
+  }
+
+  /** Repeated observations dropped by the ingest dedupe (observability). */
+  duplicateCount(): number {
+    return this.duplicatesSuppressed;
+  }
+
+  /** True when this exact observation was already written inside the window. */
+  private isRepeatedIngest(source: string, instrumentKey: string, ts: Date): boolean {
+    if (this.dedupeWindowMs <= 0) return false;
+    const key = `${source}|${instrumentKey}|${ts.getTime()}`;
+    const nowMs = Date.now();
+    const seenAt = this.recentIngestKeys.get(key);
+    if (seenAt !== undefined && nowMs - seenAt <= this.dedupeWindowMs) {
+      this.duplicatesSuppressed += 1;
+      return true;
+    }
+    this.recentIngestKeys.set(key, nowMs);
+    // Bound the map: drop everything older than the window.
+    if (this.recentIngestKeys.size > 20_000) {
+      for (const [k, at] of this.recentIngestKeys) {
+        if (nowMs - at > this.dedupeWindowMs) this.recentIngestKeys.delete(k);
+      }
+    }
+    return false;
+  }
 
   /** Per-source sequence number (monotonic, in-memory). */
   nextSequence(source: string): number {
@@ -183,6 +221,9 @@ export class UnifiedMarketDataService {
 
     this.bumpSource(source, ts);
     this.latestQuotes.set(instrumentKey, row);
+    // Repeated observation of the SAME broker tick: refresh the cache (done
+    // above) but do not write a second row.
+    if (this.isRepeatedIngest(source, instrumentKey, ts)) return row;
     try {
       return await this.quotes.save(row);
     } catch (error) {
@@ -226,6 +267,7 @@ export class UnifiedMarketDataService {
 
     this.bumpSource(source, ts);
     this.latestSnapshots.set(symbol, row);
+    if (this.isRepeatedIngest(source, symbol, ts)) return row;
     try {
       return await this.snapshots.save(row);
     } catch (error) {
@@ -266,6 +308,76 @@ export class UnifiedMarketDataService {
       if (stats.lastAt && now - stats.lastAt.getTime() <= staleMs) return true;
     }
     return false;
+  }
+
+  /**
+   * Latest observation for one option contract from the COMMON store — how a desk
+   * CONSUMES ticks produced by the other desk's feed (brief s12). Lookup order:
+   *   1. this process's in-memory latest cache (a producer in THIS process), then
+   *   2. the unified_option_quotes table, because the other producer is a
+   *      DIFFERENT process/host (the FYERS WS worker runs on the Dhargent VM).
+   * Returns null when the store has nothing, nothing fresh enough, or only a
+   * row flagged INVALID. The row's `source` is the TRUE producer (FYERS_LIVE /
+   * UPSTOX_LIVE) and must be carried through by the caller — a consumer never
+   * relabels someone else's tick as its own.
+   */
+  async sharedQuote(
+    query: {
+      /** Exact broker instrument key (preferred when known). */
+      instrumentKey?: string | null;
+      /** Broker contract symbol without exchange prefix (NIFTY26SEP23900CE). */
+      contractSymbol?: string | null;
+      underlying?: string | null;
+      expiry?: string | null;
+      strike?: number | null;
+      optionType?: string | null;
+    },
+    opts: { maxAgeMs?: number; now?: number } = {},
+  ): Promise<UnifiedOptionQuote | null> {
+    const nowMs = opts.now ?? Date.now();
+    const maxAgeMs = opts.maxAgeMs ?? Number(process.env.UNIFIED_SHARED_QUOTE_MAX_AGE_MS ?? 60_000);
+    const freshEnough = (row: UnifiedOptionQuote | null | undefined): row is UnifiedOptionQuote => {
+      if (!row) return false;
+      if (String(row.dataQuality ?? 'GOOD').toUpperCase() === 'INVALID') return false;
+      const at = (row.receivedTimestamp ?? row.ts)?.getTime?.() ?? 0;
+      return at > 0 && nowMs - at <= maxAgeMs;
+    };
+
+    const key = String(query.instrumentKey ?? '').trim();
+    const symbol = String(query.contractSymbol ?? '').trim().toUpperCase();
+
+    // 1. In-process cache.
+    if (key) {
+      const cached = this.latestQuotes.get(key);
+      if (freshEnough(cached)) return cached;
+    }
+    if (symbol) {
+      let newest: UnifiedOptionQuote | null = null;
+      for (const row of this.latestQuotes.values()) {
+        const rowSymbol = String(row.instrumentKey ?? '').split(':').pop()?.toUpperCase();
+        if (rowSymbol !== symbol) continue;
+        if (!newest || row.ts.getTime() > newest.ts.getTime()) newest = row;
+      }
+      if (freshEnough(newest)) return newest;
+    }
+
+    // 2. Common table (another process produced it).
+    try {
+      const where: Record<string, unknown> = {};
+      if (key) where.instrumentKey = key;
+      else if (symbol) where.instrumentKey = Like(`%:${symbol}`);
+      else {
+        if (query.underlying) where.underlying = String(query.underlying).toUpperCase();
+        if (query.expiry) where.expiry = String(query.expiry);
+        if (query.strike !== null && query.strike !== undefined) where.strike = query.strike;
+        if (query.optionType) where.optionType = String(query.optionType).toUpperCase();
+      }
+      const row = await this.quotes.findOne({ where, order: { receivedTimestamp: 'DESC' } });
+      return freshEnough(row) ? row : null;
+    } catch (error) {
+      this.logger.warn(`unified sharedQuote lookup failed: ${(error as Error).message}`);
+      return null;
+    }
   }
 
   /**
@@ -312,5 +424,7 @@ export class UnifiedMarketDataService {
     this.sourceStats.clear();
     this.latestQuotes.clear();
     this.latestSnapshots.clear();
+    this.recentIngestKeys.clear();
+    this.duplicatesSuppressed = 0;
   }
 }

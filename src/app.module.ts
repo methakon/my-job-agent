@@ -122,6 +122,12 @@ import { AiModule } from './ai/ai.module';
 // ── Upstox LIVE paper module (new, isolated) ──────────────────────────────────
 import { UpstoxLivePaperModule } from './trading/upstox-live-paper/upstox-live-paper.module';
 import { UnifiedMarketDataModule } from './trading/unified-market-data/unified-market-data.module';
+import { UnifiedOptionQuote } from './trading/unified-market-data/unified-option-quote.entity';
+import { UnifiedMarketSnapshot } from './trading/unified-market-data/unified-market-snapshot.entity';
+import { PatternSignal } from './trading/pattern-engine/pattern-signal.entity';
+import { PatternEngineService } from './trading/pattern-engine/pattern-engine.service';
+import { PatternSignalDispatchService } from './trading/pattern-engine/pattern-signal-dispatch.service';
+import { PatternEngineController } from './trading/pattern-engine/pattern-engine.controller';
 import {
   UpstoxLivePaperPortfolio,
   UpstoxLivePaperTrade,
@@ -153,6 +159,8 @@ import {
       UpstoxLivePaperPortfolio, UpstoxLivePaperTrade, UpstoxLivePaperOrder, UpstoxLivePaperPosition,
       UpstoxLivePaperPnlEvent, UpstoxLivePaperOptionQuote, UpstoxLivePaperMarketSnapshot,
       UpstoxLivePaperWeeklyReport, UpstoxLivePaperToken,
+      // Common normalized live store + pattern/learning dataset
+      UnifiedOptionQuote, UnifiedMarketSnapshot, PatternSignal,
     ]),
     SideIncomeModule,
     AuthModule,
@@ -171,6 +179,7 @@ import {
     OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController,
     FnfOptionChainController, FailedApplicationsPageController, ProjectStatusPageController, QuickQuestionsController,
     CvRegionFormatController, FyersAuthController, FyersOAuthController, UpstoxTradingPageController,
+    PatternEngineController,
     AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
     AppFallbackController, // MUST stay last: serves dashboard.html for unmatched GETs
   ],
@@ -183,6 +192,7 @@ import {
     AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService,
     FnfTradingService, FnoMarketDataService, FnfOptionChainService, MarketDataInspectionService, FeatureEngineService,
     UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, FyersTokenService,
+    PatternEngineService, PatternSignalDispatchService,
   ],
 })
 export class AppModule {}

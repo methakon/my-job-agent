@@ -12,12 +12,14 @@ import {
   UpstoxLivePaperMarketSnapshot,
   UpstoxLivePaperWeeklyReport,
   UpstoxLivePaperToken,
+  UpstoxLivePaperInstruction,
 } from './upstox-live-paper-entities';
 import { UpstoxLivePaperMarketService } from './upstox-live-paper-market.service';
 import { UpstoxLivePaperMarketStabilityService } from './upstox-live-paper-market-stability.service';
 import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
 import { UpstoxLivePaperTokenController } from './upstox-live-paper-token.controller';
 import { UpstoxLivePaperScheduledService } from './upstox-live-paper-scheduled.service';
+import { UpstoxLivePaperInstructionService } from './upstox-live-paper-instruction.service';
 import { UpstoxLivePaperService } from './upstox-live-paper.service';
 import { UpstoxLivePaperWeeklyReportService } from './upstox-live-paper-weekly-report.service';
 import { UpstoxLivePaperController } from './upstox-live-paper.controller';
@@ -38,6 +40,7 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
       UpstoxLivePaperMarketSnapshot,
       UpstoxLivePaperWeeklyReport,
       UpstoxLivePaperToken,
+      UpstoxLivePaperInstruction,
     ]),
   ],
   controllers: [UpstoxLivePaperTokenController, UpstoxLivePaperController],
@@ -47,6 +50,7 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperMarketStabilityService,
     UpstoxLivePaperTokenService,
     UpstoxLivePaperScheduledService,
+    UpstoxLivePaperInstructionService,
     UpstoxLivePaperService,
     UpstoxLivePaperWeeklyReportService,
     EncryptionService, // token/credential AES (same convention as FYERS/fnF)
@@ -56,6 +60,7 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperMarketService,
     UpstoxLivePaperTokenService,
     UpstoxLivePaperService,
+    UpstoxLivePaperInstructionService,
   ],
 })
 export class UpstoxLivePaperModule implements OnModuleInit {

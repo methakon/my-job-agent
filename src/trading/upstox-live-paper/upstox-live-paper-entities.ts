@@ -7,3 +7,4 @@ export { UpstoxLivePaperOptionQuote } from './upstox-live-paper-option-quote.ent
 export { UpstoxLivePaperMarketSnapshot } from './upstox-live-paper-market-snapshot.entity';
 export { UpstoxLivePaperWeeklyReport } from './upstox-live-paper-weekly-report.entity';
 export { UpstoxLivePaperToken } from './upstox-live-paper-token.entity';
+export { UpstoxLivePaperInstruction } from './upstox-live-paper-instruction.entity';
