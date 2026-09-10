@@ -23,7 +23,7 @@ const ALLOW_FILE = path.join(ROOT, 'docs', 'gate-close-allow.json');
 const LEGACY_FILE = path.join(ROOT, 'docs', 'gate-close-legacy-baseline.json');
 const JA_SHA = 'd80e0bad00747b54a7c85574be78b1af1b98d57c';
 
-const { loadExemptions, findExemption, classifyCommit } = require(LIB);
+const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit } = require(LIB);
 
 let pass = 0;
 let fail = 0;
@@ -151,8 +151,33 @@ t('precedence is unchanged: legacy > control-plane > exemption > drift', () => {
 	assert.equal(classifyCommit({ hasOwner: false, isControlPlane: false, legacyReason: null, exemption: null }), 'drift');
 });
 
+// ── control-plane scope stays name-scoped (not a global weakening) ───────────
+t('control-plane scope covers the guard family only — including its own tests', () => {
+	assert.equal(isControlPlaneCommit(['scripts/gate-close-check.js']), true);
+	assert.equal(isControlPlaneCommit(['scripts/gate-status.js']), true);
+	assert.equal(isControlPlaneCommit(['scripts/lib/gate-exemptions.js']), true);
+	assert.equal(isControlPlaneCommit(['scripts/gate-exemptions.test.js']), true, "the guard family's own tests are tracking-layer tooling");
+	assert.equal(isControlPlaneCommit(['docs/gate-close-allow.json']), true);
+	assert.equal(isControlPlaneCommit(['package.json']), true);
+	assert.equal(isControlPlaneCommit(['AGENTS.md']), true);
+});
+
+t('control-plane scope does NOT cover feature code, feature tests or other scripts', () => {
+	assert.equal(isControlPlaneCommit(['src/trading/upstox-live-paper/upstox-live-paper-auth.service.ts']), false);
+	assert.equal(isControlPlaneCommit(['src/job-application-roadmap/job-application-roadmap.service.ts']), false);
+	assert.equal(isControlPlaneCommit(['scripts/pre-open-window-capture.js']), false);
+	assert.equal(isControlPlaneCommit(['scripts/gate0-regression.test.js']), false, 'only the gate-* family is tracking layer');
+	assert.equal(isControlPlaneCommit(['scripts/gate-close-check.js', 'src/trading/x.ts']), false, 'a mixed commit is NOT control-plane-only');
+	assert.equal(isControlPlaneCommit([]), false, 'an empty changeset is not control-plane tooling');
+});
+
 // ── the guard actually uses it, and the drift branch is intact ───────────────
 const guardSrc = fs.readFileSync(GUARD, 'utf8');
+
+t('the guard uses the shared control-plane pattern (no divergent copy)', () => {
+	assert.match(guardSrc, /isControlPlaneCommit\(changed\)/);
+	assert.ok(!/const CONTROL_PLANE =/.test(guardSrc), 'the old inline regex must be gone, not duplicated');
+});
 
 t('the guard loads the committed source into its EXISTING allow set', () => {
 	assert.match(guardSrc, /require\('\.\/lib\/gate-exemptions'\)/);

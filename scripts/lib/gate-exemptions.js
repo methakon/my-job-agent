@@ -27,6 +27,25 @@ const path = require('node:path');
 const DEFAULT_FILE = path.join(__dirname, '..', '..', 'docs', 'gate-close-allow.json');
 const SHA_RE = /^[0-9a-f]{7,40}$/;
 
+/**
+ * Commits touching ONLY the tracking layer cannot belong to a roadmap row — they
+ * ARE the tracking layer, so the guard labels them `cp-plan` and never blocks them.
+ *
+ * Scoped to this guard family's own files: AGENTS.md/CLAUDE.md, package.json, docs/,
+ * the pre-push hook, and scripts[/lib]/gate-*.js INCLUDING their own tests
+ * (`\.test`). Nothing else is covered — a feature script, a service test or any
+ * src/ path still has to be recorded on a row. Keep this list narrow: widening it
+ * is how a guard gets quietly neutered.
+ */
+const CONTROL_PLANE_PATTERN =
+	/^(AGENTS\.md|CLAUDE\.md|package\.json|docs\/.+|scripts\/hooks\/.+|scripts\/lib\/gate-[a-z-]+(\.test)?\.js|scripts\/gate-[a-z-]+(\.test)?\.js)$/;
+
+/** True when every changed path is control-plane tooling (and there is at least one). */
+function isControlPlaneCommit(files) {
+	const list = (files || []).filter(Boolean);
+	return list.length > 0 && list.every((f) => CONTROL_PLANE_PATTERN.test(f));
+}
+
 /** Read + validate the exemption file. Never throws: a broken file yields no exemptions and a problem line. */
 function loadExemptions(filePath) {
 	const file = filePath || process.env.GATE_CLOSE_ALLOW_FILE || DEFAULT_FILE;
@@ -85,4 +104,4 @@ function classifyCommit({ hasOwner, isControlPlane, legacyReason, exemption }) {
 	return 'drift';
 }
 
-module.exports = { DEFAULT_FILE, SHA_RE, loadExemptions, findExemption, classifyCommit };
+module.exports = { DEFAULT_FILE, SHA_RE, CONTROL_PLANE_PATTERN, isControlPlaneCommit, loadExemptions, findExemption, classifyCommit };

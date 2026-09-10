@@ -56,7 +56,7 @@ const ALLOW = new Set(
 // Persistent exemptions — the committed source for the SAME allow set. A push runs
 // this from scripts/hooks/pre-push, where no --allow flag can be supplied, so an
 // exemption covering a separately-tracked workstream has to live in the repo.
-const { loadExemptions, findExemption, classifyCommit } = require('./lib/gate-exemptions');
+const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit } = require('./lib/gate-exemptions');
 const FILE_EXEMPTIONS = loadExemptions();
 for (const sha of FILE_EXEMPTIONS.entries.keys()) ALLOW.add(sha);
 
@@ -92,14 +92,13 @@ const log = (...a) => {
 	if (SINCE) commits = commits.filter((c) => c.date >= SINCE);
 
 	// Commits that only touch the control plane's own machinery (this guard, its docs,
-	// the repo instructions) cannot belong to a roadmap row — they ARE the tracking
-	// layer. Labelled `cp-plan` in the report, never silent.
-	const CONTROL_PLANE =
-		/^(AGENTS\.md|CLAUDE\.md|package\.json|docs\/.+|scripts\/hooks\/.+|scripts\/lib\/gate-[a-z-]+\.js|scripts\/gate-[a-z-]+\.js)$/;
+	// the repo instructions, its own tests) cannot belong to a roadmap row — they ARE
+	// the tracking layer. Labelled `cp-plan` in the report, never silent. The pattern
+	// lives in lib/gate-exemptions.js so it can be tested directly.
 	for (const c of commits) {
 		const changed = git('show', '--pretty=format:', '--name-only', c.sha).split('\n').map((s) => s.trim()).filter(Boolean);
 		c.files = changed;
-		c.controlPlane = changed.length > 0 && changed.every((f) => CONTROL_PLANE.test(f));
+		c.controlPlane = isControlPlaneCommit(changed);
 	}
 
 	// ── 2. what the control plane records ─────────────────────────────────────
