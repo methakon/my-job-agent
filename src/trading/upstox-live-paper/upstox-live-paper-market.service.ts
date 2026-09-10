@@ -4,15 +4,35 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, MoreThanOrEqual } from 'typeorm';
 import { BsmGreeks, BsmInputs, localGreeks, bsmGreeks } from '../bsm-greeks';
 import { UpstoxLivePaperConfig } from './upstox-live-paper.config';
+import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
 import { FeedHealthService } from '../unified-market-data/feed-health.service';
 import { UPSTOX_LIVE_DATA_ISOLATION } from './upstox-live-paper.const';
 import { UpstoxLivePaperOptionQuote, UpstoxLivePaperMarketSnapshot } from './upstox-live-paper-entities';
 
 const UPSTOX_LIVE_API_BASE = 'https://api.upstox.com';
 const UPSTOX_LIVE_V2_OPTION_CHAIN = '/v2/option/chain';
-const UPSTOX_LIVE_V2_QUOTE = '/v2/quote';
+const UPSTOX_LIVE_V2_OPTION_CONTRACT = '/v2/option/contract';
+/** v2 quote endpoints are keyed by instrument_key (NOT instrument_token). */
+const UPSTOX_LIVE_V2_QUOTE = '/v2/market-quote/quotes';
+const UPSTOX_LIVE_V2_LTP = '/v2/market-quote/ltp';
 const UPSTOX_LIVE_V2_MARKET_STATUS = '/v2/market/status';
 const UPSTOX_LIVE_WS_BASE = 'wss://api.upstox.com/live/';
+
+/** Upstox v2 /option/chain leg — one side (call or put) of a strike row. */
+interface UpstoxV2MarketData {
+  ltp?: number; last_price?: number; close_price?: number; volume?: number;
+  oi?: number; open_interest?: number; prev_oi?: number;
+  bid_price?: number; bid_qty?: number; ask_price?: number; ask_qty?: number;
+  [k: string]: unknown;
+}
+interface UpstoxV2Greeks { delta?: number; gamma?: number; theta?: number; vega?: number; iv?: number; [k: string]: unknown; }
+interface UpstoxV2Leg { instrument_key?: string; market_data?: UpstoxV2MarketData; option_greeks?: UpstoxV2Greeks; [k: string]: unknown; }
+interface UpstoxV2ChainRow {
+  strike_price?: number; expiry?: string; underlying_key?: string; underlying_spot_price?: number;
+  call_options?: UpstoxV2Leg; put_options?: UpstoxV2Leg; [k: string]: unknown;
+}
+interface UpstoxV2ContractRow { expiry?: string; strike_price?: number; instrument_key?: string; underlying_key?: string; [k: string]: unknown; }
+interface UpstoxV2Envelope<T> { status?: string; data?: T; code?: string; message?: string; errors?: unknown; }
 
 interface UpstoxApiError { status?: number; code?: string; message?: string; details?: string; }
 
@@ -77,6 +97,11 @@ const parseTs = (raw: unknown): Date | null => {
 };
 const finite = (v: unknown): number | null => { if (v===null||v===undefined||v==='') return null; const n=Number(v); return Number.isFinite(n)?n:null; };
 const toOptionType = (raw: unknown): 'CE'|'PE'|null => { const s=String(raw??'').trim().toUpperCase(); if(s==='CE')return'CE'; if(s==='PE')return'PE'; return null; };
+/** Today's date (YYYY-MM-DD) in IST — the market's own calendar. */
+const istDateString = (now = Date.now()): string => new Date(now + 5.5 * 3_600_000).toISOString().slice(0, 10);
+/** 'BSE_INDEX|SENSEX' → 'SENSEX' · 'NSE_INDEX|Nifty 50' → 'NIFTY50'. */
+const underlyingShortName = (key: string): string =>
+  String(key.split('|').pop() ?? key).toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 @Injectable()
 export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestroy {
@@ -100,6 +125,13 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   private readonly paperOnly: boolean;
   private readonly safetyLockActive: boolean;
   private latestUnderlyingPriceByInstrument = new Map<string, number>();
+  /** Cached v2 auth headers + validity horizon (see liveAuthHeaders). */
+  private authHeadersCache: Record<string,string> | null = null;
+  private authCacheUntilMs = 0;
+  /** Expiry currently used per underlying key, resolved from the broker's contract list. */
+  private readonly expiryByUnderlyingKey = new Map<string, string>();
+  /** Last time the AUTH_REQUIRED warning was logged (throttled to 5 min). */
+  private lastAuthWarnMs = 0;
 
   slippageBps(): number { return this.config.defaultSlippageBps; }
   staleThresholdMs(): number { return this.config.staleQuoteMaxAgeMs; }
@@ -125,7 +157,8 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   constructor(config: UpstoxLivePaperConfig,
     @InjectRepository(UpstoxLivePaperOptionQuote) optionQuotes: Repository<UpstoxLivePaperOptionQuote>,
     @InjectRepository(UpstoxLivePaperMarketSnapshot) marketSnapshots: Repository<UpstoxLivePaperMarketSnapshot>,
-    private readonly feedHealth: FeedHealthService) {
+    private readonly feedHealth: FeedHealthService,
+    private readonly tokenService: UpstoxLivePaperTokenService) {
     this.config = config; this.optionQuotes = optionQuotes; this.marketSnapshots = marketSnapshots;
     this.paperOnly = config.paperOnly; this.safetyLockActive = config.safetyLockActive;
     // Feed-health gate registration (brief s6/s8): the Upstox desk's own REST
@@ -163,46 +196,140 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
 
   async fetchOptionChain(): Promise<{fetched:number;errors:string[]}> {
     if (!this.config.liveCredentialsPresent) { this.restLastError='LIVE credentials missing'; this.logger.warn(this.restLastError); return {fetched:0,errors:[this.restLastError]}; }
-    const errors: string[] = []; const headers = this.liveAuthHeaders(); const symbols = this.config.liveInstruments.slice(0,50);
-    if (!symbols.length) return {fetched:0,errors:['no instruments']};
-    for (const sym of symbols) {
+    const keys = this.config.liveInstruments.slice(0,50);
+    if (!keys.length) return {fetched:0,errors:['no instruments']};
+    const headers = await this.liveAuthHeaders();
+    if (!headers) {
+      // No valid token row → nothing can be ingested. Say so out loud, but
+      // throttled: the poll cycle retries every UPSTOX_LIVE_POLL_MS.
+      this.restLastError = `AUTH_REQUIRED — ${this.restLastError ?? 'Upstox access token missing/expired'}; complete the login at /api/upstox/token/init`;
+      const nowMs = Date.now();
+      if (nowMs - this.lastAuthWarnMs > 300_000) { this.lastAuthWarnMs = nowMs; this.logger.warn(`[UPSTOX-LIVE] ${this.restLastError}`); }
+      return {fetched:0,errors:[this.restLastError]};
+    }
+    const errors: string[] = []; let fetched = 0;
+    for (const key of keys) {
       try {
-        const row = await this.fetchOptionChainForSymbol(sym, headers);
-        if (!row) { errors.push(`no data for ${sym}`); continue; }
-        const tick = await this.normalizeOptionChainRow(row, sym);
-        if (!tick) { errors.push(`unparseable row for ${sym}`); continue; }
-        await this.persistOptionQuote(tick);
-        this.lastOptionQuoteTsByContract.set(tick.contractSymbol, tick.ts.getTime());
-        this.quotesPersistedToday++;
-      } catch (err) { errors.push(`${sym}: ${this.errorMessage(err)}`); this.logger.warn(`[UPSTOX-LIVE] fetch failed for ${sym}: ${this.errorMessage(err)}`); }
+        const chain = await this.fetchChainForKey(key, headers);
+        if (!chain.ticks.length) { errors.push(`no tradable quotes for ${key}${chain.expiry?` (expiry ${chain.expiry})`:''}`); continue; }
+        for (const tick of chain.ticks) {
+          await this.persistOptionQuote(tick);
+          this.markOptionQuoteTs(tick.contractSymbol, tick.ts.getTime());
+          this.quotesPersistedToday++; fetched++;
+        }
+        if (chain.spot !== null) {
+          await this.persistMarketSnapshot({
+            instrument: chain.ticks[0].underlying, price: chain.spot, bid: null, ask: null, volume: 0,
+            open: null, high: null, low: null, close: null, ts: chain.ticks[0].ts, upstoxRef: key,
+            dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource, executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
+          });
+          this.markMarketSnapshotTs(chain.ticks[0].underlying, chain.ticks[0].ts.getTime());
+        }
+      } catch (err) { errors.push(`${key}: ${this.errorMessage(err)}`); this.logger.warn(`[UPSTOX-LIVE] fetch failed for ${key}: ${this.errorMessage(err)}`); }
     }
     this.optionChainFetchedAt = nowUtc();
     this.restLastError = errors.length ? errors.join('; ').slice(0,300) : null;
-    this.logger.log(`[UPSTOX-LIVE] option chain: ${symbols.length-errors.length}/${symbols.length} persisted`);
-    return { fetched: symbols.length-errors.length, errors };
+    this.logger.log(`[UPSTOX-LIVE] option chain: ${fetched} quotes persisted from ${keys.length} underlying(s)`);
+    return { fetched, errors };
   }
 
-  private async fetchOptionChainForSymbol(sym: string, headers: Record<string,string>): Promise<UpstoxOptionChainRow|null> {
-    const token = this.instrumentTokenForSymbol(sym); if (!token) return null;
-    const q = await this.fetchJson<UpstoxQuoteResponse>(`${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_QUOTE}?instrument_token=${encodeURIComponent(token)}`, {method:'GET',headers});
-    if (q?.data) return this.upstoxQuoteDataToRow(q.data, token, sym);
-    const underlying = this.underlyingForSymbol(sym); if (!underlying) return null;
-    const chain = await this.fetchJson<{data?:UpstoxOptionChainRow[];status?:string;code?:string;message?:string}>(
-      `${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_OPTION_CHAIN}?instrument_token=${encodeURIComponent(underlying)}`, {method:'GET',headers});
-    if (!chain?.data?.length) { if (chain?.code||chain?.message) throw new Error(`Upstox chain error ${chain.code}: ${chain.message}`); return null; }
-    return chain.data.find(r=>this.rowMatchesSymbol(r,sym)) ?? chain.data[0] ?? null;
+  /**
+   * One underlying's live chain, flattened into per-leg ticks. Upstox v2 takes
+   * `instrument_key` (e.g. BSE_INDEX|SENSEX) — not an instrument token — and
+   * /option/chain REQUIRES `expiry_date`. The expiry comes from the broker's own
+   * /option/contract list: the nearest LISTED expiry, which is today's expiry on
+   * expiry day. No expiry is ever hard-coded.
+   */
+  private async fetchChainForKey(key: string, headers: Record<string,string>): Promise<{ticks: LiveOptionTick[]; spot: number|null; expiry: string|null}> {
+    const expiry = await this.resolveExpiry(key, headers);
+    if (!expiry) return { ticks: [], spot: null, expiry: null };
+    const url = `${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_OPTION_CHAIN}?instrument_key=${encodeURIComponent(key)}&expiry_date=${encodeURIComponent(expiry)}`;
+    const res = await this.fetchJson<UpstoxV2Envelope<UpstoxV2ChainRow[]>>(url, {method:'GET',headers});
+    const rows = Array.isArray(res?.data) ? res.data : [];
+    if (!rows.length) {
+      if (res?.code || res?.message) throw new Error(`Upstox chain error ${res.code ?? ''}: ${res.message ?? ''}`);
+      return { ticks: [], spot: null, expiry };
+    }
+
+    const symbol = underlyingShortName(key);
+    const spot = finite(rows.find(r => finite(r.underlying_spot_price) !== null)?.underlying_spot_price);
+    if (spot !== null) this.latestUnderlyingPriceByInstrument.set(symbol, spot);
+
+    // Bound the universe to a window of strikes around ATM (config-driven).
+    const strikes = rows.map(r => finite(r.strike_price)).filter((n): n is number => n !== null).sort((a,b) => a-b);
+    let keep: Set<number> | null = null;
+    if (spot !== null && strikes.length) {
+      const atm = strikes.reduce((best, s) => (Math.abs(s - spot) < Math.abs(best - spot) ? s : best), strikes[0]);
+      const idx = strikes.indexOf(atm); const w = this.config.liveStrikeWindow;
+      keep = new Set(strikes.slice(Math.max(0, idx - w), idx + w + 1));
+    }
+
+    const ts = nowUtc();
+    const ticks: LiveOptionTick[] = [];
+    for (const row of rows) {
+      const strike = finite(row.strike_price); if (strike === null) continue;
+      if (keep && !keep.has(strike)) continue;
+      const rowExpiry = parseExpiryDate(row.expiry) ?? expiry;
+      const legs: Array<[UpstoxV2Leg | undefined, 'CE' | 'PE']> = [[row.call_options, 'CE'], [row.put_options, 'PE']];
+      for (const [leg, optionType] of legs) {
+        const tick = this.legToTick(leg, optionType, strike, rowExpiry, symbol, key, ts);
+        if (tick) ticks.push(tick);
+      }
+    }
+    return { ticks, spot, expiry };
   }
 
-  private rowMatchesSymbol(row: UpstoxOptionChainRow, sym: string): boolean {
-    const s = String(row.symbol??'').trim().toUpperCase();
-    if (!s) return false;
-    return s === sym.toUpperCase() || sym.toUpperCase().includes(s) || s.includes(sym.toUpperCase());
+  /**
+   * The expiry to fetch for an underlying, taken from the broker's contract list:
+   * the earliest listed expiry not before today (i.e. today's expiry on expiry
+   * day, else the next one). Memoised per underlying until it has passed.
+   */
+  private async resolveExpiry(key: string, headers: Record<string,string>): Promise<string|null> {
+    const today = istDateString();
+    const cached = this.expiryByUnderlyingKey.get(key);
+    if (cached && cached >= today) return cached;
+    const url = `${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_OPTION_CONTRACT}?instrument_key=${encodeURIComponent(key)}`;
+    const res = await this.fetchJson<UpstoxV2Envelope<UpstoxV2ContractRow[]>>(url, {method:'GET',headers});
+    const rows = Array.isArray(res?.data) ? res.data : [];
+    const expiries = Array.from(new Set(rows.map(r => parseExpiryDate(r.expiry)).filter((e): e is string => e !== null))).sort();
+    const upcoming = expiries.filter(e => e >= today);
+    const picked = (this.config.livePreferTodayExpiry ? upcoming.find(e => e === today) : undefined) ?? upcoming[0] ?? null;
+    if (picked) this.expiryByUnderlyingKey.set(key, picked);
+    else this.logger.warn(`[UPSTOX-LIVE] no listed expiry on/after ${today} for ${key} (listed: ${expiries.join(', ') || 'none'})`);
+    return picked;
+  }
+
+  /** Map one v2 chain leg (call/put) onto a desk tick; null when it has no price. */
+  private legToTick(leg: UpstoxV2Leg | undefined, optionType: 'CE'|'PE', strike: number, expiry: string, symbol: string, key: string, ts: Date): LiveOptionTick | null {
+    const md = leg?.market_data;
+    if (!md) return null;
+    const ltp = finite(md.ltp) ?? finite(md.last_price);
+    if (ltp === null || ltp <= 0) return null; // no honest tick without a traded price
+    const oi = finite(md.oi) ?? finite(md.open_interest);
+    const prevOi = finite(md.prev_oi);
+    const iv = finite(leg?.option_greeks?.iv);
+    const spot = this.latestUnderlyingPriceByInstrument.get(symbol) ?? null;
+    const greeks = this.computeGreeks(ltp, strike, expiry, spot, optionType, iv);
+    const instrumentKey = String(leg?.instrument_key ?? '');
+    return {
+      contractSymbol: `${symbol}${expiry.slice(2).replace(/-/g,'')}${Math.trunc(strike)}${optionType}`,
+      instrumentToken: instrumentKey, underlying: symbol, expiry, strike, optionType,
+      ltp, bid: finite(md.bid_price), ask: finite(md.ask_price),
+      bidQty: finite(md.bid_qty), askQty: finite(md.ask_qty),
+      volume: Math.max(0, Math.trunc(finite(md.volume) ?? 0)),
+      openInterest: Math.max(0, Math.trunc(oi ?? 0)),
+      oiChange: oi !== null && prevOi !== null ? Math.trunc(oi - prevOi) : 0,
+      impliedVolatility: iv ?? greeks?.iv ?? null,
+      underlyingPrice: spot, ts, upstoxRef: instrumentKey || key,
+      dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource, executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
+    };
   }
 
   private async fetchMarketStatus(): Promise<void> {
     if (!this.config.liveCredentialsPresent) return;
     try {
-      const res = await this.fetchJson<UpstoxMarketStatusResponse>(`${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_MARKET_STATUS}`, {method:'GET',headers:this.liveAuthHeaders()});
+      const headers = await this.liveAuthHeaders(); if (!headers) return;
+      const res = await this.fetchJson<UpstoxMarketStatusResponse>(`${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_MARKET_STATUS}`, {method:'GET',headers});
       this.optionChainFetchedAt = nowUtc(); this.logger.log(`[UPSTOX-LIVE] market status: ${res?.status??'unknown'}`);
     } catch (err) { this.logger.warn(`[UPSTOX-LIVE] market status failed: ${this.errorMessage(err)}`); }
   }
@@ -236,33 +363,6 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   isStale(contractSymbol: string): boolean { const ts = this.lastOptionQuoteTsByContract.get(contractSymbol); if (!ts) return true; return (Date.now()-ts) > this.config.staleQuoteMaxAgeMs; }
   latestQuoteTs(contractSymbol: string): number | null { return this.lastOptionQuoteTsByContract.get(contractSymbol) ?? null; }
 
-  private async normalizeOptionChainRow(row: UpstoxOptionChainRow, reqSym: string): Promise<LiveOptionTick|null> {
-    const symbol = row.symbol ?? reqSym; const contractSymbol = this.contractSymbolForRow(row, symbol); if (!contractSymbol) return null;
-    const ts = parseTs(row.timestamp) ?? nowUtc(); const optionType = toOptionType(row.optionType) ?? 'CE';
-    const expiry = parseExpiryDate(row.expiryDate) ?? '2099-12-31'; const strike = finite(row.strikePrice) ?? 0;
-    const underlying = String(row.underlying??'').trim().toUpperCase() || 'UNKNOWN';
-    const ltp = finite(row.lastPrice); const bid = finite(row.bidPrice); const ask = finite(row.askPrice);
-    if (ltp===null || ltp<=0) return null;
-    const iv = finite(row.impliedVolatility); const spot = this.latestUnderlyingPriceByInstrument.get(underlying) ?? null;
-    const greeks = this.computeGreeks(ltp, strike, expiry, spot, optionType, iv);
-    return { contractSymbol, instrumentToken: String(row.instrumentToken??''), underlying, expiry, strike, optionType, ltp, bid: bid??null, ask: ask??null, bidQty: finite(row.bidQty), askQty: finite(row.askQty), volume: Math.max(0,Math.trunc(finite(row.volume)??0)), openInterest: Math.max(0,Math.trunc(finite(row.openInterest)??0)), oiChange: Math.trunc(finite(row.changeinOI)??0), impliedVolatility: iv??greeks?.iv??null, underlyingPrice: spot, ts, upstoxRef: String(row.instrumentToken??''), dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource, executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode };
-  }
-
-  private upstoxQuoteDataToRow(data: UpstoxQuoteResponse['data'], token: string, reqSym: string): UpstoxOptionChainRow|null {
-    if (!data) return null;
-    return { symbol: data.symbol??reqSym, instrumentToken: data.instrumentToken??token, lastPrice: data.lastPrice, bidPrice: data.bidPrice, askPrice: data.askPrice, bidQty: data.bidQty, askQty: data.askQty, volume: data.volume, openInterest: data.openInterest, changeinOI: data.changeinOI, impliedVolatility: data.impliedVolatility, underlying: data.underlying, strikePrice: data.strikePrice, optionType: data.optionType, expiryDate: data.expiryDate, timestamp: data.timestamp, mode: data.mode };
-  }
-
-  private contractSymbolForRow(row: UpstoxOptionChainRow, reqSym: string): string|null {
-    const s = String(row.symbol??'').trim(); if (s) return s;
-    const u = String(row.underlying??'').trim().toUpperCase(); const strike = finite(row.strikePrice); const type = toOptionType(row.optionType); const expiry = parseExpiryDate(row.expiryDate);
-    if (u && strike!=null && type && expiry) { const ss = String(Math.trunc(strike)); return `${u}${expiry.slice(2).replace(/-/g,'')}${ss}${type}`; }
-    return reqSym || null;
-  }
-
-  private underlyingForSymbol(sym: string): string|null { const m = sym.match(/^([A-Z]+)/); return m ? m[1] : null; }
-  private instrumentTokenForSymbol(sym: string): string|null { return sym; }
-
   private computeGreeks(ltp: number, strike: number, expiry: string, spot: number|null, optionType: 'CE'|'PE', ivOverride: number|null): BsmGreeks|null {
     if (!spot || spot<=0) return null;
     const expiryDate = new Date(expiry+'T15:30:00.000Z'); const now = nowUtc();
@@ -272,10 +372,29 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     return localGreeks(ltp, inputs, optionType);
   }
 
-  private liveAuthHeaders(): Record<string,string> {
-    const key = this.config.liveApiKey; const secret = this.config.liveApiSecret; const token = this.config.liveAccessToken;
+  /**
+   * Auth headers for Upstox v2 REST, built from the SINGLE active token row in
+   * the database (never from .env — see UpstoxLivePaperTokenService). Cached
+   * briefly so one poll cycle does not hit the DB per request. Returns null and
+   * records restLastError when no valid token exists (AUTH_REQUIRED).
+   */
+  private async liveAuthHeaders(): Promise<Record<string,string> | null> {
+    if (this.authHeadersCache && Date.now() < this.authCacheUntilMs) return this.authHeadersCache;
+    let token: string;
+    let expiresAt: Date;
+    try {
+      const active = await this.tokenService.getValidUpstoxAccessToken();
+      token = active.token; expiresAt = active.expiresAt;
+    } catch (err) {
+      this.authHeadersCache = null; this.authCacheUntilMs = 0;
+      this.restLastError = this.errorMessage(err);
+      return null;
+    }
     const headers: Record<string,string> = { 'Content-Type':'application/json', Accept:'application/json' };
-    if (key && secret) { headers['x-api-key']=key; if (token) headers['Authorization']=`Bearer ${token}`; } else if (token) { headers['Authorization']=`Bearer ${token}`; }
+    if (this.config.liveApiKey) headers['x-api-key'] = this.config.liveApiKey;
+    headers['Authorization'] = `Bearer ${token}`;
+    this.authHeadersCache = headers;
+    this.authCacheUntilMs = Math.min(expiresAt.getTime(), Date.now() + 60_000);
     return headers;
   }
 

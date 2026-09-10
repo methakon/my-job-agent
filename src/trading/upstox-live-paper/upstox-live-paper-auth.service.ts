@@ -197,7 +197,11 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
   }
 
   private async latestToken(): Promise<UpstoxLivePaperToken | null> {
-    return this.repo.findOne({ order: { updatedAt: 'DESC' } });
+    // TypeORM 0.3 rejects findOne() without a `where` ("You must provide
+    // selection conditions…"), even with an order clause — which made every
+    // token read throw, so the desk could never see a token it had stored.
+    const rows = await this.repo.find({ order: { updatedAt: 'DESC' }, take: 1 });
+    return rows[0] ?? null;
   }
 
   private parseTs(raw: string | number | undefined): Date | null {

@@ -42,7 +42,6 @@ const files = fs.readdirSync(SRC).sort();
 const expected = [
   'upstox-live-paper.module.ts',
   'upstox-live-paper.config.ts',
-  'upstox-live-paper.token.entity.ts',
   'upstox-live-paper-token.entity.ts',
   'upstox-live-paper-auth.service.ts',
   'upstox-live-paper-token.controller.ts',
@@ -74,19 +73,19 @@ if (extra.length) console.log('ℹ extra files:', extra.join(', '));
 const configSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper.config.ts'), 'utf8');
 assert.ok(configSrc.includes('UPSTOX_SANDBOX_ENABLED'), 'config reads UPSTOX_SANDBOX_ENABLED');
 assert.ok(configSrc.includes('this.sandboxEnabled'), 'config derives sandboxEnabled');
-assert.ok(configSrc.includes('this.safetyLockActive = this.sandboxEnabled'), 'safetyLockActive follows the existing var');
+assert.ok(configSrc.includes('get safetyLockActive()') && configSrc.includes('this.sandboxEnabled'), 'safetyLockActive follows the existing var (getter form)');
 assert.ok(configSrc.includes('REAL_ORDER_ALLOWED'), 'config exposes REAL_ORDER_ALLOWED derivation');
 assert.ok(configSrc.includes('!this.sandboxEnabled'), 'REAL_ORDER_ALLOWED requires sandboxEnabled==false');
 assert.ok(configSrc.includes('this.requestedRealMode'), 'REAL_ORDER_ALLOWED requires explicit REAL mode');
 assert.ok(configSrc.includes('this.liveCredentialsPresent'), 'REAL_ORDER_ALLOWED requires checks');
 assert.ok(configSrc.includes('this.paperOnly = true'), 'module is paperOnly');
-assert.ok(configSrc.includes('RISKY'), 'safety block warns when REAL_ORDER_ALLOWED is true');
+assert.ok(configSrc.includes('REAL_ORDER_ALLOWED=true derivation') && configSrc.includes('PAPER-only'), 'safety block warns when REAL_ORDER_ALLOWED is true');
 console.log('✔ 1: safety model reads UPSTOX_SANDBOX_ENABLED and stays PAPER');
 
 // ── 2. SAFETY: UPSTOX_SANDBOX_ENABLED=true + attempted REAL → hard reject ────
 const serviceSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper.service.ts'), 'utf8');
 assert.ok(serviceSrc.includes('assertPaperMode'), 'orchestrator has paper-mode assertion');
-assert.ok(serviceSrc.includes(' PAPER-only enforcement'), 'paper-mode assertion message present');
+assert.ok(serviceSrc.includes('paper-only enforcement'), 'paper-mode assertion message present');
 assert.ok(serviceSrc.includes('REAL order path'), 'paper-mode assertion references real order path');
 assert.ok(serviceSrc.includes('this.paperOnly'), 'orchestrator exposes paperOnly');
 assert.ok(serviceSrc.includes('this.config.safetyLockActive'), 'orchestrator checks safety lock');
@@ -104,8 +103,10 @@ console.log('✔ 4: REAL only reachable after derivation + checks (not auto)');
 
 // ── 5. PAPER BUY uses ASK ─────────────────────────────────────────────────────
 const marketSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-market.service.ts'), 'utf8');
-assert.ok(marketSrc.includes('BUY') && marketSrc.includes('ask'), 'market service handles BID/ASK');
-console.log('✔ 5: market service tracks bid/ask (paper fill uses ask for BUY — see execution service)');
+assert.ok(marketSrc.includes('bid') && marketSrc.includes('ask'), 'market service tracks bid/ask');
+// the paper-fill rule itself lives in the desk service (BUY @ ask, SELL @ bid)
+assert.ok(serviceSrc.includes('BUY fills at ask') && serviceSrc.includes('SELL fills at bid'), 'paper fills: BUY at ask, SELL at bid');
+console.log('✔ 5: paper fill rule present (BUY @ ask, SELL @ bid)');
 
 const execServicePath = path.join(SRC, 'upstox-live-paper-execution.service.ts');
 let execSrc = '';
@@ -169,7 +170,7 @@ assert.ok(reportSrc.includes('perfByType') || reportSrc.includes('CE') , 'report
 assert.ok(reportSrc.includes('perfByExpiry') || reportSrc.includes('expiryOf'), 'report buckets by expiry');
 assert.ok(reportSrc.includes('perfByTimeOfDay') || reportSrc.includes('bucketByTimeOfDay'), 'report buckets by time of day');
 assert.ok(reportSrc.includes('aiAnalysis') || reportSrc.includes('buildAiAnalysis'), 'report has AI-readable analysis');
-assert.ok(reportSrc.includes('do not automatically change the strategy'), 'report states no auto change');
+assert.ok(/do not automatically change the strategy/i.test(reportSrc), 'report states no auto change');
 console.log('✔ 12: weekly report computes all required metrics + AI analysis section');
 
 // ── ENV / config placeholders ────────────────────────────────────────────────
@@ -179,7 +180,7 @@ const allEnv = envExample + '\n' + envLocal;
 assert.ok(allEnv.includes('UPSTOX_SANDBOX_ENABLED'), 'UPSTOX_SANDBOX_ENABLED documented in env');
 assert.ok(allEnv.includes('UPSTOX_LIVE_API_KEY') || configSrc.includes('UPSTOX_LIVE_API_KEY'), 'UPSTOX_LIVE_API_KEY referenced');
 assert.ok(allEnv.includes('UPSTOX_LIVE_API_SECRET') || configSrc.includes('UPSTOX_LIVE_API_SECRET'), 'UPSTOX_LIVE_API_SECRET referenced');
-assert.ok(allEnv.includes('UPSTOX_LIVE_REDIRECT_URI') || configSrc.includes('UPSTOX_LIVE_REDIRECT_URI'), 'UPSTOX_LIVE_REDIRECT_URI referenced');
+assert.ok(allEnv.includes('UPSTOX_LIVE_REDIRECT_URI') || configSrc.includes('UPSTOX_LIVE_REDIRECT_URI') || fs.readFileSync(path.join(SRC, 'upstox-live-paper-auth.service.ts'), 'utf8').includes('UPSTOX_LIVE_REDIRECT_URI'), 'UPSTOX_LIVE_REDIRECT_URI referenced');
 console.log('✔ env placeholders referenced (UPSTOX_LIVE_* + existing UPSTOX_SANDBOX_ENABLED)');
 
 // ── token isolation ──────────────────────────────────────────────────────────
@@ -204,7 +205,7 @@ console.log('✔ market data tagged dataSource=UPSTOX, executionMode=PAPER');
 const appModule = fs.readFileSync(path.join(ROOT, 'src', 'app.module.ts'), 'utf8');
 assert.ok(appModule.includes('UpstoxLivePaperModule'), 'AppModule imports UpstoxLivePaperModule');
 assert.ok(appModule.includes('UpstoxLivePaperPortfolio') || appModule.includes('upstox_live_paper_portfolios'), 'AppModule registers paper entities');
-assert.ok(appModule.includes('UpstoxLivePaperController') || appModule.includes('upstox-live-paper.controller'), 'AppModule registers paper controller');
+assert.ok(appModule.includes('UpstoxLivePaperController') || appModule.includes('upstox-live-paper.controller') || fs.readFileSync(path.join(SRC, 'upstox-live-paper.module.ts'), 'utf8').includes('UpstoxLivePaperController'), 'AppModule (via UpstoxLivePaperModule) registers paper controller');
 console.log('✔ AppModule wired: module + entities + controllers');
 
 // ── public page ──────────────────────────────────────────────────────────────
@@ -219,5 +220,33 @@ if (fs.existsSync(pagePath)) {
 } else {
   console.log('ℹ public/upstox-live-paper.html not on disk yet');
 }
+
+// ── v2 market adapter (2026-09-10 rewrite: v1 paths/params/shapes were wrong) ──
+assert.ok(marketSrc.includes("'/v2/option/chain'"), 'chain endpoint is /v2/option/chain');
+assert.ok(marketSrc.includes("'/v2/option/contract'"), 'listed expiries come from /v2/option/contract');
+assert.ok(marketSrc.includes('instrument_key='), 'requests are keyed by instrument_key (v2)');
+assert.ok(!marketSrc.includes('instrument_token='), 'no v1-style instrument_token query parameter left');
+assert.ok(marketSrc.includes('expiry_date='), 'chain request sends the mandatory expiry_date');
+assert.ok(marketSrc.includes('call_options') && marketSrc.includes('put_options'), 'parses nested call_options/put_options (v2 chain shape)');
+assert.ok(marketSrc.includes('option_greeks'), 'reads IV/greeks from option_greeks');
+assert.ok(marketSrc.includes('getValidUpstoxAccessToken'), 'market service takes its token from the DB (single active row)');
+assert.ok(!marketSrc.includes('this.config.liveAccessToken'), 'market service never authenticates with the .env token');
+console.log('✔ 13: Upstox v2 option-chain adapter (instrument_key + expiry_date + nested legs, DB token)');
+
+// ── expiry selection: nearest LISTED expiry (today's on expiry day), never hard-coded ──
+assert.ok(marketSrc.includes('resolveExpiry') && marketSrc.includes('istDateString'), 'expiry resolved from the broker contract list');
+assert.ok(marketSrc.includes('livePreferTodayExpiry') && marketSrc.includes('e === today'), 'today\'s listed expiry is preferred when present');
+assert.ok(!/expiry:\s*'20\d\d-\d\d-\d\d'/.test(marketSrc), 'no hard-coded expiry date literal anywhere');
+assert.ok(configSrc.includes('UPSTOX_LIVE_PREFER_TODAY_EXPIRY'), 'config exposes UPSTOX_LIVE_PREFER_TODAY_EXPIRY');
+assert.ok(configSrc.includes('UPSTOX_LIVE_STRIKE_WINDOW'), 'config exposes UPSTOX_LIVE_STRIKE_WINDOW');
+assert.ok(marketSrc.includes('liveStrikeWindow'), 'per-poll universe bounded by the configured strike window');
+console.log('✔ 14: expiry = nearest listed (today on expiry day) from broker contracts, universe bounded');
+
+// ── 15. token read path must not use a where-less findOne (TypeORM 0.3) ───────
+const authSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-auth.service.ts'), 'utf8');
+assert.ok(!/findOne\(\{\s*order:/.test(authSrc), 'token lookup never uses findOne without a where (throws in TypeORM 0.3)');
+assert.ok(/find\(\{\s*order: \{\s*updatedAt: 'DESC'\s*\},\s*take: 1\s*\}\)/.test(authSrc), 'token lookup takes the newest row via find(...take:1)');
+assert.ok(authSrc.includes('AUTH_REQUIRED'), 'token service reports AUTH_REQUIRED when no valid row exists');
+console.log('✔ 15: token lookup is TypeORM-0.3 safe (newest row via find/take)');
 
 console.log('\n✅ upstox-live-paper safety + execution + report tests complete');

@@ -47,6 +47,14 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
   readonly liveTokenExpiry: string | null;
   readonly liveInstruments: string[];
   readonly liveWebSocketEnabled: boolean;
+  /**
+   * Expiry selection for the live option chain: always the NEAREST listed
+   * expiry (which is today's expiry on expiry day). Derived from the broker's
+   * own contract list — never a hard-coded date.
+   */
+  readonly livePreferTodayExpiry: boolean;
+  /** Strikes kept per side around ATM, bounding each poll's universe. */
+  readonly liveStrikeWindow: number;
 
   /** Derived README-style status string for the UI. */
   readonly safetyStatusText: string;
@@ -87,6 +95,8 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
       .filter(Boolean)
       .slice(0, 200);
     this.liveWebSocketEnabled = /^(1|true|yes)$/i.test(config.get<string>('UPSTOX_LIVE_WS_ENABLED') ?? 'true');
+    this.livePreferTodayExpiry = /^(1|true|yes)$/i.test(config.get<string>('UPSTOX_LIVE_PREFER_TODAY_EXPIRY') ?? 'true');
+    this.liveStrikeWindow = Math.max(1, Math.min(50, Number(config.get<string>('UPSTOX_LIVE_STRIKE_WINDOW') ?? 10) || 10));
 
     this.safetyStatusText = this.buildSafetyStatusText();
   }
