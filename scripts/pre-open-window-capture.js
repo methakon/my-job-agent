@@ -76,6 +76,11 @@ const istClock = (d = new Date()) =>
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   }).format(d).replace(',', '');
 const istInstant = (hm, day = istDay()) => new Date(`${day}T${hm.length === 5 ? `${hm}:00` : hm}+05:30`);
+/** Display an ISO timestamp / Date / epoch-ms as an IST wall-clock string. */
+const istInstantOf = (v) => {
+  const ms = v instanceof Date ? v.getTime() : typeof v === 'number' ? v : new Date(v).getTime();
+  return Number.isNaN(ms) ? 'invalid' : `${istClock(new Date(ms))} IST`;
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(`[${istClock()} IST]`, ...a);
 
@@ -143,6 +148,7 @@ function bootApp() {
 
   return { NestFactory, PreOpenWindowModule, classes: {
     PreOpenRepository, PreOpenCaptureService, UpstoxPreOpenSource, PreOpenObservation,
+    UpstoxLivePaperTokenService,
   } };
 }
 
@@ -319,6 +325,19 @@ async function noLookaheadCheck(repo, instrumentKey, rows) {
   }
   log('window open — the shipped service polls on its own interval now');
 
+  // A stored token that is already dead (or dies before the window closes) makes
+  // the run worthless: refuse loudly instead of recording a window full of
+  // auth-failure rows. The operator re-issues the token and runs it again.
+  const tokenSvc = app.get(classes.UpstoxLivePaperTokenService);
+  const ts = await tokenSvc.tokenStatus();
+  const tokenExpMs = ts.expiresAt ? new Date(ts.expiresAt).getTime() : null;
+  log(`token: status=${ts.status} clientId=${ts.clientId || 'n/a'} expires=${ts.expiresAt ? `${ts.expiresAt} (${istInstantOf(ts.expiresAt)})` : 'n/a'}`);
+  if (!tokenExpMs || tokenExpMs <= windowEnd) {
+    log(`REFUSING: Upstox token ${ts.status}${tokenExpMs ? ` expires at ${istInstantOf(ts.expiresAt)}` : ' carries no expiry'}, at/before the window end ${TO_HM} IST. Re-issue it (node scripts/upstox-token-intake.js --file <token.txt>) and re-run. Nothing was written.`);
+    await app.close();
+    process.exit(3);
+  }
+
   const startedAt = new Date();
   const before = await repo.countForSession(day);
   let polls = 0;
@@ -332,12 +351,28 @@ async function noLookaheadCheck(repo, instrumentKey, rows) {
       log(`phase=${st.phase} brokerStatus=${st.brokerStatus} persisted=${seen.total - before.total} new (${JSON.stringify(seen.byQuality)}) lastSkip=${st.lastSkippedReason} err=${st.lastError ?? 'none'}`);
       lastSeenRows = seen.total;
     }
+    // Kill-insurance: a live snapshot rewritten every poll, so a run that is
+    // interrupted before the final report still leaves a readable trace. The
+    // observations themselves are already durable in Oracle (append-only).
+    try {
+      fs.writeFileSync(path.join(EVIDENCE_DIR, `${day}-progress.json`), JSON.stringify({
+        at: new Date().toISOString(), ist: istHm(), phase: st.phase, brokerStatus: st.brokerStatus,
+        persistedNew: seen.total - before.total, byQuality: seen.byQuality,
+        lastSkippedReason: st.lastSkippedReason ?? null, lastError: st.lastError ?? null,
+      }, null, 1));
+    } catch (e) {
+      log(`progress snapshot failed: ${e.message}`);
+    }
   }
 
   // ── collect the session's captured rows for our instruments ──────────────
   const rowsByInstrument = {};
   for (const key of instruments) {
-    rowsByInstrument[key] = await repo.list({ instrumentKey: key, sessionDate: day, limit: 500 });
+    // ascending by receivedAt: first/last windows and the sample are then honest
+    // (the repository returns newest-first, which silently inverted first/last).
+    rowsByInstrument[key] = (await repo.list({ instrumentKey: key, sessionDate: day, limit: 500 }))
+      .slice()
+      .sort((a, b) => new Date(a.receivedAt) - new Date(b.receivedAt));
   }
   const endStatus = capture.status();
   const inWindow = (r) => ['PRE_OPEN', 'OPEN_AUCTION'].includes(r.sessionPhase);
@@ -347,9 +382,10 @@ async function noLookaheadCheck(repo, instrumentKey, rows) {
   for (const rows of Object.values(rowsByInstrument)) {
     for (const r of rows) {
       const at = new Date(r.receivedAt).toISOString();
-      phases[r.sessionPhase] = phases[r.sessionPhase] ?? { count: 0, first: at, last: at };
+      if (!phases[r.sessionPhase]) phases[r.sessionPhase] = { count: 0, first: at, last: at };
       phases[r.sessionPhase].count += 1;
-      phases[r.sessionPhase].last = at;
+      if (at < phases[r.sessionPhase].first) phases[r.sessionPhase].first = at;
+      if (at > phases[r.sessionPhase].last) phases[r.sessionPhase].last = at;
       if (r.sourceStatus) sourceStatuses[r.sourceStatus] = (sourceStatuses[r.sourceStatus] ?? 0) + 1;
       const k = `${r.sessionPhase}|${r.quality}`;
       qualityByPhase[k] = (qualityByPhase[k] ?? 0) + 1;
