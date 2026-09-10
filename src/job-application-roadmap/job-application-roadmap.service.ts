@@ -74,6 +74,78 @@ export class JobApplicationRoadmapService implements OnModuleInit {
   static readonly IDENTITY = 'my-job-agent-job-application';
   static readonly NAME = 'JOB APPLICATION AGENT ROADMAP';
 
+  /**
+   * Align the 40 live rows' content fields to the current seed WITHOUT touching
+   * status / note / lastCommitSha / lastVerifiedAt. This is the content-migration
+   * path for a seed rewrite: titles, doneWhen, instr, phase, goal, priority, and
+   * edition are updated from the authoritative seed; operator status history is
+   * preserved.
+   *
+   * Idempotent and safe to re-run (only updates rows whose content differs from
+   * the seed).
+   */
+  async alignContentToSeed(): Promise<{ updated: number; untouched: number }> {
+    const existing = await this.repo.find({
+      where: { roadmapIdentity: JOB_APP_ROADMAP_IDENTITY },
+      order: { phaseOrder: 'ASC', itemOrder: 'ASC' },
+    });
+    const byId = new Map(existing.map((r) => [r.itemId, r]));
+
+    let updated = 0;
+    let untouched = 0;
+
+    for (const phase of SEED) {
+      for (let i = 0; i < phase.items.length; i++) {
+        const it = phase.items[i];
+        const row = byId.get(it.itemId);
+        if (!row) {
+          // missing row — leave it; ensureSeeded will insert on next boot if needed
+          continue;
+        }
+
+        const want = {
+          item: it.item,
+          doneWhen: it.doneWhen ?? null,
+          instr: it.instr ?? null,
+          phase: phase.phase,
+          phaseOrder: phase.phaseOrder,
+          goal: phase.goal ?? '',
+          priority: it.priority ?? 'p1',
+          edition: 'v1',
+        };
+
+        const differs =
+          row.item !== want.item ||
+          row.doneWhen !== want.doneWhen ||
+          row.instr !== want.instr ||
+          row.phase !== want.phase ||
+          row.phaseOrder !== want.phaseOrder ||
+          row.goal !== want.goal ||
+          row.priority !== want.priority ||
+          row.edition !== want.edition;
+
+        if (!differs) {
+          untouched++;
+          continue;
+        }
+
+        row.item = want.item;
+        row.doneWhen = want.doneWhen;
+        row.instr = want.instr;
+        row.phase = want.phase;
+        row.phaseOrder = want.phaseOrder;
+        row.goal = want.goal;
+        row.priority = want.priority;
+        row.edition = want.edition;
+        // status, note, lastCommitSha, lastVerifiedAt intentionally left alone
+        await this.repo.save(row);
+        updated++;
+      }
+    }
+
+    return { updated, untouched };
+  }
+
   // ---- reads ----
 
   async findAll(): Promise<JobApplicationRoadmapItem[]> {

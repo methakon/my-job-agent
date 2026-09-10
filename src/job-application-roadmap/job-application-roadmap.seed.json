@@ -1,391 +1,391 @@
 [
   {
-    "phase": "PHASE 0 — FOUNDATION & SAFETY",
+    "phase": "PHASE 0 — Baseline, safety and control",
     "phaseOrder": 1,
-    "goal": "Baseline audit plus sandbox and application-control safety before any intelligence work.",
+    "goal": "Establish actual current behavior before changes, prove submission safety, and create a regression baseline.",
     "items": [
       {
         "itemId": "JA-001",
-        "item": "Job-agent architecture and baseline audit",
+        "item": "Baseline audit",
         "status": "pending",
         "priority": "p0",
-        "instr": "Document the existing job-agent architecture, data flow, scoring, application flow, learning flow and safety boundaries against runtime/code. Produce a baseline document and verify it is consistent with the live code and DB.",
-        "doneWhen": "Existing job-agent architecture, data flow, scoring, application flow, learning flow and safety boundaries are documented and verified against runtime/code."
+        "instr": "Audit src/applications/, src/profile/, src/leads/, src/scout/, src/astro/.\nTrace lead → qualification → preparation → approval → submission → tracking → outcome → learning.\nVerify runtime/code paths; document implemented, stubbed and partially wired behavior.\nCreate a repeatable regression baseline.",
+        "doneWhen": "Current behavior and gaps are documented and baseline tests pass."
       },
       {
         "itemId": "JA-002",
         "item": "Final submission sandbox safety",
         "status": "pending",
         "priority": "p0",
-        "instr": "Prove SANDBOX=true is unable to produce a real external application/email through every submission path, with integration tests covering the final submission boundary.",
-        "doneWhen": "SANDBOX=true is proven unable to produce a real external application/email through every submission path, with integration tests covering the final submission boundary."
+        "instr": "Audit email, ATS/browser, portal, retry, prepared/queued and scheduled autonomous paths.\nLow-level submission functions must independently enforce sandbox/kill-switch checks.\nFail closed; never bypass CAPTCHA, authentication or access controls.",
+        "doneWhen": "Every real submission path is blocked whenever safety conditions require it, including direct low-level invocation."
       },
       {
         "itemId": "JA-003",
-        "item": "Application-control regression baseline",
+        "item": "Regression baseline",
         "status": "pending",
         "priority": "p0",
-        "instr": "Add passing regression tests covering the existing kill switch, caps, deduplication, approval gate, mailbox controls and existing application paths.",
-        "doneWhen": "Existing kill switch, caps, deduplication, approval gate, mailbox controls and existing application paths have passing regression tests."
+        "instr": "Cover ingestion, deduplication, profile validation, scoring, CV generation, email/portal preparation, approval, retries, inbox tracking and learning infrastructure.",
+        "doneWhen": "Automated baseline tests pass."
       }
     ]
   },
   {
-    "phase": "PHASE 1 — JOB INTELLIGENCE",
+    "phase": "PHASE 1 — Qualification and matching",
     "phaseOrder": 2,
     "goal": "Replace ad-hoc match scoring with a single qualification engine and hard eligibility checks.",
     "items": [
       {
         "itemId": "JA-010",
-        "item": "Central Job Qualification Engine",
+        "item": "Central qualification engine",
         "status": "pending",
         "priority": "p1",
-        "instr": "Create a single qualification service that evaluates leads before application preparation and exposes a structured qualification result.",
-        "doneWhen": "A single qualification service evaluates leads before application preparation and exposes a structured qualification result."
+        "instr": "Evaluate profile, normalized job, eligibility, evidence, job quality, career fit and application/channel information.\nReturn QUALIFIED, CONDITIONAL, NEAR_MISS, REJECT or INSUFFICIENT_DATA plus score, confidence, reasons, blockers and missing information.\nDownstream channels consume the central result.",
+        "doneWhen": "Qualification is deterministic/replayable and downstream selection uses it."
       },
       {
         "itemId": "JA-011",
-        "item": "Hard eligibility engine",
+        "item": "Hard eligibility",
         "status": "pending",
         "priority": "p1",
-        "instr": "Extract and evaluate mandatory requirements separately from general similarity, and allow hard failures to prevent application.",
-        "doneWhen": "Mandatory requirements are extracted and evaluated separately from general similarity, and hard failures can prevent application."
+        "instr": "Evaluate location, authorization where known, employment type, seniority, mandatory experience/skills, education/certification where genuinely required, salary, notice period and language.\nDistinguish HARD_FAIL from UNKNOWN; never guess material facts.",
+        "doneWhen": "Mandatory requirements are independently evaluated with evidence or explicit UNKNOWN."
       },
       {
         "itemId": "JA-012",
         "item": "JD intent extraction",
         "status": "pending",
         "priority": "p1",
-        "instr": "Convert job descriptions into structured role intent including role family, seniority, technologies, responsibilities, location, work mode and other relevant constraints.",
-        "doneWhen": "Job descriptions are converted into structured role intent including role family, seniority, technologies, responsibilities, location, work mode and other relevant constraints."
+        "instr": "Extract role, seniority, must-have/preferred skills, responsibilities, experience, location/remote rules, employment type, compensation, authorization, notice/start requirements, technology/domain, channel, employer and freshness.\nPreserve original JD evidence and separate explicit requirements from inference.",
+        "doneWhen": "Same JD produces a stable representation traceable to source text or labelled inference."
       },
       {
         "itemId": "JA-013",
-        "item": "Evidence-backed candidate matching",
+        "item": "Candidate evidence matching",
         "status": "pending",
         "priority": "p1",
-        "instr": "Link important JD requirements to verified candidate evidence with evidence strength and confidence.",
-        "doneWhen": "Important JD requirements can be linked to verified candidate evidence with evidence strength and confidence."
+        "instr": "Use work history, projects, education, skills, CV, portfolio, GitHub and verified profile data.\nEvery material match needs evidence; never manufacture experience, employers, achievements, metrics, technologies or certifications.",
+        "doneWhen": "Material matches are explainable using candidate evidence."
       },
       {
         "itemId": "JA-014",
         "item": "Semantic skill matching",
         "status": "pending",
         "priority": "p1",
-        "instr": "Recognize legitimate equivalent terminology while rejecting materially different technologies, with tests for false positives.",
-        "doneWhen": "Semantic matching recognizes legitimate equivalent terminology while rejecting materially different technologies, with tests for false positives."
+        "instr": "Support synonyms, aliases, related technologies and framework/library relationships.\nAvoid false equivalence such as Java vs JavaScript.\nRetain explainability.",
+        "doneWhen": "Recall improves without materially increasing false-positive skill matches."
       },
       {
         "itemId": "JA-015",
         "item": "Skill-gap severity",
         "status": "pending",
         "priority": "p1",
-        "instr": "Classify missing requirements into meaningful severity/transferability categories and let them influence qualification.",
-        "doneWhen": "Missing requirements are classified into meaningful severity/transferability categories and influence qualification."
+        "instr": "Classify NONE, MINOR, MODERATE, MAJOR, BLOCKING and UNKNOWN.\nConsider must-have/preferred status, transferable skills, seniority and related technologies.\nNever hide a genuine blocker.",
+        "doneWhen": "Gap classification is deterministic, explainable and used by qualification."
       }
     ]
   },
   {
-    "phase": "PHASE 2 — PRECISION TARGETING",
+    "phase": "PHASE 2 — Decision quality",
     "phaseOrder": 3,
     "goal": "Add career-fit, job-quality and ROI scoring plus explainable decisions.",
     "items": [
       {
         "itemId": "JA-020",
-        "item": "Career-fit scoring",
+        "item": "Career fit",
         "status": "pending",
-        "priority": "p2",
-        "instr": "Evaluate whether a job represents an appropriate career progression, independently from technical match.",
-        "doneWhen": "The system evaluates whether a job represents an appropriate career progression, independently from technical match."
+        "priority": "p1",
+        "instr": "Evaluate trajectory, seniority, technology direction, domain, compensation, location and stability.\nDistinguish technical match from good career match.",
+        "doneWhen": "Career fit explicitly contributes to the decision."
       },
       {
         "itemId": "JA-021",
-        "item": "Job quality scoring",
+        "item": "Job quality and freshness",
         "status": "pending",
-        "priority": "p2",
-        "instr": "Let job freshness, validity, duplicate/staleness signals and source/employer quality affect prioritization.",
-        "doneWhen": "Job freshness, validity, duplicate/staleness signals and source/employer quality affect prioritization."
+        "priority": "p1",
+        "instr": "Evaluate posting age, availability, employer signals, duplicates, stale/reposted listings and closing/deadline information.\nDowngrade low-quality jobs even when candidate fit is strong.",
+        "doneWhen": "Quality/freshness affects ranking and stale/closed jobs are safely excluded."
       },
       {
         "itemId": "JA-022",
-        "item": "Application ROI scoring",
+        "item": "Application ROI",
         "status": "pending",
-        "priority": "p2",
-        "instr": "Evaluate whether a job is worth spending an application opportunity on using transparent scoring components.",
-        "doneWhen": "The system evaluates whether a job is worth spending an application opportunity on using transparent scoring components."
+        "priority": "p1",
+        "instr": "Consider qualification probability, job quality, channel success probability, effort, response likelihood and tailoring cost.\nDo not optimize solely for application count.",
+        "doneWhen": "Ranking incorporates expected value, not only match score."
       },
       {
         "itemId": "JA-023",
-        "item": "Explainable application decision",
+        "item": "Explainable decision",
         "status": "pending",
-        "priority": "p2",
-        "instr": "Persist reasons, strengths, gaps, evidence and confidence for every APPLY / HUMAN_REVIEW / WATCH / DO_NOT_APPLY decision.",
-        "doneWhen": "Every APPLY / HUMAN_REVIEW / WATCH / DO_NOT_APPLY decision has persisted reasons, strengths, gaps, evidence and confidence."
+        "priority": "p1",
+        "instr": "Show decision, score, confidence, strongest matches, gaps, blockers, uncertainty, expected value, channel and CV strategy.\nProvide evidence/source references where possible.",
+        "doneWhen": "Operator can understand the decision without reading model internals."
       },
       {
         "itemId": "JA-024",
-        "item": "Near-miss qualification",
+        "item": "Near-miss rescue",
         "status": "pending",
-        "priority": "p2",
-        "instr": "Allow strong transferable experience to prevent an otherwise premature rejection and route suitable near-miss jobs to HUMAN_REVIEW.",
-        "doneWhen": "Strong transferable experience can prevent an otherwise premature rejection and route suitable near-miss jobs to HUMAN_REVIEW."
+        "priority": "p1",
+        "instr": "Identify preferred-skill gaps, related technology, title differences, modest experience mismatch or resolvable missing information.\nNever override genuine hard blockers; route near misses separately.",
+        "doneWhen": "Near misses are separately identified and never silently treated as fully qualified."
       }
     ]
   },
   {
-    "phase": "PHASE 3 — CV & APPLICATION INTELLIGENCE",
+    "phase": "PHASE 3 — Candidate evidence and CV",
     "phaseOrder": 4,
-    "goal": "Ground CV generation in a verified evidence library and add drift protection.",
+    "goal": "Ground CV generation in a verified evidence library with drift protection and dual ATS/human scoring.",
     "items": [
       {
         "itemId": "JA-030",
         "item": "Master candidate evidence library",
         "status": "pending",
         "priority": "p2",
-        "instr": "Base tailoring on a canonical, verified candidate evidence set and prevent inventing experience.",
-        "doneWhen": "Tailoring is based on a canonical, verified candidate evidence set and cannot invent experience."
+        "instr": "Store skills, employment, projects, education, certifications, achievements, links, dates and locations.\nTrack source, confidence, verification status and version/date.",
+        "doneWhen": "Tailoring retrieves facts from the evidence layer."
       },
       {
         "itemId": "JA-031",
         "item": "CV strategy selection",
         "status": "pending",
         "priority": "p2",
-        "instr": "Choose an appropriate CV strategy/profile for the job before generating the tailored CV.",
-        "doneWhen": "The system chooses an appropriate CV strategy/profile for the job before generating the tailored CV."
+        "instr": "Choose based on role, seniority, JD emphasis, domain, geography, ATS needs and evidence.\nExamples: backend, full-stack, AI/automation, management, domain-specific.\nVariants must not contain contradictory facts.",
+        "doneWhen": "Strategy is selected systematically and recorded."
       },
       {
         "itemId": "JA-032",
         "item": "Evidence-grounded CV tailoring",
         "status": "pending",
         "priority": "p2",
-        "instr": "Make tailored CV generation demonstrably constrained to verified candidate evidence.",
-        "doneWhen": "Tailored CV generation is demonstrably constrained to verified candidate evidence."
+        "instr": "Tailor summary, skill ordering, projects, experience emphasis and terminology.\nEvery material claim maps to candidate evidence.",
+        "doneWhen": "Generated CVs pass automated evidence validation."
       },
       {
         "itemId": "JA-033",
         "item": "CV semantic-drift protection",
         "status": "pending",
         "priority": "p2",
-        "instr": "Check generated CV content for excessive semantic drift and flag unsafe rewrites.",
-        "doneWhen": "Generated CV content is checked for excessive semantic drift and unsafe rewrites are flagged."
+        "instr": "Compare tailored CV with master evidence.\nDetect invented skills, inflated experience, changed dates, unsupported metrics, altered titles and unsupported responsibilities.\nReject or flag excessive drift.",
+        "doneWhen": "Unsupported material claims reliably fail validation."
       },
       {
         "itemId": "JA-034",
-        "item": "ATS + human recruiter scoring",
+        "item": "ATS + human scoring",
         "status": "pending",
         "priority": "p2",
-        "instr": "Measure ATS compatibility and human-readable recruiter quality separately.",
-        "doneWhen": "ATS compatibility and human-readable recruiter quality are measured separately."
+        "instr": "Evaluate keyword coverage, semantic relevance, readability, structure, evidence strength and keyword stuffing.\nDo not insert irrelevant keywords merely to increase ATS score.",
+        "doneWhen": "Separate ATS and human-relevance signals are available."
       }
     ]
   },
   {
-    "phase": "PHASE 4 — APPLICATION CHANNEL INTELLIGENCE",
+    "phase": "PHASE 4 — Application channels",
     "phaseOrder": 5,
-    "goal": "Make channel selection, ATS handling and deduplication smarter and learnable.",
+    "goal": "Make channel selection, ATS question handling, browser field mapping and deduplication smarter and learnable.",
     "items": [
       {
         "itemId": "JA-040",
-        "item": "Channel-learning integration",
+        "item": "Channel learning",
         "status": "pending",
         "priority": "p2",
-        "instr": "Let historical channel performance influence selection among valid channels without overriding employer-stated instructions.",
-        "doneWhen": "Historical channel performance can influence selection among valid channels without overriding employer-stated instructions."
+        "instr": "Track ATS, direct HR email, recruiter, easy apply and portal outcomes.\nControl for job quality and candidate fit.",
+        "doneWhen": "Historical channel performance affects future channel selection."
       },
       {
         "itemId": "JA-041",
         "item": "Generic ATS question discovery",
         "status": "pending",
         "priority": "p2",
-        "instr": "Capture, normalize and surface unknown required ATS questions to the answer bank for user completion.",
-        "doneWhen": "Unknown required ATS questions are captured, normalized and surfaced to the answer bank for user completion."
+        "instr": "Detect unknown, conditional, dropdown, radio, multi-select and free-text fields.\nAnswer only from verified evidence; stop/ask/flag for unknown or high-risk questions.\nNever guess legal/demographic/authorization information.",
+        "doneWhen": "Unknown questions cannot silently receive fabricated answers."
       },
       {
         "itemId": "JA-042",
-        "item": "ATS field-mapping memory",
+        "item": "Browser field mapping",
         "status": "pending",
         "priority": "p2",
-        "instr": "Store and reuse verified successful field mappings for subsequent applications.",
-        "doneWhen": "Verified successful field mappings are stored and reused for subsequent applications."
+        "instr": "Learn common field mappings and store by portal/form signature.\nRevalidate when form structure changes.",
+        "doneWhen": "Known forms populate reliably and changed forms trigger re-validation."
       },
       {
         "itemId": "JA-043",
-        "item": "Application deduplication intelligence",
+        "item": "Cross-portal deduplication",
         "status": "pending",
         "priority": "p2",
-        "instr": "Recognize cross-portal duplicates/reposts and prevent them from generating duplicate applications.",
-        "doneWhen": "Cross-portal duplicates/reposts can be recognized and prevented from generating duplicate applications."
+        "instr": "Use employer, normalized title, location, JD similarity, external IDs, canonical URL and posting identity.\nDistinguish genuine reposts from separate vacancies.",
+        "doneWhen": "Equivalent jobs resolve to one canonical opportunity."
       }
     ]
   },
   {
-    "phase": "PHASE 5 — EMPLOYER & OUTCOME INTELLIGENCE",
+    "phase": "PHASE 5 — Employer and recruiter intelligence",
     "phaseOrder": 6,
-    "goal": "Add employer-level, recruiter-relationship and outcome-driven learning.",
+    "goal": "Improve decisions using employer-specific signals, recruiter context and outcome-driven learning.",
     "items": [
       {
         "itemId": "JA-050",
         "item": "Employer intelligence",
         "status": "pending",
         "priority": "p2",
-        "instr": "Provide employer-level application/reply/interview outcome statistics with minimum-sample safeguards.",
-        "doneWhen": "Employer-level application/reply/interview outcome statistics are available with minimum-sample safeguards."
+        "instr": "Track employer identity/domain, ATS, channel, response behavior, outcomes and repost patterns.\nUse evidence-backed signals; do not create an unverified blacklist.",
+        "doneWhen": "Employer information safely influences decisions."
       },
       {
         "itemId": "JA-051",
-        "item": "Recruiter relationship memory",
+        "item": "Recruiter memory",
         "status": "pending",
         "priority": "p2",
-        "instr": "Let verified recruiter/application relationships influence future prioritization without causing spam.",
-        "doneWhen": "Verified recruiter/application relationships can influence future prioritization without causing spam."
+        "instr": "Track recruiter, employer, roles, contact history and responses.\nAvoid duplicate outreach and respect retention/privacy.",
+        "doneWhen": "Future applications can recognize prior recruiter relationships."
       },
       {
         "itemId": "JA-052",
         "item": "Rejection learning",
         "status": "pending",
         "priority": "p2",
-        "instr": "Let rejection and no-response outcomes contribute structured features to future job qualification.",
-        "doneWhen": "Rejection and no-response outcomes contribute structured features to future job qualification."
+        "instr": "Record rejection stage, channel, role, qualification, CV strategy, timing, employer and known reason.\nUse aggregate evidence; one rejection must not create a rule.",
+        "doneWhen": "Rejection outcomes update controlled learning features."
       },
       {
         "itemId": "JA-053",
-        "item": "Interview/offer learning",
+        "item": "Interview and offer learning",
         "status": "pending",
         "priority": "p2",
-        "instr": "Feed interview and offer outcomes into future role/company/channel/CV prioritization.",
-        "doneWhen": "Interview and offer outcomes feed future role/company/channel/CV prioritization."
+        "instr": "Track interviews, stages, offers, accepted/rejected offers, role, channel, CV strategy and employer.",
+        "doneWhen": "Positive outcomes demonstrably feed future scoring."
       },
       {
         "itemId": "JA-054",
-        "item": "Outcome confidence model",
+        "item": "Confidence calibration",
         "status": "pending",
         "priority": "p2",
-        "instr": "Make learning decisions account for sample size and confidence and avoid overfitting small datasets.",
-        "doneWhen": "Learning decisions account for sample size and confidence and do not overfit small datasets."
+        "instr": "Compare predicted confidence with outcomes; track calibration, false positives, false negatives and uncertainty.\nDo not treat confidence as probability until empirically calibrated.",
+        "doneWhen": "Calibration metrics are available and monitored."
       }
     ]
   },
   {
-    "phase": "PHASE 6 — APPLICATION CONTENT LEARNING",
+    "phase": "PHASE 6 — Content learning",
     "phaseOrder": 7,
     "goal": "Track and learn from template and CV strategy variants.",
     "items": [
       {
         "itemId": "JA-060",
-        "item": "Template variant tracking",
+        "item": "Template tracking",
         "status": "pending",
         "priority": "p2",
-        "instr": "Persistently identify email/cover-letter template variants.",
-        "doneWhen": "Email/cover-letter template variants are persistently identified."
+        "instr": "Version emails, recruiter messages, cover letters and CV strategies.\nRecord the version with every application.",
+        "doneWhen": "Every application is traceable to its exact content version."
       },
       {
         "itemId": "JA-061",
-        "item": "Template performance learning",
+        "item": "Template performance",
         "status": "pending",
         "priority": "p2",
-        "instr": "Correlate template performance with reply/interview outcomes using sufficient sample sizes.",
-        "doneWhen": "Template performance can be correlated with reply/interview outcomes using sufficient sample sizes."
+        "instr": "Compare response, interview, offer and rejection rates.\nControl for job quality/fit and avoid conclusions from tiny samples.",
+        "doneWhen": "Template performance is measurable and responsibly interpreted."
       },
       {
         "itemId": "JA-062",
-        "item": "CV strategy performance learning",
+        "item": "CV strategy learning",
         "status": "pending",
         "priority": "p2",
-        "instr": "Correlate CV strategy variants with application outcomes.",
-        "doneWhen": "CV strategy variants can be correlated with application outcomes."
+        "instr": "Track outcomes by strategy, role, industry, seniority and channel.\nMake learning reversible and auditable.",
+        "doneWhen": "Future strategy selection uses measured historical performance."
       }
     ]
   },
   {
-    "phase": "PHASE 7 — FOLLOW-UP & LIFECYCLE",
+    "phase": "PHASE 7 — Application lifecycle",
     "phaseOrder": 8,
-    "goal": "Manage job lifecycle, portal status and follow-ups.",
+    "goal": "Create one authoritative application lifecycle with safe portal polling and follow-up automation.",
     "items": [
       {
         "itemId": "JA-070",
-        "item": "Job lifecycle management",
+        "item": "Application lifecycle",
         "status": "pending",
         "priority": "p2",
-        "instr": "Let jobs transition through active, qualified, applied, closed/expired and other required lifecycle states without generating stale applications.",
-        "doneWhen": "Jobs can transition through active, qualified, applied, closed/expired and other required lifecycle states without stale applications being generated."
+        "instr": "Define states such as DISCOVERED, QUALIFIED, CONDITIONAL, PREPARED, AWAITING_APPROVAL, APPROVED, SUBMITTED, DELIVERED, IN_REVIEW, INTERVIEW, OFFER, REJECTED, WITHDRAWN and FAILED.\nDefine valid transitions and prevent impossible transitions.",
+        "doneWhen": "Applications follow a validated lifecycle."
       },
       {
         "itemId": "JA-071",
-        "item": "Portal-side status tracking",
+        "item": "Portal status polling",
         "status": "pending",
         "priority": "p2",
-        "instr": "Incorporate available portal/employer status information where technically and legally appropriate.",
-        "doneWhen": "Available portal/employer status information is incorporated where technically and legally appropriate."
+        "instr": "Poll supported portals safely; preserve evidence/timestamps; handle login failures and back off on errors.\nNever bypass access controls.",
+        "doneWhen": "Supported portals update lifecycle status reliably."
       },
       {
         "itemId": "JA-072",
-        "item": "Follow-up engine",
+        "item": "Follow-up automation",
         "status": "pending",
         "priority": "p2",
-        "instr": "Schedule follow-ups according to configurable policy, duplicate-safe and subject to approval/autonomy controls.",
-        "doneWhen": "Follow-ups can be scheduled according to configurable policy, duplicate-safe and subject to approval/autonomy controls."
+        "instr": "Consider application date, channel, employer, response status, recruiter relationship and prior communication.\nNever follow up after rejection/withdrawal; respect caps and approval/sandbox controls.",
+        "doneWhen": "Follow-ups are lifecycle-aware, deduplicated and safety-controlled."
       }
     ]
   },
   {
-    "phase": "PHASE 8 — PRIORITIZATION & UI",
+    "phase": "PHASE 8 — Operator experience",
     "phaseOrder": 9,
-    "goal": "Improve the pre-apply queue, explanations and digest.",
+    "goal": "Present the best opportunities first with an auditable decision UI and concise operational digest.",
     "items": [
       {
         "itemId": "JA-080",
         "item": "Precision application queue",
         "status": "pending",
         "priority": "p2",
-        "instr": "Prioritize jobs in /pre-apply-page using qualification/ROI rather than raw matchScore alone and expose the important decision factors.",
-        "doneWhen": "/pre-apply-page prioritizes jobs using qualification/ROI rather than raw matchScore alone and exposes the important decision factors."
+        "instr": "Rank qualification, confidence, career fit, job quality, freshness, ROI, channel probability and effort.\nShow why each job is ranked.",
+        "doneWhen": "Queue prioritizes quality rather than raw volume."
       },
       {
         "itemId": "JA-081",
-        "item": "Qualification explanation UI",
+        "item": "Decision/explanation UI",
         "status": "pending",
         "priority": "p2",
-        "instr": "Let the user understand why a job was recommended, rejected or sent for review without inspecting raw JSON.",
-        "doneWhen": "The user can understand why a job was recommended, rejected or sent for review without inspecting raw JSON."
+        "instr": "Display decision, score, confidence, evidence, blockers, gaps, channel, CV strategy and learning factors.\nAllow inspection of supporting information.",
+        "doneWhen": "Operator can understand and challenge recommendations."
       },
       {
         "itemId": "JA-082",
-        "item": "Daily intelligence digest",
+        "item": "Application digest",
         "status": "pending",
         "priority": "p2",
-        "instr": "Include high-priority opportunities, outcomes and meaningful learning signals in the daily digest.",
-        "doneWhen": "Daily digest includes high-priority opportunities, outcomes and meaningful learning signals."
+        "instr": "Include high-quality matches, prepared/awaiting approval/submitted items, failures, interviews, offers, rejections, follow-ups and learning changes.\nNever expose credentials/secrets.",
+        "doneWhen": "Digest is generated reliably."
       }
     ]
   },
   {
-    "phase": "PHASE 9 — CONTINUOUS LEARNING",
+    "phase": "PHASE 9 — Closed-loop learning",
     "phaseOrder": 10,
-    "goal": "Close the loop from outcomes back into job ranking, with safety boundaries and KPI measurement.",
+    "goal": "Connect outcomes back to future decisions with safety guardrails and a KPI dashboard.",
     "items": [
       {
         "itemId": "JA-090",
-        "item": "Closed-loop job learning",
+        "item": "Closed-loop learning",
         "status": "pending",
         "priority": "p2",
-        "instr": "Make application outcomes demonstrably feed future job ranking/qualification.",
-        "doneWhen": "Application outcomes demonstrably feed future job ranking/qualification."
+        "instr": "Implement JOB → QUALIFICATION → APPLICATION → CHANNEL/CV/TEMPLATE → OUTCOME → LEARNING → UPDATED WEIGHTS → NEXT QUALIFICATION.\nExisting process-learning.service.ts is not complete until it actually influences future behavior.",
+        "doneWhen": "A controlled historical outcome measurably changes a future decision."
       },
       {
         "itemId": "JA-091",
-        "item": "Learning safety boundaries",
+        "item": "Learning safety and guardrails",
         "status": "pending",
         "priority": "p0",
-        "instr": "Allow learning to modify ranking/preferences but prevent it from automatically modifying hard safety, truthfulness, authorization, sandbox or user-policy rules.",
-        "doneWhen": "Learning can modify ranking/preferences but cannot automatically modify hard safety, truthfulness, authorization, sandbox or user-policy rules."
+        "instr": "Prevent one-off overfitting, runaway weights, feedback loops, confidence inflation and contaminated outcomes.\nUse bounded weights, minimum samples, rollback/versioning, audit history and frozen evaluation data.",
+        "doneWhen": "Learning changes are bounded, explainable, reversible and regression-tested."
       },
       {
         "itemId": "JA-092",
-        "item": "Precision KPI dashboard",
+        "item": "KPI dashboard",
         "status": "pending",
         "priority": "p2",
-        "instr": "Measure at least: qualified jobs, applications, reply rate, interview rate, offer rate, rejection rate, no-response rate, qualification precision, false-positive applications, false-negative samples where identified, channel performance, CV strategy performance.",
-        "doneWhen": "The system measures at least: qualified jobs, applications, reply rate, interview rate, offer rate, rejection rate, no-response rate, qualification precision, false-positive applications, false-negative samples where identified, channel performance, CV strategy performance."
+        "instr": "Track discovery, qualification, applications, duplicates, submission success, response, interview, offer and rejection rates.\nTrack channel/CV/template performance, confidence, false positives/negatives, near misses, effort and source outcomes.\nSeparate volume from quality metrics.",
+        "doneWhen": "Dashboard demonstrates meaningful outcome improvement rather than merely increased application count."
       }
     ]
   }

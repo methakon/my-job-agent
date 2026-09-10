@@ -229,5 +229,26 @@ ${withNotes
   async clearEvidence(@Param('id') id: string) {
     await this.jaSvc.clearEvidence(id);
   }
+
+  // ---- one-off content alignment (run after a seed rewrite) ----
+
+  @Post('align-content')
+  @HttpCode(HttpStatus.OK)
+  async alignContent(@Req() req: any, @Res() res: Response) {
+    const passwordHeader = req.headers[OPERATOR_PASSWORD_HEADER];
+    const sessionUser = req.session?.user as { id?: string; username?: string } | undefined;
+
+    if (!sessionUser && !passwordHeader) {
+      res.redirect(302, '/');
+      return;
+    }
+    if (passwordHeader && process.env.SESSION_PASSWORD && passwordHeader !== process.env.SESSION_PASSWORD) {
+      res.status(401).type('text/plain').send('unauthorized');
+      return;
+    }
+
+    const result = await this.jaSvc.alignContentToSeed();
+    res.type('application/json').send(JSON.stringify(result, null, 2));
+  }
 }
 
