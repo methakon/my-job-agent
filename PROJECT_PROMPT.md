@@ -95,6 +95,56 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 03:50) — rows 21 + 22 (GATE 2 OAI) implemented; desk app crash-loop repaired; clean stop
+
+- **Row 21 (GATE 2 #2 — OAI formula) → done, commit `0c33c4d`.** `oai` = (BuyQty − SellQty) /
+  (BuyQty + SellQty) is now explicit in `pre-open-features.ts`: formula, units
+  (dimensionless, [−1,+1]), window (auction phases only), and edge behaviour (zero total /
+  missing side / out-of-phase / stale → UNAVAILABLE with reason + null value, never a
+  fabricated number). It is the **SAME `DerivedValue` object as `auctionImbalancePct`** — one
+  computation, two names (the test asserts object identity). `PRE_OPEN_FEATURES_VERSION` → `po-v2`;
+  the capture service and the ORM column default no longer hard-code a version literal.
+  `scripts/pre-open-capture.test.js` gained the `[O]` replay/formula/edges and `[V]`
+  single-source-of-truth sections → **100/100** (run in an isolated worktree, see the build note).
+- **Row 22 (GATE 2 #3 — store OAI level/slope/acceleration/persistence) → `in_progress`,
+  commit `9cb178d`.** New pure module `src/trading/pre-open/pre-open-oai-series.ts`:
+  `buildOaiSeries()` writes the block **at capture time** (values as used at decision time, not
+  recomputed later) with pinned definitions — level = newest OAI in the auction window; slope =
+  (last−first)/elapsedMinutes; acceleration = change of slope across the last two legs ÷ mean leg
+  length; persistence = share of non-zero samples agreeing with the newest direction (a neutral 0
+  neither agrees nor enters the denominator). Post-cutoff/out-of-window samples are excluded AND
+  counted; duplicate timestamps collapse to the last value; input order is irrelevant (replay is
+  byte-identical); short series refuse with a reason and a null value — never 0/NaN/Infinity. The
+  block carries version `oais-v1`, cutoff, phase, sample counts and reasons. Storage: a new
+  additive nullable `derived` json column on `pre_open_observations` (live in the DB; TypeORM
+  `synchronize:true`), written via `attachOaiSeries()` in BOTH capture paths before
+  `insertIgnore()` (and never blocking the observation on failure); `pre-open.repository.ts`
+  gained `seriesAsOf()`; `pre-open.controller.ts` exposes the stored block for audit.
+  `scripts/pre-open-oai-series.test.js` (**60/60**, wired into `test:pre-open` = 100/100 + 60/60).
+  **Gap (why not done): the row's doneWhen needs a historical record CONTAINING the value — the
+  first real block can only be written in the next 09:00–09:15 IST capture window. Code, column
+  and storage path are live; the artefact lands Monday.** Deliberately not marked done.
+- **INCIDENT + REPAIR (desk app down ~03:21–03:30 IST, 104 restarts).** My earlier `npm run build`
+  in the SHARED tree failed on the parallel job-application session's uncommitted
+  `src/app.module.ts` (undefined `PreApplyService`/`QualificationService`) yet still EMITTED
+  `dist/app.module.js` from that broken source and skipped nest's asset copy → `dist` lost
+  `project-status/*.json`. The running process kept serving from memory, so it looked healthy
+  until its next restart, then crash-looped: `ReferenceError: PreApplyService is not defined` +
+  `MODULE_NOT_FOUND './checklist-v4.seed.json'`. (The `src/*.ts` stack frames were a red herring:
+  pm2 runs node with `--enable-source-maps`.) **Repair:** built HEAD cleanly out-of-tree in a
+  detached git worktree and swapped that `dist/` in (previous build kept at
+  `/tmp/dist.partial.033027`), restarted → app up, listening 3010, stable, running `9cb178d`
+  (which also made row 22's code live and materialised the `derived` column). `trading-agent`
+  (FYERS socket owner) was NOT restarted. **The JA session's files were not touched, stashed or
+  reverted** — they remain modified/uncommitted as they left them. Hazard recorded: while that
+  WIP is uncommitted and non-compiling, ANY `npm run build` in the shared tree re-poisons `dist`;
+  build from a clean revision (worktree recipe now in the `nestjs-boot-blocker-checklist` skill).
+- **Control plane:** rows 21 (done) and 22 (in_progress, render-verified with its gap) synced via
+  the sanctioned writer; `gate:check` exit 0 **IN SYNC**; pushed `origin/dev` = `9cb178d`.
+- **Clean stop on instruction:** after row 22 no offline-completable roadmap item remains in
+  dependency order — the rest of GATE 2 (20, 23, 24, 25, 26, 27) needs live/archived tape, and
+  GATE 4+ is downstream new feature work. Rows 20/427/438/876/877/878 were not touched.
+
 ## Progress (2026-09-12 01:45) — row 159 DONE (strict future-only labels, frozen feature cutoffs) + Dhargent Option A executed
 
 - **Dhargent Option A (operator-approved, executed read-only everywhere else):**
@@ -340,6 +390,8 @@ the headless `trading-agent`, with the app making zero connect attempts.
 > The list below is historical context; on "continue" start from the DB log
 > (first `in_progress`/`pending` by id), NOT from this numbered list.
 
+0. **GATE 2 rows 21/22 — row 22 still needs its first REAL stored OAI series block.** Row 21 is done (`0c33c4d`); row 22 (`9cb178d`) is complete in code — `pre-open-oai-series.ts` + the `derived` json column + the capture-time write in both paths + 60/60 tests — but its doneWhen requires a historical record CONTAINING the value, which only the next **09:00–09:15 IST capture window** can produce. At that window: confirm `derived.oaiSeries` lands on the session's rows with version `oais-v1`, cutoff and sample counts, then move row 22 to `done`. Rows 20, 23, 24, 25, 26, 27 all need the same live/archived tape, so GATE 2 closes as a block once that data exists.
+0. **BUILD HAZARD (learned 2026-09-12): never run `npm run build` in the shared tree while the job-application session has uncommitted WIP.** A failed build can still emit `dist/app.module.js` from broken source AND skip nest's asset copy, silently poisoning `dist` for the next restart (this crashed the desk app with 104 restarts: `ReferenceError: PreApplyService is not defined` then `MODULE_NOT_FOUND './checklist-v4.seed.json'`). Deploy by building HEAD in a detached worktree and swapping `dist/` (recipe in the `nestjs-boot-blocker-checklist` skill). Also note pm2 runs node with `--enable-source-maps`, so crash frames show `src/*.ts` even though `dist/*.js` is what runs.
 0. **Common-feed workstream (row 877 = GATE 0 #10) — restore single-owner and demonstrate controlled failback.** The authorised lease-isolation fix (`c2d369a`) is DONE and LIVE: the arbiter's lease read/write runs on its own dedicated MySQL connection, and the agent's `FYERS_WS` heartbeat now renews every 15 s (it had been frozen 647 s) — `test:lease-connection` 6/6, pool size untouched, 8 s bound kept, TTL rules unchanged. Baseline element "fresh FYERS heartbeat/lease" is PROVEN; "FYERS owns NIFTY / is publishing NIFTY / Upstox standby" needs market hours, so at the NEXT SESSION: (1) prove the clean baseline, (2) run the bounded 100 s FYERS outage → UPSTOX_REST NIFTY failover → FYERS recovery → controlled failback demo with lease+publication+common-store evidence at each stage, (3) finish verifying the CANONICAL pipeline for row 878 (GATE 0 #11) — the Upstox side is ALREADY proven live (`42df4cc`: accepted 590 / persisted 546 / rejected 0 on real chains, converged keys `BSE:SENSEX17SEP74900CE`); still open: the FYERS side under live ticks (watch the STALE reject rate) and BOTH desks consuming canonical rows. Row 878's `doneWhen` has no mode flip (the interpreter is permanently ON and mandatory; `TICK_INTERPRETER_MODE` and the dual-write switches are deleted). Raw-payload archival is DEFERRED by the operator (no new column, no extra write volume). Do not mark row 877 or row 878 done until its own doneWhen fully holds.
 0. **FYERS token lifetime** — the DB token expires 06:00 IST daily and `FYERS_PIN` is absent, so the re-login at `http://127.0.0.1:3010/auth/fyers/login` is a standing morning dependency (the socket rebuilds itself once a fresh token lands; no restart needed).
 0. **Tue 2026-09-15 08:57 IST — the re-armed pre-open window capture** (jobs `gate2-preopen-capture-20260915` fb2b3340dcc2 + review `gate2-preopen-review-20260915` a20aa715de88). Preconditions: machine powered on before 08:55 IST (the gateway unit is enabled+Linger, so it only needs the host up) and a fresh Upstox token after 03:30 IST — tokens die daily. The plan for 2026-09-11 itself WAS executed correctly up to the window and was lost to the host being off (04:23–10:40); the review found nothing to sync, so no Gate 2 row moved. The first real operator OAuth click is STILL the only thing that closes row 876's gap.
