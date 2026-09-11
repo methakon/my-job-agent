@@ -1,9 +1,94 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { FnfOptionContract } from './fnf-option-contract.entity';
 import { FnfOptionQuote } from './fnf-option-quote.entity';
+import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
+import { UnifiedOptionQuote } from './unified-market-data/unified-option-quote.entity';
 import { normalizeOptionContract, normalizeOptionQuote, OptionContract } from './option-chain-parser';
+
+const asNumberOrNull = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Last segment of any broker/either-convention instrument key:
+ * 'NSE:NIFTY26SEP23900CE' | 'BSE_INDEX|SENSEX26SEP74000PE' | 'NSE_FO|12345' →
+ * the trailing symbol part. Producers differ in key shape (FYERS prefixes the
+ * exchange, Upstox uses an index/token key), so symbol comparison is always
+ * done on this tail.
+ */
+export const symbolKey = (value: unknown): string =>
+  String(value ?? '')
+    .trim()
+    .split('|')
+    .pop()!
+    .split(':')
+    .pop()!
+    .trim()
+    .toUpperCase();
+
+/**
+ * Producer-independent identity of one option contract: underlying + expiry +
+ * strike + right. Lets an observation from ANOTHER feed be matched to this
+ * desk's registered contract even when the instrument keys differ in shape.
+ * Returns '' when the row lacks the metadata to be matched safely.
+ */
+export const contractMatchKey = (row: {
+  underlying?: unknown;
+  expiry?: unknown;
+  strike?: unknown;
+  optionType?: unknown;
+}): string => {
+  const underlying = String(row?.underlying ?? '').trim().toUpperCase();
+  const expiry = String(row?.expiry ?? '').trim().slice(0, 10);
+  const strike = Number(row?.strike);
+  const optionType = String(row?.optionType ?? '').trim().toUpperCase().slice(0, 2);
+  if (!underlying || !expiry || !Number.isFinite(strike) || !optionType) return '';
+  return `${underlying}|${expiry}|${strike}|${optionType}`;
+};
+
+/**
+ * Map a COMMON-store observation onto the chain-row shape the FnF readers
+ * expect (candidate builder, position pricing, chain page). Pure + exported so
+ * scripts/fnf-shared-quote-fallback.test.js can exercise it without DI.
+ *
+ * Provenance is preserved exactly: `provider` carries the TRUE producer
+ * (FYERS_LIVE / UPSTOX_LIVE), never this desk's name — a consumer must never
+ * relabel another producer's tick as its own (brief s12).
+ */
+export const sharedQuoteToChainRow = (
+  row: UnifiedOptionQuote,
+  symbolHint?: string | null,
+): FnfOptionQuote => {
+  const instrumentKey = String(row?.instrumentKey ?? '').trim();
+  const symbol = String(symbolHint ?? symbolKey(instrumentKey)).trim().toUpperCase();
+  const received = row?.receivedTimestamp ?? row?.ts ?? new Date();
+  const ts = received instanceof Date ? received : new Date(String(received));
+  return {
+    id: `shared:${String(row?.id ?? instrumentKey)}`,
+    contractSymbol: symbol,
+    underlying: String(row?.underlying ?? '').trim().toUpperCase(),
+    expiry: String(row?.expiry ?? '').trim().slice(0, 10),
+    strike: asNumberOrNull(row?.strike) ?? 0,
+    optionType: String(row?.optionType ?? '').trim().toUpperCase().slice(0, 2),
+    ltp: asNumberOrNull(row?.ltp) ?? 0,
+    bid: asNumberOrNull(row?.bid),
+    ask: asNumberOrNull(row?.ask),
+    volume: asNumberOrNull(row?.volume) ?? 0,
+    openInterest: asNumberOrNull(row?.oi) ?? 0,
+    impliedVolatility: asNumberOrNull(row?.iv),
+    delta: asNumberOrNull(row?.delta),
+    gamma: asNumberOrNull(row?.gamma),
+    theta: asNumberOrNull(row?.theta),
+    vega: asNumberOrNull(row?.vega),
+    provider: String(row?.source ?? 'COMMON_STORE').trim().toUpperCase(),
+    ts: Number.isNaN(ts.getTime()) ? new Date() : ts,
+    createdAt: Number.isNaN(ts.getTime()) ? new Date() : ts,
+  } as unknown as FnfOptionQuote;
+};
 
 export type OptionChainQuery = {
   symbol?: string;
@@ -12,6 +97,15 @@ export type OptionChainQuery = {
   optionType?: 'CE' | 'PE';
   latestOnly?: boolean;
   limit: number;
+};
+
+/** One registered option contract, reduced to what the read path needs. */
+export type RegisteredContract = {
+  symbol: string;
+  underlying: string;
+  expiry: string;
+  strike: number;
+  optionType: string;
 };
 
 const limitParam = (value: string | undefined): number => {
@@ -25,12 +119,36 @@ const boolParam = (value: string | undefined): boolean => /^(1|true|yes|on)$/i.t
 
 @Injectable()
 export class FnfOptionChainService {
+  private readonly logger = new Logger(FnfOptionChainService.name);
+  /**
+   * Read-path failover onto the COMMON normalized store (brief s2/s4/s12).
+   * ON by default: when this desk's own broker feed has no fresh quote for an
+   * instrument, the engine consumes the authoritative observation produced by
+   * whichever OTHER feed is live, instead of treating the instrument as
+   * unquoted. FNO_SHARED_QUOTE_FALLBACK=false keeps the read path purely local.
+   */
+  private readonly sharedFallbackEnabled: boolean;
+  /** A local quote older than this is superseded by a fresher shared one. */
+  private readonly sharedFallbackAfterMs: number;
+  /** Max age accepted for a shared (other-producer) observation. */
+  private readonly sharedFallbackMaxAgeMs: number;
+  /** Registered contracts (symbol + match metadata), cached. */
+  private contractsCache: { at: number; rows: RegisteredContract[] } | null = null;
+  private readonly contractsCacheMs: number;
+  private sharedFallbackLogAt = 0;
+
   constructor(
     @InjectRepository(FnfOptionContract)
     private readonly contracts: Repository<FnfOptionContract>,
     @InjectRepository(FnfOptionQuote)
     private readonly quotes: Repository<FnfOptionQuote>,
-  ) {}
+    private readonly unified?: UnifiedMarketDataService,
+  ) {
+    this.sharedFallbackEnabled = (process.env.FNO_SHARED_QUOTE_FALLBACK ?? 'true').toLowerCase() !== 'false';
+    this.sharedFallbackAfterMs = Math.max(1_000, Number(process.env.FNO_SHARED_FALLBACK_AFTER_MS ?? 60_000));
+    this.sharedFallbackMaxAgeMs = Math.max(1_000, Number(process.env.FNO_SHARED_QUOTE_MAX_AGE_MS ?? 60_000));
+    this.contractsCacheMs = Math.max(30_000, Number(process.env.FNO_UNIVERSE_CACHE_MS ?? 300_000));
+  }
 
   parseQuery(query: Record<string, string | undefined>): OptionChainQuery {
     const optionType = query.optionType?.trim().toUpperCase();
@@ -55,7 +173,9 @@ export class FnfOptionChainService {
       ...(existing ?? {}),
       ...contract,
     });
-    return this.contracts.save(entity);
+    const saved = await this.contracts.save(entity);
+    this.contractsCache = null; // a new contract/underlying may exist now
+    return saved;
   }
 
   async ingestQuote(input: unknown): Promise<FnfOptionQuote> {
@@ -116,7 +236,140 @@ export class FnfOptionChainService {
     const rows = query.latestOnly
       ? [...new Map(candidates.map((quote) => [quote.contractSymbol, quote])).values()].slice(0, query.limit)
       : candidates.slice(0, query.limit);
-    return { rows, total, hasMore: total > rows.length, filters: query };
+    const merged = await this.withSharedQuotes(rows, query);
+    return { rows: merged, total, hasMore: total > merged.length, filters: query };
+  }
+
+  /**
+   * Registered contracts (symbol + match metadata), cached — cheap on a 10s
+   * engine tick. Drives both the arbitrated universes and symbol resolution
+   * for observations produced by another feed.
+   */
+  private async registeredContracts(): Promise<RegisteredContract[]> {
+    if (this.contractsCache && Date.now() - this.contractsCache.at <= this.contractsCacheMs) {
+      return this.contractsCache.rows;
+    }
+    try {
+      const raw = await this.contracts
+        .createQueryBuilder('c')
+        .select('c.symbol', 'symbol')
+        .addSelect('c.underlying', 'underlying')
+        .addSelect('c.expiry', 'expiry')
+        .addSelect('c.strike', 'strike')
+        .addSelect('c.optionType', 'optionType')
+        .getRawMany<{ symbol: string; underlying: string; expiry: string; strike: string; optionType: string }>();
+      const rows: RegisteredContract[] = raw
+        .map((r) => ({
+          symbol: String(r?.symbol ?? '').trim(),
+          underlying: String(r?.underlying ?? '').trim().toUpperCase(),
+          expiry: String(r?.expiry ?? '').trim().slice(0, 10),
+          strike: Number(r?.strike),
+          optionType: String(r?.optionType ?? '').trim().toUpperCase().slice(0, 2),
+        }))
+        .filter((r) => r.symbol && r.underlying && r.expiry && Number.isFinite(r.strike) && r.optionType);
+      this.contractsCache = { at: Date.now(), rows };
+      return rows;
+    } catch (error) {
+      this.logger.warn(`registeredContracts lookup failed: ${(error as Error).message}`);
+      return this.contractsCache?.rows ?? [];
+    }
+  }
+
+  /**
+   * Overlay the COMMON normalized store on a latest-only chain read (brief
+   * s2/s4/s12). The engine wants the freshest observation OF AN INSTRUMENT; when
+   * this desk's own broker feed has nothing fresh for a universe, that
+   * observation is served by whichever other feed is producing it, so source
+   * selection is per instrument and the engine is not coupled to one broker.
+   *
+   * Never invents data: only real rows from unified_option_quotes (or this
+   * process's own ingest cache) within sharedFallbackMaxAgeMs qualify, each
+   * carrying its true `provider`. Ours wins unless the shared observation is
+   * strictly newer. History/latest=false reads are never altered.
+   */
+  private async withSharedQuotes(rows: FnfOptionQuote[], query: OptionChainQuery): Promise<FnfOptionQuote[]> {
+    if (!this.sharedFallbackEnabled || !query.latestOnly || !this.unified) return rows;
+    const now = Date.now();
+    const ageOf = (row: FnfOptionQuote): number => {
+      const at = new Date(row.ts).getTime();
+      return Number.isNaN(at) ? Number.POSITIVE_INFINITY : now - at;
+    };
+    const contracts = await this.registeredContracts();
+    const universes = (query.underlying ? [query.underlying] : [...new Set(contracts.map((c) => c.underlying))])
+      .map((u) => String(u).trim().toUpperCase())
+      .filter(Boolean);
+    // Only universes where our own producer has nothing fresh are worth a read.
+    const needed = universes.filter((universe) => {
+      const mine = rows.filter((r) => String(r.underlying ?? '').toUpperCase() === universe);
+      return mine.length === 0 || mine.every((r) => ageOf(r) > this.sharedFallbackAfterMs);
+    });
+    if (!needed.length) return rows;
+
+    // Registered symbol per contract identity, so a foreign observation is
+    // presented under the symbol THIS desk's callers look up.
+    const symbolOf = new Map<string, string>();
+    for (const contract of contracts) {
+      const key = contractMatchKey(contract);
+      if (key && !symbolOf.has(key)) symbolOf.set(key, contract.symbol);
+    }
+    const sharedBySymbol = new Map<string, FnfOptionQuote>();
+    const sharedByContract = new Map<string, FnfOptionQuote>();
+    for (const universe of needed) {
+      let found: UnifiedOptionQuote[] = [];
+      try {
+        found = await this.unified.sharedQuotesForUnderlying(universe, { maxAgeMs: this.sharedFallbackMaxAgeMs });
+      } catch (error) {
+        this.logger.warn(`shared quote fallback failed for ${universe}: ${(error as Error).message}`);
+        continue;
+      }
+      for (const row of found) {
+        const tail = symbolKey(row.instrumentKey);
+        if (!tail) continue;
+        const key = contractMatchKey(row);
+        const symbol = (key && symbolOf.get(key)) || tail;
+        if (query.symbol && !symbolKey(symbol).includes(symbolKey(query.symbol))) continue;
+        const mapped = sharedQuoteToChainRow(row, symbol);
+        sharedBySymbol.set(symbolKey(symbol), mapped);
+        if (key) sharedByContract.set(key, mapped);
+      }
+    }
+    if (!sharedBySymbol.size) return rows;
+
+    const merged = new Map<string, FnfOptionQuote>();
+    const mergedContracts = new Set<string>();
+    let substituted = 0;
+    for (const row of rows) {
+      const key = contractMatchKey(row);
+      const candidate =
+        sharedBySymbol.get(symbolKey(row.contractSymbol)) ?? (key ? sharedByContract.get(key) : undefined);
+      // Our own row wins unless the shared observation is strictly newer.
+      if (candidate && new Date(candidate.ts).getTime() > new Date(row.ts).getTime()) {
+        merged.set(symbolKey(row.contractSymbol), candidate);
+        substituted += 1;
+      } else {
+        merged.set(symbolKey(row.contractSymbol), row);
+      }
+      if (key) mergedContracts.add(key);
+    }
+    // Fill instruments the local store has nothing for at all (full failover).
+    // Only instruments this desk actually trades are introduced.
+    for (const [key, candidate] of sharedByContract) {
+      if (mergedContracts.has(key)) continue;
+      if (!query.symbol && !symbolOf.has(key)) continue;
+      merged.set(symbolKey(candidate.contractSymbol), candidate);
+      mergedContracts.add(key);
+      substituted += 1;
+    }
+    if (!substituted) return rows;
+    if (now - this.sharedFallbackLogAt > 300_000) {
+      this.sharedFallbackLogAt = now;
+      this.logger.log(
+        `[FNF][MARKET_DATA] ${substituted} quote(s) read from the COMMON store (${needed.join(', ')}) — local producer has nothing fresh; per-row provenance kept`,
+      );
+    }
+    return [...merged.values()]
+      .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())
+      .slice(0, query.limit);
   }
 
   /** Load explicit provider metadata from JSON configuration without retaining credentials. */

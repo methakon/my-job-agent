@@ -8,6 +8,8 @@ import { OptionContract } from './option-chain-parser';
 import { shouldAcceptTick } from './market-feed-guard';
 import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
 import { FeedHealthService } from './unified-market-data/feed-health.service';
+import { FeedArbitrationService } from './unified-market-data/feed-arbitration.service';
+import { optionUniversesFromSymbols, shortUniverse } from './unified-market-data/feed-arbitration.state';
 
 // The FYERS package currently ships JavaScript without TypeScript declarations.
 // Keep the SDK boundary typed as unknown/any and validate every inbound field.
@@ -109,6 +111,16 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   /** Age of the newest observation in the COMMON store (non-owner processes only). */
   private commonAgeMs: number | null = null;
   private connectedTokenHash: string | null = null;
+  /** Stable identity for the single-active-feed arbiter (primary by default). */
+  private readonly feedName = 'FYERS_WS';
+  /** OPTION universes this feed is configured to produce (arbitrated coverage). */
+  private arbiterUniverses: string[] = [];
+  /** Latest award per universe, refreshed by startArbiterOwnershipWatch(). */
+  private arbiterOwnerByUniverse = new Map<string, string | null>();
+  private arbiterDecisionAt: number | null = null;
+  private arbiterPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Live credentials present (arbiter eligibility + lease honesty). */
+  private credentialsOk = false;
 
   constructor(
     private readonly trading: FnfTradingService,
@@ -116,6 +128,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     private readonly fyersTokens: FyersTokenService,
     private readonly unified: UnifiedMarketDataService,
     private readonly feedHealth: FeedHealthService,
+    private readonly arbitration: FeedArbitrationService,
   ) {
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
       .split(',')
@@ -195,6 +208,95 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     if (declared === 'app') return !headless;
     if (declared === 'agent') return headless;
     return headless;
+  }
+
+  /**
+   * Register this producer with the single-active-feed arbiter (brief s2/s6)
+   * and start its ownership poll. Coverage is derived from the configured
+   * symbol list and the registered option contracts, and is deliberately
+   * OPTION-only: an index subscription (NSE:SENSEX-INDEX) is not option
+   * coverage, so FYERS never claims the SENSEX OPTION universe the Upstox REST
+   * desk produces — otherwise this primary would win that universe and starve
+   * the desk that actually polls it.
+   */
+  private registerArbiterCoverage(): void {
+    this.arbiterUniverses = optionUniversesFromSymbols([
+      ...this.statusValue.subscribedSymbols,
+      ...this.optionContracts.keys(),
+    ]);
+    if (!this.arbiterUniverses.length) {
+      this.logger.log('[FEED-ARBITER] no option universe configured for this feed — arbiter registration skipped (index-only subscription)');
+      return;
+    }
+    const priority = this.arbitration.priorityFor(this.feedName, 0);
+    this.arbitration.register({
+      name: this.feedName,
+      priority,
+      universes: this.arbiterUniverses,
+      enabled: () => this.statusValue.enabled,
+      credentialsOk: () => this.credentialsOk,
+      ageMs: () => {
+        const at = this.statusValue.lastTickAt;
+        if (!at) return null;
+        return Math.max(0, Date.now() - new Date(at).getTime());
+      },
+      note: 'FYERS market-data WebSocket (primary by default)',
+    });
+    this.logger.log(
+      `[FEED-ARBITER] registered ${this.feedName} priority=${priority} universes=${this.arbiterUniverses.join(',')} (option coverage only)`,
+    );
+    this.startArbiterOwnershipWatch();
+  }
+
+  /**
+   * Refresh this feed's award and publish its lease every
+   * FEED_OWNERSHIP_POLL_MS (15s default). The lease is what lets the OTHER
+   * process — and the web app, which runs no socket — see which feed owns which
+   * universe and fail over without coordination.
+   */
+  private startArbiterOwnershipWatch(): void {
+    if (this.arbiterPollTimer) return;
+    const tick = async (): Promise<void> => {
+      try {
+        const decisions = await this.arbitration.decisions();
+        const owners = new Map<string, string | null>();
+        for (const decision of decisions) owners.set(shortUniverse(decision.universe), decision.owner ?? null);
+        this.arbiterOwnerByUniverse = owners;
+        this.arbiterDecisionAt = Date.now();
+        const owned = [...owners.entries()].filter(([, owner]) => owner === this.feedName).map(([universe]) => universe);
+        await this.arbitration.beat(this.feedName, {
+          state: this.statusValue.connected ? 'ACTIVE' : 'STANDBY',
+          universes: owned,
+          credentialsOk: this.credentialsOk,
+          lastTickAt: this.statusValue.lastTickAt ? new Date(this.statusValue.lastTickAt) : null,
+          note: this.statusValue.connected ? null : 'socket down — awaiting credentials/reconnect',
+        });
+      } catch (error) {
+        this.logger.warn(`[FEED-ARBITER] ownership poll failed: ${this.safeMessage(error)}`);
+      }
+    };
+    void tick();
+    this.arbiterPollTimer = setInterval(
+      () => void tick(),
+      Math.max(5_000, Number(process.env.FEED_OWNERSHIP_POLL_MS ?? 15_000)),
+    );
+    this.arbiterPollTimer.unref?.();
+  }
+
+  /**
+   * May THIS feed publish ticks for this underlying? Instrument-aware source
+   * selection (brief s2): the arbiter awards each universe to ONE producer, so
+   * two feeds never write competing prices for the same instrument at the same
+   * time. Fails OPEN when the universe is not arbitrated for this feed or no
+   * decision is known yet — a starved desk is worse than a repeated tick, and
+   * the common store's ingest dedupe already covers repeats.
+   */
+  private mayPublish(universe: string): boolean {
+    const short = shortUniverse(universe);
+    if (!short || !this.arbiterUniverses.includes(short)) return true;
+    if (this.arbiterDecisionAt === null) return true;
+    const owner = this.arbiterOwnerByUniverse.get(short);
+    return !owner || owner === this.feedName;
   }
 
 
@@ -291,6 +393,10 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       this.startOwnershipFreshnessWatch();
       return;
     }
+    // Single-active-feed arbiter (brief s2/s6): announce this producer and its
+    // OPTION coverage even while the socket is down, so a universe this feed
+    // cannot currently serve can be elected to the other live feed.
+    this.registerArbiterCoverage();
     if (!this.statusValue.enabled) {
       this.statusValue.lastMessage = 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure FYERS credentials';
       this.logger.log(this.statusValue.lastMessage);
@@ -304,6 +410,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     const dbToken = await this.fyersTokens.getActiveAccessToken();
     const accessToken = (dbToken ?? process.env.FYERS_ACCESS_TOKEN)?.trim() ?? null;
     if (!appId || !accessToken) {
+      this.credentialsOk = false;
       this.statusValue.connected = false;
       this.statusValue.lastMessage = 'FYERS credentials missing (FYERS_APP_ID env and no active token row in DB; login via /auth/fyers/login) — feed disabled; Yahoo fallback is NOT permitted';
       this.logger.warn(this.statusValue.lastMessage);
@@ -314,6 +421,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     }
 
     try {
+      this.credentialsOk = true;
       this.connectFyersSocket(accessToken);
       // Watches for a NEW token landing in the DB (fresh login from the
       // paper-desk "GET THE TOKEN" flow) while this socket is down, then
@@ -333,6 +441,10 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     if (this.ownershipPollTimer) {
       clearInterval(this.ownershipPollTimer);
       this.ownershipPollTimer = null;
+    }
+    if (this.arbiterPollTimer) {
+      clearInterval(this.arbiterPollTimer);
+      this.arbiterPollTimer = null;
     }
     if (this.yahooPollTimer) {
       clearInterval(this.yahooPollTimer);
@@ -413,7 +525,11 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     if (this.destroyed) return;
     try {
       const token = await this.fyersTokens.getActiveAccessToken();
-      if (!token) return;
+      if (!token) {
+        this.credentialsOk = false;
+        return;
+      }
+      this.credentialsOk = true;
       const sameToken = this.tokenHash(token) === this.connectedTokenHash;
       if (this.statusValue.connected && sameToken) return;
       // No Yahoo fallback exists anymore (brief s3): if the socket is down
@@ -510,6 +626,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       this.statusValue.lastTickAt = tick.ts;
       const optionContract = this.optionContracts.get(tick.instrument);
       if (optionContract) {
+        // Instrument-aware source selection (brief s2): publish only what the
+        // arbiter awarded this feed, so two feeds never price one instrument.
+        if (!this.mayPublish(optionContract.underlying)) continue;
         void this.optionChain.ingestQuote({
           contractSymbol: optionContract.symbol,
           ltp: tick.price,

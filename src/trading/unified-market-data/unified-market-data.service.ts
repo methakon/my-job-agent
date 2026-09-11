@@ -381,6 +381,59 @@ export class UnifiedMarketDataService {
   }
 
   /**
+   * Newest fresh observation per instrument for ONE underlying — the
+   * universe-level sibling of sharedQuote(). A desk whose OWN broker feed has
+   * gone quiet uses this to keep evaluating the universe from whatever OTHER
+   * producer is live, so source selection/failover is per instrument and the
+   * engine stays broker-agnostic (brief s2/s4/s12).
+   *
+   * Reads this process's in-memory latest cache first (a local producer), then
+   * the unified_option_quotes table (the other producer may be a different
+   * process). One row per instrument key, newest wins; rows older than maxAgeMs
+   * or flagged INVALID are dropped. `source` is carried through untouched.
+   */
+  async sharedQuotesForUnderlying(
+    underlying: string,
+    opts: { maxAgeMs?: number; now?: number; limit?: number } = {},
+  ): Promise<UnifiedOptionQuote[]> {
+    const wanted = String(underlying ?? '').trim().toUpperCase();
+    if (!wanted) return [];
+    const nowMs = opts.now ?? Date.now();
+    const maxAgeMs = opts.maxAgeMs ?? Number(process.env.UNIFIED_SHARED_QUOTE_MAX_AGE_MS ?? 60_000);
+    const limit = Math.max(1, Math.min(2_000, opts.limit ?? 500));
+    const freshEnough = (row: UnifiedOptionQuote | null | undefined): row is UnifiedOptionQuote => {
+      if (!row) return false;
+      if (String(row.dataQuality ?? 'GOOD').toUpperCase() === 'INVALID') return false;
+      const at = (row.receivedTimestamp ?? row.ts)?.getTime?.() ?? 0;
+      return at > 0 && nowMs - at <= maxAgeMs;
+    };
+    const newest = new Map<string, UnifiedOptionQuote>();
+    const consider = (row: UnifiedOptionQuote | null | undefined): void => {
+      if (!freshEnough(row)) return;
+      const key = String(row.instrumentKey ?? '').trim().toUpperCase();
+      if (!key) return;
+      const at = (row.receivedTimestamp ?? row.ts).getTime();
+      const previous = newest.get(key);
+      const previousAt = previous ? (previous.receivedTimestamp ?? previous.ts).getTime() : 0;
+      if (!previous || at > previousAt) newest.set(key, row);
+    };
+    for (const row of this.latestQuotes.values()) {
+      if (String(row.underlying ?? '').trim().toUpperCase() === wanted) consider(row);
+    }
+    try {
+      const rows = await this.quotes.find({
+        where: { underlying: wanted },
+        order: { receivedTimestamp: 'DESC' },
+        take: limit,
+      });
+      for (const row of rows) consider(row);
+    } catch (error) {
+      this.logger.warn(`unified sharedQuotesForUnderlying(${wanted}) failed: ${(error as Error).message}`);
+    }
+    return [...newest.values()].slice(0, limit);
+  }
+
+  /**
    * Freshness of the common store, readable from ANY process — including one
    * that runs no feed socket of its own (the web app displays ticks the
    * headless engine writes; brief s4/s12: one store, many readers).
