@@ -1542,12 +1542,17 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 	 * IST-naive ts columns. Idempotent: run any number of times.
 	 */
 	async archiveTicksBefore(boundaryIst: string): Promise<{ snapshots: number; quotes: number }> {
+		// archivedAt is bound from THIS process's clock: the DB server's clock was
+		// measured ~5 h 30 m off real UTC (2026-09-11), so a SQL NOW() would stamp
+		// the archive with a wrong instant (the rest of the row's machine-written
+		// columns — createdAt — are the client's UTC).
+		const archivedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
 		const snapshots = await this.snapshots.manager.query(
 			`INSERT INTO fnf_market_snapshots_history
-				 (id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt)
-			 SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, NOW()
-			 FROM fnf_market_snapshots WHERE ts < ?`,
-			[boundaryIst],
+				(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt)
+				SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, ?
+				FROM fnf_market_snapshots WHERE ts < ?`,
+			[archivedAt, boundaryIst],
 		);
 		const delSnap = await this.snapshots.manager.query(
 			'DELETE FROM fnf_market_snapshots WHERE ts < ?',
@@ -1555,12 +1560,12 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 		);
 		const quotes = await this.quoteHistory.manager.query(
 			`INSERT INTO fnf_option_quotes_history
-				 (id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
+				(id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
 				  openInterest, impliedVolatility, delta, gamma, theta, vega, provider, ts, createdAt, archivedAt)
-			 SELECT id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
-				  openInterest, impliedVolatility, delta, gamma, theta, vega, provider, ts, createdAt, NOW()
-			 FROM fnf_option_quotes WHERE ts < ?`,
-			[boundaryIst],
+				SELECT id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
+				  openInterest, impliedVolatility, delta, gamma, theta, vega, provider, ts, createdAt, ?
+				FROM fnf_option_quotes WHERE ts < ?`,
+			[archivedAt, boundaryIst],
 		);
 		const delQuotes = await this.quoteHistory.manager.query(
 			'DELETE FROM fnf_option_quotes WHERE ts < ?',

@@ -347,6 +347,25 @@ const reject = (code: RejectionCode, reason: string, source: string): TickReject
 });
 
 /**
+ * Bounded, provider-neutral dump of the timestamp-ish fields a record carries —
+ * the evidence needed to judge a STALE/FUTURE rejection at the source (was the
+ * provider replaying a closed-market tick, or is a quiet contract's last-trade
+ * time being read as its quote time?). Never dumps the whole payload.
+ */
+export function describeRecordTimestamps(raw: unknown): string {
+  if (raw === null || raw === undefined) return '(no payload)';
+  if (typeof raw !== 'object') return String(raw).slice(0, 48);
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/time|ts$|date|stamp|epoch/i.test(key)) continue;
+    if (value === null || value === undefined || typeof value === 'object') continue;
+    parts.push(`${key}=${String(value).slice(0, 22)}`);
+    if (parts.length >= 6) break;
+  }
+  return parts.join(' ') || '(record carries no timestamp field)';
+}
+
+/**
  * Deterministically turn a provider observation into a canonical tick, or reject
  * it. Pure: same inputs ⇒ same output (receivedAt is passed in, never read here).
  */
@@ -446,11 +465,11 @@ export function interpretObservation(
 
   if (sourceTimestamp) {
     if (sourceLagMs! < -budgets.maxFutureSkewMs) {
-      return reject('FUTURE_TIMESTAMP', `source timestamp is ${Math.round(-sourceLagMs!)}ms in the future`, name);
+      return reject('FUTURE_TIMESTAMP', `source timestamp is ${Math.round(-sourceLagMs!)}ms in the future; record timestamps: ${describeRecordTimestamps(observation.raw)}`, name);
     }
     const budget = kind === 'LAST_TRADE' ? budgets.maxLastTradeAgeMs : budgets.maxQuoteLagMs;
     if (sourceLagMs! > budget) {
-      return reject('STALE', `${kind} tick is ${Math.round(sourceLagMs! / 1000)}s old (> ${Math.round(budget / 1000)}s budget)`, name);
+      return reject('STALE', `${kind} tick is ${Math.round(sourceLagMs! / 1000)}s old (> ${Math.round(budget / 1000)}s budget); record timestamps: ${describeRecordTimestamps(observation.raw)}`, name);
     }
   }
 

@@ -1,0 +1,229 @@
+{
+  "asOf": "2026-09-11T18:21:44.605Z",
+  "ist": "11-09-2026 23:51 IST",
+  "windowMinutes": 5,
+  "cutoffUtc": "2026-09-11 18:16:44",
+  "app": {
+    "asOf": "2026-09-11T18:21:58.830Z",
+    "pipeline": "provider -> adapter -> interpreter -> validation -> canonical persistence -> desks",
+    "accepted": 1393,
+    "rejected": 0,
+    "persisted": 1393,
+    "withheld": 0,
+    "ignored": 0,
+    "rejectionsByCode": {},
+    "rejectionsBySource": {},
+    "latency": {
+      "samples": 0,
+      "p50Ms": null,
+      "p95Ms": null,
+      "maxMs": null
+    },
+    "latencyBudgetExceeded": 0,
+    "lastSample": {
+      "source": "UPSTOX_LIVE",
+      "instrumentKey": "BSE:SENSEX17SEP75800PE",
+      "lagMs": null,
+      "accepted": true
+    }
+  },
+  "socketOwnerLog": "\u001b[32m[Nest] 94151  - \u001b[39m09/11/2026, 11:42:08 PM \u001b[32m    LOG\u001b[39m \u001b[38;5;3m[FnoMarketDataService] \u001b[39m\u001b[32m[CANONICAL] accepted=0 persisted=0 rejected=4795 (STALE=4795) withheld=0 ignored=672 latency p50=-ms p95=-ms budgetBreaches=0 last=FYERS_LIVE: REJECTED\u001b[39m",
+  "store": {
+    "quotesBySource": [
+      {
+        "source": "UPSTOX_LIVE",
+        "rows_": 1386,
+        "instruments": 84,
+        "broker_keyed": "0",
+        "legacy_index_form": "0",
+        "missing_hash": "0"
+      },
+      {
+        "source": "FYERS_LIVE",
+        "rows_": 768,
+        "instruments": 32,
+        "broker_keyed": "0",
+        "legacy_index_form": "0",
+        "missing_hash": "768"
+      }
+    ],
+    "snapshotsBySource": [
+      {
+        "source": "FYERS_LIVE",
+        "rows_": 36,
+        "symbols": "BSE:SENSEX-INDEX, NSE:NIFTY50-INDEX, NSE:NIFTYBANK-INDEX",
+        "underlyings": "NIFTY50-INDEX, NIFTYBANK-INDEX, SENSEX-INDEX"
+      },
+      {
+        "source": "UPSTOX_LIVE",
+        "rows_": 7,
+        "symbols": "BSE:SENSEX",
+        "underlyings": "SENSEX"
+      }
+    ],
+    "nonCanonicalWriters": [
+      {
+        "source": "FYERS_LIVE",
+        "n": 768,
+        "newest": "18:21:13"
+      }
+    ],
+    "sequenceRanges": [
+      {
+        "source": "UPSTOX_LIVE",
+        "mn": 1,
+        "mx": 1419,
+        "n": 1412
+      },
+      {
+        "source": "FYERS_LIVE",
+        "mn": 646397,
+        "mx": 647200,
+        "n": 768
+      }
+    ],
+    "sharedContracts": [],
+    "byUnderlying": [
+      {
+        "source": "UPSTOX_LIVE",
+        "underlying": "NIFTY",
+        "instruments": 42
+      },
+      {
+        "source": "UPSTOX_LIVE",
+        "underlying": "SENSEX",
+        "instruments": 42
+      },
+      {
+        "source": "FYERS_LIVE",
+        "underlying": "BANKNIFTY",
+        "instruments": 16
+      },
+      {
+        "source": "FYERS_LIVE",
+        "underlying": "NIFTY",
+        "instruments": 16
+      }
+    ]
+  },
+  "desks": {
+    "fnfProviders": [
+      {
+        "provider": "fyers",
+        "rows_": 864,
+        "contracts": 32
+      }
+    ],
+    "fnfSnapshots": [],
+    "upstox": {
+      "feedRole": "ACTIVE",
+      "activeFeedByUniverse": {
+        "BANKNIFTY": "FYERS_WS",
+        "NIFTY": "UPSTOX_REST",
+        "SENSEX": "UPSTOX_REST"
+      },
+      "sharedTicksUsed": 0,
+      "quotesPersistedToday": 908,
+      "duplicateTicksSuppressed": 0,
+      "instrumentsTracked": 2,
+      "lastOptionQuoteTs": "2026-09-11T18:22:10.098Z",
+      "tokenExpiresAt": "2026-09-11T22:00:00.000Z",
+      "lastError": null
+    },
+    "signals": [],
+    "execution": {
+      "fnf_trades": 0,
+      "fnf_decision_journal": 0,
+      "upstox_orders": 0,
+      "upstox_candidates": 0
+    }
+  },
+  "keys": {
+    "sampled": 2154,
+    "badKeys": [],
+    "foreignKeys": 0
+  },
+  "stale": {
+    "appStale": 0,
+    "socketOwnerLogLine": "\u001b[32m[Nest] 94151  - \u001b[39m09/11/2026, 11:42:08 PM \u001b[32m    LOG\u001b[39m \u001b[38;5;3m[FnoMarketDataService] \u001b[39m\u001b[32m[CANONICAL] accepted=0 persisted=0 rejected=4795 (STALE=4795) withheld=0 ignored=672 latency p50=-ms p95=-ms budgetBreaches=0 last=FYERS_LIVE: REJECTED\u001b[39m"
+  },
+  "verdict": "INCOMPLETE",
+  "failures": [
+    "every row in the window came from the canonical pipeline (no foreign legacy writer): FYERS_LIVE=768 rows without depth (newest 18:21:13 UTC) — a pre-canonical producer is still writing",
+    "the SAME canonical key is produced by BOTH providers (identity convergence): no contract seen from both feeds in the window",
+    "SIGNAL stage produced assessments in the window (NO_TRADE counts): no pattern assessment in the window",
+    "RISK/EXECUTION stage ran in the window (order, trade or recorded decision): {\"fnf_trades\":0,\"fnf_decision_journal\":0,\"upstox_orders\":0,\"upstox_candidates\":0}"
+  ],
+  "results": [
+    {
+      "label": "canonical interpretation is running on live payloads (accepted > 0)",
+      "ok": true,
+      "detail": "accepted=1393"
+    },
+    {
+      "label": "canonical persistence is active (persisted > 0)",
+      "ok": true,
+      "detail": "persisted=1393"
+    },
+    {
+      "label": "rejection rate is explainable (< 20 % of records)",
+      "ok": true,
+      "detail": "0.0 % rejected, codes: none"
+    },
+    {
+      "label": "no wholesale rejection storm (no single code above 50 % of records)",
+      "ok": true,
+      "detail": "accepted=1393 rejected=0"
+    },
+    {
+      "label": "every persisted quote carries the CANONICAL key form",
+      "ok": true,
+      "detail": "2154 sampled, 0 non-canonical"
+    },
+    {
+      "label": "no broker key form leaked into the store",
+      "ok": true,
+      "detail": "0 keys containing '|'"
+    },
+    {
+      "label": "provenance preserved on every canonical row (payload hash)",
+      "ok": true,
+      "detail": "0 canonical rows without depth.payloadHash"
+    },
+    {
+      "label": "every row in the window came from the canonical pipeline (no foreign legacy writer)",
+      "ok": false,
+      "detail": "FYERS_LIVE=768 rows without depth (newest 18:21:13 UTC) — a pre-canonical producer is still writing"
+    },
+    {
+      "label": "the SAME canonical key is produced by BOTH providers (identity convergence)",
+      "ok": false,
+      "detail": "no contract seen from both feeds in the window"
+    },
+    {
+      "label": "FNF desk consumed common-store rows (foreign producer present)",
+      "ok": true,
+      "detail": "fyers=864"
+    },
+    {
+      "label": "upstox desk is running against live data (not disabled/errored)",
+      "ok": true,
+      "detail": "feedRole=ACTIVE"
+    },
+    {
+      "label": "upstox desk produced quotes from live data in the window",
+      "ok": true,
+      "detail": "quotesPersistedToday=908 instruments=2"
+    },
+    {
+      "label": "SIGNAL stage produced assessments in the window (NO_TRADE counts)",
+      "ok": false,
+      "detail": "no pattern assessment in the window"
+    },
+    {
+      "label": "RISK/EXECUTION stage ran in the window (order, trade or recorded decision)",
+      "ok": false,
+      "detail": "{\"fnf_trades\":0,\"fnf_decision_journal\":0,\"upstox_orders\":0,\"upstox_candidates\":0}"
+    }
+  ]
+}
