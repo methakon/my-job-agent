@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
 import { UnifiedOptionQuote } from './unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './unified-market-snapshot.entity';
+import { canonicalInstrumentKey } from './canonical/canonical-tick';
 
 /**
  * Normalized feed shape accepted from any broker adapter (brief s5).
@@ -345,17 +346,25 @@ export class UnifiedMarketDataService {
 
     const key = String(query.instrumentKey ?? '').trim();
     const symbol = String(query.contractSymbol ?? '').trim().toUpperCase();
+    // A producer writes the CANONICAL key (NSE:NIFTY26SEP23000PE) while a caller
+    // may still ask with its broker's own form (Upstox's NSE_FO|NIFTY26SEP23000PE),
+    // so both shapes are matched. This only WIDENS the lookup: it cannot produce a
+    // row that is not in the store.
+    const canonicalKey = key ? canonicalInstrumentKey(key) : null;
+    const keyTail = key ? String(key).split('|').pop()!.split(':').pop()!.trim().toUpperCase() : '';
+    const bareSymbol = symbol || (/^[A-Z0-9]+$/.test(keyTail) ? keyTail : '');
+    const symbolIsUsable = Boolean(bareSymbol) && !/^\d+$/.test(bareSymbol);
 
     // 1. In-process cache.
-    if (key) {
-      const cached = this.latestQuotes.get(key);
+    for (const candidate of [key, canonicalKey].filter((k): k is string => Boolean(k))) {
+      const cached = this.latestQuotes.get(candidate);
       if (freshEnough(cached)) return cached;
     }
-    if (symbol) {
+    if (symbolIsUsable) {
       let newest: UnifiedOptionQuote | null = null;
       for (const row of this.latestQuotes.values()) {
         const rowSymbol = String(row.instrumentKey ?? '').split(':').pop()?.toUpperCase();
-        if (rowSymbol !== symbol) continue;
+        if (rowSymbol !== bareSymbol) continue;
         if (!newest || row.ts.getTime() > newest.ts.getTime()) newest = row;
       }
       if (freshEnough(newest)) return newest;
@@ -363,14 +372,18 @@ export class UnifiedMarketDataService {
 
     // 2. Common table (another process produced it).
     try {
-      const where: Record<string, unknown> = {};
-      if (key) where.instrumentKey = key;
-      else if (symbol) where.instrumentKey = Like(`%:${symbol}`);
-      else {
-        if (query.underlying) where.underlying = String(query.underlying).toUpperCase();
-        if (query.expiry) where.expiry = String(query.expiry);
-        if (query.strike !== null && query.strike !== undefined) where.strike = query.strike;
-        if (query.optionType) where.optionType = String(query.optionType).toUpperCase();
+      const where: Record<string, unknown>[] = [];
+      if (key || symbolIsUsable) {
+        if (key) where.push({ instrumentKey: key });
+        if (canonicalKey && canonicalKey !== key) where.push({ instrumentKey: canonicalKey });
+        if (symbolIsUsable) where.push({ instrumentKey: Like(`%:${bareSymbol}`) });
+      } else {
+        const fallback: Record<string, unknown> = {};
+        if (query.underlying) fallback.underlying = String(query.underlying).toUpperCase();
+        if (query.expiry) fallback.expiry = String(query.expiry);
+        if (query.strike !== null && query.strike !== undefined) fallback.strike = query.strike;
+        if (query.optionType) fallback.optionType = String(query.optionType).toUpperCase();
+        where.push(fallback);
       }
       const row = await this.quotes.findOne({ where, order: { receivedTimestamp: 'DESC' } });
       return freshEnough(row) ? row : null;

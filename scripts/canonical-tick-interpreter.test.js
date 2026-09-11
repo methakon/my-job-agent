@@ -222,19 +222,9 @@ async function main() {
     const quotes = repo();
     const snapshots = repo();
     const unified = new UnifiedMarketDataService(quotes, snapshots);
-    const prevMode = process.env.TICK_INTERPRETER_MODE;
-    process.env.TICK_INTERPRETER_MODE = 'shadow';
-    const shadow = new TickInterpreterService(unified);
-    assert.equal(shadow.currentMode, 'shadow');
-    const shadowResult = await shadow.interpretAndPersist({ source: 'FYERS_LIVE', payload: fyersPayload, receivedAt: RECEIVED_AT });
-    assert.equal(shadowResult.ok, true);
-    assert.equal(quotes.created.length, 0, 'shadow mode measures only — it never writes');
-    assert.equal(shadow.metrics().latency.samples, 1, 'latency is measured in shadow mode');
-    assert.equal(shadow.metrics().latency.p50Ms, 400);
-
-    process.env.TICK_INTERPRETER_MODE = 'on';
+    // THERE IS NO MODE: the interpreter sits on the production pipeline, always.
+    // A validated tick is persisted and its latency is measured as a side effect.
     const live = new TickInterpreterService(unified);
-    assert.equal(live.currentMode, 'on');
     await live.interpretAndPersist({ source: 'UPSTOX_LIVE', payload: upstoxPayload, receivedAt: RECEIVED_AT });
     assert.equal(quotes.created.length, 1, 'the canonical tick is persisted into the common store');
     const row = quotes.created[0];
@@ -265,7 +255,9 @@ async function main() {
     assert.equal(metrics.rejectionsByCode.UNSUPPORTED_PROVIDER, 1);
     assert.equal(metrics.persisted, 1);
     assert.equal(metrics.lastSample.accepted, false);
-    if (prevMode === undefined) delete process.env.TICK_INTERPRETER_MODE; else process.env.TICK_INTERPRETER_MODE = prevMode;
+    assert.equal('mode' in metrics, false, 'the interpreter exposes no operational mode');
+    assert.equal(metrics.latency.samples, 1, 'latency is measured on the production path');
+    assert.equal(metrics.latency.p50Ms, 400);
     ok('latency measured + flagged, metrics aggregated, canonical ticks persisted, rejects dropped');
   }
 
@@ -294,36 +286,43 @@ async function main() {
     const repo = () => ({ created: [], create(row) { this.created.push(row); return row; }, async save(row) { return { ...row, id: 'row-1' }; } });
     const quotes = repo();
     const unified = new UnifiedMarketDataService(quotes, repo());
-    process.env.TICK_INTERPRETER_MODE = 'on';
     const interpreter = new TickInterpreterService(unified);
 
     // FYERS SDK message: records wrapped in `d`, exch_feed_time in epoch SECONDS.
-    interpreter.observe('FYERS_LIVE', {
+    const single = await interpreter.ingestMessage('FYERS_LIVE', {
       d: [{ symbol: 'NSE:NIFTY26SEP23000PE', ltp: 99.8, vol_traded_today: 12000, oi: 45000, exch_feed_time: Math.floor(QUOTE_AT.getTime() / 1000) }],
-    }, RECEIVED_AT);
+    }, { receivedAt: RECEIVED_AT });
+    assert.equal(single.accepted, 1);
+    assert.equal(single.persisted, 1, 'a wrapped SDK message is interpreted and persisted');
     // The same style message can carry several contracts at once.
-    interpreter.observe('FYERS_LIVE', {
+    const multi = await interpreter.ingestMessage('FYERS_LIVE', {
       d: [
         { symbol: 'NSE:NIFTY26SEP23000PE', ltp: 99.8, exch_feed_time: Math.floor(QUOTE_AT.getTime() / 1000) },
         { symbol: 'NSE:NIFTY26SEP23000CE', ltp: 120.5, exch_feed_time: Math.floor(QUOTE_AT.getTime() / 1000) },
         { symbol: 'NSE:NIFTY26SEP23000CE', ltp: -1, exch_feed_time: Math.floor(QUOTE_AT.getTime() / 1000) },
       ],
-    }, RECEIVED_AT);
+    }, { receivedAt: RECEIVED_AT });
+    assert.equal(multi.accepted, 2, 'every good record in a wrapped message is interpreted');
+    assert.equal(multi.rejected, 1, 'a bad record beside good ones is rejected alone');
+    assert.equal(multi.persisted, 2, 'only validated records are persisted');
+    assert.equal(multi.rejections[0].code, 'IMPOSSIBLE_VALUE');
     // Upstox option-chain leg: market fields nested under market_data.
-    interpreter.observe('UPSTOX_LIVE', {
+    const legMessage = await interpreter.ingestMessage('UPSTOX_LIVE', {
       instrument_key: 'NSE_FO|NIFTY26SEP23000PE',
       option_greeks: { iv: 12.5 },
       market_data: { ltp: 99.8, volume: 12000, oi: 45000, bid_price: 99.65, ask_price: 99.95, bid_qty: 50, ask_qty: 75 },
-    }, RECEIVED_AT);
+    }, { receivedAt: RECEIVED_AT });
+    assert.equal(legMessage.persisted, 1);
 
     const metrics = interpreter.metrics();
     assert.equal(metrics.accepted, 4, 'every good record in a wrapped message is interpreted');
     assert.equal(metrics.rejected, 1, 'a bad record beside good ones is rejected alone');
     assert.equal(metrics.rejectionsByCode.IMPOSSIBLE_VALUE, 1);
-    assert.equal(metrics.persisted, 0, 'the shadow hook interprets and measures only — it never writes');
-    assert.equal(quotes.created.length, 0, 'nothing was persisted by observe()');
+    assert.equal(metrics.persisted, 4, 'each validated record is persisted in canonical form');
+    // The bad record never reached the store: no row carries its value.
+    assert.ok(!quotes.created.some((row) => String(row.instrumentKey).includes('NSE:NIFTY26SEP23000CE') && Number(row.ltp) <= 0), 'a rejected record is never written');
 
-    // Persistence is the `on` path: the SAME real Upstox leg payload, now written.
+    // The SAME real Upstox leg payload through the single-record entry point.
     const leg = {
       instrument_key: 'NSE_FO|NIFTY26SEP23000PE',
       market_data: { ltp: 99.8, volume: 12000, oi: 45000, bid_price: 99.65, ask_price: 99.95, bid_qty: 50, ask_qty: 75 },
@@ -331,15 +330,119 @@ async function main() {
     const written = await interpreter.interpretAndPersist({ source: 'UPSTOX_LIVE', payload: leg, receivedAt: RECEIVED_AT });
     assert.equal(written.ok, true);
     assert.equal(written.tick.instrumentKey, 'NSE:NIFTY26SEP23000PE', 'the Upstox key form lands on the canonical identity');
-    assert.equal(quotes.created.length, 1);
-    const pe = quotes.created[0];
-    assert.equal(pe.instrumentKey, 'NSE:NIFTY26SEP23000PE');
+    const pe = quotes.created.find((row) => row.instrumentKey === 'NSE:NIFTY26SEP23000PE' && Number(row.oi) === 45000);
+    assert.ok(pe, 'the leg was written to the common store');
     assert.equal(pe.optionType, 'PE');
     assert.equal(Number(pe.strike), 23000);
-    assert.equal(Number(pe.oi), 45000);
-    assert.equal(interpreter.metrics().persisted, 1);
-    if (process.env.TICK_INTERPRETER_MODE === 'on') delete process.env.TICK_INTERPRETER_MODE;
-    ok('real provider envelopes (SDK wrapper, nested chain leg, epoch seconds) interpret correctly');
+    assert.equal(interpreter.metrics().persisted, 5);
+    ok('real provider envelopes (SDK wrapper, nested chain leg, epoch seconds) interpret and persist correctly');
+  }
+
+  // ── 10. The canonical pipeline is MANDATORY: no mode, no fallback ─────────
+  {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const SRC = path.join(__dirname, '..', 'src');
+    const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+      .flatMap((entry) => (entry.isDirectory() ? walk(path.join(dir, entry.name)) : [path.join(dir, entry.name)]));
+    const tsFiles = walk(SRC).filter((file) => file.endsWith('.ts'));
+    for (const file of tsFiles) {
+      assert.ok(!fs.readFileSync(file, 'utf8').includes('TICK_INTERPRETER_MODE'),
+        `${path.relative(SRC, file)} must not carry an interpreter mode flag`);
+    }
+    const interpreterSrc = fs.readFileSync(path.join(SRC, 'trading/unified-market-data/canonical/tick-interpreter.service.ts'), 'utf8');
+    assert.ok(!/InterpreterMode|currentMode/.test(interpreterSrc), 'no off/shadow/on mode concept survives in the interpreter');
+    for (const rel of ['trading/fno-market-data.service.ts', 'trading/upstox-live-paper/upstox-live-paper-market.service.ts']) {
+      const src = fs.readFileSync(path.join(SRC, rel), 'utf8');
+      assert.ok(src.includes('ingestMessage('), `${rel} must run live payloads through the canonical pipeline`);
+      assert.ok(!src.includes('interpreter.observe('), `${rel} must not use a shadow-only path`);
+      assert.ok(!src.includes('unified.ingestQuote(') && !src.includes('unified.ingestSnapshot('),
+        `${rel} must not write the common store outside the canonical pipeline (no broker-specific fallback)`);
+      assert.ok(!src.includes('DUAL_WRITE'), `${rel} must not keep a transitional dual-write switch`);
+    }
+
+    // The producer's own gate withholds (arbitration ownership / snapshot throttle):
+    // a withheld tick was VALIDATED, is not a rejection, and is not persisted.
+    const gateQuotes = { created: [], create(row) { this.created.push(row); return row; }, async save(row) { return { ...row, id: 'g1' }; } };
+    const gated = new TickInterpreterService(new UnifiedMarketDataService(gateQuotes, { create: (r) => r, async save(r) { return r; } }));
+    const withheldOutcome = await gated.ingestMessage('FYERS_LIVE', { d: [{ symbol: 'NSE:NIFTY26SEP23000PE', ltp: 99.8, exch_feed_time: Math.floor(QUOTE_AT.getTime() / 1000) }] }, {
+      receivedAt: RECEIVED_AT,
+      allowPublish: () => false,
+    });
+    assert.equal(withheldOutcome.accepted, 1, 'the tick was valid');
+    assert.equal(withheldOutcome.rejected, 0, 'withholding is not a rejection');
+    assert.equal(withheldOutcome.withheld, 1);
+    assert.equal(withheldOutcome.persisted, 0);
+    assert.equal(gateQuotes.created.length, 0, 'a withheld tick is never written');
+    assert.equal(gated.metrics().withheld, 1);
+
+    // A provider CONTROL/ack record is neither a tick nor invalid data: ignored.
+    const control = await gated.ingestMessage('FYERS_LIVE', { code: -99, type: 'sub', message: 'socket is disconnected', s: 'error' }, { receivedAt: RECEIVED_AT });
+    assert.equal(control.ignored, 1, 'a provider control/ack record is ignored');
+    assert.equal(control.rejected, 0, 'a control record is not invalid market data');
+    assert.equal(control.persisted, 0);
+    assert.equal(gated.metrics().ignored, 1);
+    // …while a record that DOES carry tick values but no identity is a rejection.
+    const malformed = await gated.ingestMessage('FYERS_LIVE', { ltp: 99.8, exch_feed_time: Math.floor(QUOTE_AT.getTime() / 1000) }, { receivedAt: RECEIVED_AT });
+    assert.equal(malformed.rejected, 1);
+    assert.equal(malformed.rejections[0].code, 'SCHEMA');
+
+    // Identity the record does not carry comes only from the same provider
+    // response: absent everywhere ⇒ refused, supplied by the adapter ⇒ resolved.
+    const hintQuotes = { created: [], create(row) { this.created.push(row); return row; }, async save(row) { return { ...row, id: 'h1' }; } };
+    const hinted = new TickInterpreterService(new UnifiedMarketDataService(hintQuotes, { create: (r) => r, async save(r) { return r; } }));
+    const keylessLeg = { market_data: { ltp: 99.8, oi: 45000 } };
+    const refused = await hinted.interpretAndPersist({ source: 'UPSTOX_LIVE', payload: keylessLeg, receivedAt: RECEIVED_AT });
+    assert.equal(refused.ok, false, 'a record with no identity at all is refused — never invented');
+    const resolved = await hinted.interpretAndPersist({
+      source: 'UPSTOX_LIVE', payload: keylessLeg, receivedAt: RECEIVED_AT,
+      identity: {
+        providerInstrumentId: 'NSE_FO|NIFTY26SEP23000PE', underlying: 'NIFTY', exchange: 'NSE',
+        instrumentType: 'OPT', expiry: '2026-09-26', strike: 23000, optionType: 'PE',
+      },
+    });
+    assert.equal(resolved.ok, true);
+    assert.equal(resolved.tick.instrumentKey, 'NSE:NIFTY26SEP23000PE', 'the requested contract identity is used, never a guess');
+
+    // An index chain row's own tape field (underlying_spot_price) becomes a canonical snapshot.
+    const indexRow = await hinted.interpretAndPersist({
+      source: 'UPSTOX_LIVE', payload: { underlying_spot_price: 82345.6, strike_price: 82000 }, receivedAt: RECEIVED_AT,
+      identity: { providerInstrumentId: 'BSE_INDEX|SENSEX', underlying: 'SENSEX', exchange: 'BSE', instrumentType: 'INDEX' },
+    });
+    assert.equal(indexRow.ok, true);
+    assert.equal(indexRow.tick.instrumentKey, 'BSE:SENSEX');
+    assert.equal(indexRow.tick.instrumentType, 'INDEX');
+    assert.equal(indexRow.tick.ltp, 82345.6);
+
+    // Canonical DESK READS: a row written canonically is found from a caller that
+    // still asks with its own broker key form.
+    const saved = [];
+    const readerRepo = () => ({
+      create(row) { return row; },
+      async save(row) { const stored = { ...row, id: `r${saved.length + 1}` }; saved.push(stored); return stored; },
+      async findOne({ where }) {
+        const conditions = Array.isArray(where) ? where : [where];
+        const matches = (row, condition) => Object.entries(condition).every(([field, expected]) => {
+          if (expected === null || expected === undefined) return true;
+          if (typeof expected === 'object' && '_value' in expected) {
+            const pattern = String(expected._value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*');
+            return new RegExp(`^${pattern}$`, 'i').test(String(row[field] ?? ''));
+          }
+          return String(row[field] ?? '') === String(expected);
+        });
+        return saved.find((row) => conditions.some((condition) => matches(row, condition))) ?? null;
+      },
+    });
+    const readerService = new UnifiedMarketDataService(readerRepo(), readerRepo());
+    const canonicalWriter = new TickInterpreterService(readerService);
+    await canonicalWriter.interpretAndPersist({ source: 'FYERS_LIVE', payload: fyersPayload, receivedAt: RECEIVED_AT });
+    const viaBrokerKey = await readerService.sharedQuote({ instrumentKey: 'NSE_FO|NIFTY26SEP23000PE' }, { maxAgeMs: 600_000, now: RECEIVED_AT.getTime() });
+    assert.ok(viaBrokerKey, 'a canonical row is found when the caller asks with its broker key form');
+    assert.equal(viaBrokerKey.instrumentKey, 'NSE:NIFTY26SEP23000PE');
+    assert.equal(viaBrokerKey.source, 'FYERS_LIVE', 'the true producer travels to the consumer');
+    const viaSymbol = await readerService.sharedQuote({ contractSymbol: 'NIFTY26SEP23000PE' }, { maxAgeMs: 600_000, now: RECEIVED_AT.getTime() });
+    assert.ok(viaSymbol, 'a canonical row is found from the bare contract symbol too');
+    ok('canonical pipeline is mandatory (no mode, no fallback) and canonical desk reads resolve');
   }
 
   console.log(`\n${pass} checks passed, 0 failed`);

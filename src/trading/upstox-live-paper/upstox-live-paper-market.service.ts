@@ -177,8 +177,8 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   private sharedTicksUsed = 0;
   /** Last liveAuthHeaders() outcome — feeds the arbiter's credentialsOk. */
   private lastAuthOk = false;
-  /** Mirror own ticks into the common store (UPSTOX_LIVE_DUAL_WRITE, default ON). */
-  private readonly dualWrite = !/^(0|false|no|off)$/i.test(process.env.UPSTOX_LIVE_DUAL_WRITE ?? 'true');
+  /** Last time a chain leg without its own instrument_key was reported (throttled). */
+  private lastLegKeyWarnMs = 0;
 
   slippageBps(): number { return this.config.defaultSlippageBps; }
   staleThresholdMs(): number { return this.config.staleQuoteMaxAgeMs; }
@@ -402,7 +402,6 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
         if (!chain.ticks.length) { errors.push(`no tradable quotes for ${key}${chain.expiry?` (expiry ${chain.expiry})`:''}`); continue; }
         for (const tick of chain.ticks) {
           await this.persistOptionQuote(tick);
-          await this.publishSharedQuote(tick);
           this.markOptionQuoteTs(tick.contractSymbol, tick.ts.getTime());
           this.quotesPersistedToday++; fetched++;
         }
@@ -415,8 +414,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
           this.markMarketSnapshotTs(chain.ticks[0].underlying, chain.ticks[0].ts.getTime());
           // The underlying's tape is part of the COMMON observation too: the
           // pattern engine cannot confirm a breakout without it, and the other
-          // desk must be able to read it (brief s4/s17).
-          await this.publishSharedSnapshot(shortUniverse(key), chain.spot, chain.ticks[0].ts);
+          // desk must be able to read it (brief s4/s17). Written through the
+          // canonical pipeline, from the RAW provider row.
+          await this.publishSharedSnapshot(shortUniverse(key), chain.ticks[0].ts, key, chain.spotRow);
         }
       } catch (err) { errors.push(`${key}: ${this.errorMessage(err)}`); this.logger.warn(`[UPSTOX-LIVE] fetch failed for ${key}: ${this.errorMessage(err)}`); }
     }
@@ -434,46 +434,33 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   }
 
   /**
-   * Mirror this desk's own live tick into the COMMON normalized store (brief
-   * s4/s7: one stream, many readers) so the pattern engine, the FNF page and the
-   * other desk consume the SAME observation of SENSEX. Safe by construction:
-   * this desk only publishes for universes the arbiter awarded it, so the mirror
-   * cannot duplicate another feed's rows, and repeated (instrument_key, ts)
-   * observations are dropped by the store's ingest dedupe.
+   * Mirror the underlying index tape into the COMMON store through the CANONICAL
+   * pipeline: the RAW provider chain row (the response this desk just received)
+   * is interpreted, validated and persisted in canonical form by the interpreter,
+   * so the pattern engine and the other desk consume ONE canonical observation of
+   * the index. The desk's own snapshot table is written separately
+   * (persistMarketSnapshot) and is unaffected. Never fatal: a failed mirror must
+   * not cost the desk its own tick, and a rejected row is dropped + counted
+   * rather than routed to broker-specific logic.
    *
-   * Flag-gated by UPSTOX_LIVE_DUAL_WRITE (default ON) and never fatal: a failed
-   * mirror must not cost the desk its own tick.
+   * The identity the row itself does not carry — the index key this chain was
+   * requested for — comes from the SAME provider call (`instrument_key=<key>`).
    */
-  private async publishSharedQuote(tick: LiveOptionTick): Promise<void> {
-    if (!this.dualWrite) return;
+  private async publishSharedSnapshot(universe: string, ts: Date, requestKey: string, row: unknown): Promise<void> {
+    if (!row) return;
     try {
-      await this.unified.ingestQuote({
-        instrumentKey: tick.instrumentToken || `${tick.underlying}|${tick.contractSymbol}`,
-        underlying: tick.underlying,
-        segment: String(this.config.liveInstruments?.[0] ?? '').split('|')[0] || null,
-        instrumentType: 'OPT', expiry: tick.expiry, strike: tick.strike, optionType: tick.optionType,
-        ltp: tick.ltp, bid: tick.bid, ask: tick.ask, bidQty: tick.bidQty, askQty: tick.askQty,
-        volume: tick.volume, oi: tick.openInterest, changeOi: tick.oiChange,
-        iv: tick.impliedVolatility, source: UPSTOX_LIVE_DATA_ISOLATION.dataSource,
-        sourceTimestamp: tick.ts,
+      const outcome = await this.interpreter.ingestMessage('UPSTOX_LIVE', row, {
+        receivedAt: ts,
+        identity: {
+          providerInstrumentId: requestKey,
+          underlying: universe,
+          exchange: requestKey.startsWith('BSE') ? 'BSE' : 'NSE',
+          instrumentType: 'INDEX',
+        },
       });
-    } catch (error) {
-      this.logger.warn(`[UPSTOX-LIVE] common-store mirror failed for ${tick.contractSymbol}: ${this.errorMessage(error)}`);
-    }
-  }
-
-  /**
-   * Mirror the underlying index tick into the common store. The desk's own
-   * snapshot table stays the desk's; this copy exists so the pattern engine (and
-   * any other reader) sees the SAME underlying tape the desk priced against.
-   */
-  private async publishSharedSnapshot(universe: string, price: number, ts: Date): Promise<void> {
-    if (!this.dualWrite) return;
-    try {
-      await this.unified.ingestSnapshot({
-        instrumentKey: universe, underlying: universe, exchange: 'BSE',
-        ltp: price, volume: 0, source: UPSTOX_LIVE_DATA_ISOLATION.dataSource, sourceTimestamp: ts,
-      });
+      if (!outcome.persisted) {
+        this.logger.warn(`[UPSTOX-LIVE] common-store index mirror not written for ${universe} (accepted=${outcome.accepted} rejected=${outcome.rejected} withheld=${outcome.withheld})`);
+      }
     } catch (error) {
       this.logger.warn(`[UPSTOX-LIVE] common-store snapshot mirror failed for ${universe}: ${this.errorMessage(error)}`);
     }
@@ -537,19 +524,22 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
    * /option/contract list: the nearest LISTED expiry, which is today's expiry on
    * expiry day. No expiry is ever hard-coded.
    */
-  private async fetchChainForKey(key: string, headers: Record<string,string>): Promise<{ticks: LiveOptionTick[]; spot: number|null; expiry: string|null}> {
+  private async fetchChainForKey(key: string, headers: Record<string,string>): Promise<{ticks: LiveOptionTick[]; spot: number|null; expiry: string|null; spotRow: unknown|null}> {
     const expiry = await this.resolveExpiry(key, headers);
-    if (!expiry) return { ticks: [], spot: null, expiry: null };
+    if (!expiry) return { ticks: [], spot: null, expiry: null, spotRow: null };
     const url = `${UPSTOX_LIVE_API_BASE}${UPSTOX_LIVE_V2_OPTION_CHAIN}?instrument_key=${encodeURIComponent(key)}&expiry_date=${encodeURIComponent(expiry)}`;
     const res = await this.fetchJson<UpstoxV2Envelope<UpstoxV2ChainRow[]>>(url, {method:'GET',headers});
     const rows = Array.isArray(res?.data) ? res.data : [];
     if (!rows.length) {
       if (res?.code || res?.message) throw new Error(`Upstox chain error ${res.code ?? ''}: ${res.message ?? ''}`);
-      return { ticks: [], spot: null, expiry };
+      return { ticks: [], spot: null, expiry, spotRow: null };
     }
 
     const symbol = underlyingShortName(key);
-    const spot = finite(rows.find(r => finite(r.underlying_spot_price) !== null)?.underlying_spot_price);
+    // The row that carries the underlying's tape — kept whole so the canonical
+    // interpreter can read the provider's own field rather than a copy of it.
+    const spotRow = rows.find(r => finite(r.underlying_spot_price) !== null) ?? null;
+    const spot = finite(spotRow?.underlying_spot_price);
     if (spot !== null) this.latestUnderlyingPriceByInstrument.set(symbol, spot);
 
     // Bound the universe to a window of strikes around ATM (config-driven).
@@ -573,7 +563,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
         if (tick) ticks.push(tick);
       }
     }
-    return { ticks, spot, expiry };
+    return { ticks, spot, expiry, spotRow };
   }
 
   /**
@@ -605,15 +595,13 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     if (!md) return null;
     const ltp = finite(md.ltp) ?? finite(md.last_price);
     if (ltp === null || ltp <= 0) return null; // no honest tick without a traded price
-    // Canonical interpreter (shadow by default) on the RAW leg payload.
-    this.interpreter.observe('UPSTOX_LIVE', leg);
     const oi = finite(md.oi) ?? finite(md.open_interest);
     const prevOi = finite(md.prev_oi);
     const iv = finite(leg?.option_greeks?.iv);
     const spot = this.latestUnderlyingPriceByInstrument.get(symbol) ?? null;
     const greeks = this.computeGreeks(ltp, strike, expiry, spot, optionType, iv);
     const instrumentKey = String(leg?.instrument_key ?? '');
-    return {
+    const tick: LiveOptionTick = {
       contractSymbol: `${symbol}${expiry.slice(2).replace(/-/g,'')}${Math.trunc(strike)}${optionType}`,
       instrumentToken: instrumentKey, underlying: symbol, expiry, strike, optionType,
       ltp, bid: finite(md.bid_price), ask: finite(md.ask_price),
@@ -625,6 +613,34 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       underlyingPrice: spot, ts, upstoxRef: instrumentKey || key,
       dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource, executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
     };
+    // CANONICAL PIPELINE (mandatory, no mode): the RAW chain leg goes through the
+    // deterministic interpreter, which validates it and persists what passes into
+    // the common store in canonical form (the desk's own store is written by the
+    // caller). A rejected leg is dropped and counted — it is never handed to
+    // broker-specific logic as a fallback. The identity the leg does not carry
+    // itself comes from the SAME provider response (row expiry/strike/right), never
+    // from a guess; a leg with no instrument key at all is left unresolvable and
+    // says so instead of inventing a symbol.
+    if (!instrumentKey) {
+      const nowMs = Date.now();
+      if (nowMs - this.lastLegKeyWarnMs > 300_000) {
+        this.lastLegKeyWarnMs = nowMs;
+        this.logger.warn('[UPSTOX-LIVE] chain leg without instrument_key — no canonical identity to persist for this contract');
+      }
+    }
+    void this.interpreter
+      .ingestMessage('UPSTOX_LIVE', leg, {
+        receivedAt: ts,
+        identity: {
+          providerInstrumentId: instrumentKey || null,
+          underlying: symbol,
+          exchange: key.startsWith('BSE') ? 'BSE' : 'NSE',
+          instrumentType: 'OPT',
+          expiry, strike, optionType,
+        },
+      })
+      .catch((error: unknown) => this.logger.warn(`[UPSTOX-LIVE] canonical ingest failed for ${tick.contractSymbol}: ${this.errorMessage(error)}`));
+    return tick;
   }
 
   private async fetchMarketStatus(): Promise<void> {

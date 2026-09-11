@@ -10,6 +10,7 @@ import { UnifiedMarketDataService } from './unified-market-data/unified-market-d
 import { FeedHealthService } from './unified-market-data/feed-health.service';
 import { FeedArbitrationService } from './unified-market-data/feed-arbitration.service';
 import { TickInterpreterService } from './unified-market-data/canonical/tick-interpreter.service';
+import { CanonicalTick } from './unified-market-data/canonical/canonical-tick';
 import { optionUniversesFromSymbols, shortUniverse } from './unified-market-data/feed-arbitration.state';
 
 // The FYERS package currently ships JavaScript without TypeScript declarations.
@@ -96,10 +97,6 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private readonly lastYahooTickAt = new Map<string, string>();
   private readonly statusValue: FeedStatus;
   private readonly persistEveryMs: number;
-  /** Transitional dual-write of FYERS ticks into the normalized common store
-   * (brief s4/s5/s7). Phase 4 (read migration) removes it; disable with
-   * UNIFIED_DUAL_WRITE=false. */
-  private readonly unifiedDualWrite: boolean;
   private readonly yahooSymbols: YahooSymbolConfig[];
   private readonly yahooPollMs: number;
   private readonly yahooTimeoutMs: number;
@@ -150,7 +147,6 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     this.yahooPollMs = Math.max(5_000, Number(process.env.YAHOO_FINANCE_POLL_MS ?? 15_000));
     this.yahooTimeoutMs = Math.max(2_000, Number(process.env.YAHOO_FINANCE_TIMEOUT_MS ?? 10_000));
     this.yahooEnabled = yahooEnabled;
-    this.unifiedDualWrite = (process.env.UNIFIED_DUAL_WRITE ?? 'true').toLowerCase() !== 'false';
     this.fyersRetryMs = Math.max(15_000, Number(process.env.FYERS_RETRY_MS ?? 60_000));
     this.optionContracts = new Map(this.optionChain.configuredContracts().map((contract) => [contract.symbol, contract]));
     // Yahoo is NOT an allowed provider on the live trading/data path (brief
@@ -643,10 +639,32 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   private onMessage(message: unknown): void {
-    // Canonical interpreter (shadow by default): interprets the RAW provider
-    // message and measures it; never writes, never throws, never gates a desk.
-    this.interpreter.observe('FYERS_LIVE', message);
+    // CANONICAL PIPELINE (mandatory, no mode): the RAW provider message goes to
+    // the deterministic interpreter, which validates it and persists what passes
+    // in canonical form into the common store. A rejected tick is dropped and
+    // counted — it is never passed to broker-specific logic as a fallback.
+    void this.interpreter
+      .ingestMessage('FYERS_LIVE', message, { allowPublish: (tick) => this.allowCanonicalPublish(tick) })
+      .catch((error: unknown) => {
+        this.statusValue.lastError = `canonical ingest failed: ${this.safeMessage(error)}`;
+        this.logger.warn(this.statusValue.lastError);
+      });
     this.recordTicks(this.parseMessage(message), 'fyers');
+  }
+
+  /**
+   * The feed's own publication gate for canonical ticks: never price an
+   * instrument another feed owns (arbiter award), and keep the existing
+   * per-instrument throttle on index snapshots so canonical persistence writes
+   * exactly the volume the feed wrote before.
+   */
+  private allowCanonicalPublish(tick: CanonicalTick): boolean {
+    if (tick.instrumentType === 'OPTION') return this.mayPublish(tick.underlying ?? '');
+    const now = Date.now();
+    const last = this.lastPersistedAt.get(tick.instrumentKey) ?? 0;
+    if (now - last < this.persistEveryMs) return false;
+    this.lastPersistedAt.set(tick.instrumentKey, now);
+    return true;
   }
 
   private recordTicks(ticks: Tick[], provider: string): void {
@@ -680,36 +698,6 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
           this.statusValue.lastError = `option quote persistence failed: ${this.safeMessage(error)}`;
           this.logger.warn(this.statusValue.lastError);
         });
-        if (this.unifiedDualWrite) {
-          const exchange = tick.instrument.startsWith('BSE:') ? 'BSE' : 'NSE';
-          void this.unified
-            .ingestQuote({
-              instrumentKey: optionContract.symbol,
-              underlying: optionContract.underlying,
-              exchange,
-              segment: 'FO',
-              instrumentType: 'OPTION',
-              expiry: optionContract.expiry,
-              strike: optionContract.strike,
-              optionType: optionContract.optionType,
-              ltp: tick.price,
-              bid: tick.bid,
-              ask: tick.ask,
-              volume: tick.volume,
-              oi: tick.openInterest,
-              iv: tick.impliedVolatility,
-              delta: tick.delta,
-              gamma: tick.gamma,
-              theta: tick.theta,
-              vega: tick.vega,
-              source: 'FYERS_LIVE',
-              sourceTimestamp: tick.ts,
-            })
-            .catch((error: unknown) => {
-              this.statusValue.lastError = `unified quote persist failed: ${this.safeMessage(error)}`;
-              this.logger.warn(this.statusValue.lastError);
-            });
-        }
         // Option-contract ticks are premium data — they never become index snapshots.
         continue;
       }
@@ -721,30 +709,6 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
         this.statusValue.lastError = `snapshot persistence failed: ${this.safeMessage(error)}`;
         this.logger.warn(this.statusValue.lastError);
       });
-      if (this.unifiedDualWrite) {
-        const exchange = tick.instrument.startsWith('BSE:') ? 'BSE' : 'NSE';
-        const underlying = tick.instrument.includes(':') ? tick.instrument.split(':')[1] : tick.instrument;
-        void this.unified
-          .ingestSnapshot({
-            instrumentKey: tick.instrument,
-            underlying,
-            exchange,
-            segment: 'INDEX',
-            instrumentType: 'INDEX',
-            ltp: tick.price,
-            open: tick.open,
-            high: tick.high,
-            low: tick.low,
-            close: tick.close,
-            volume: tick.volume,
-            source: 'FYERS_LIVE',
-            sourceTimestamp: tick.ts,
-          })
-          .catch((error: unknown) => {
-            this.statusValue.lastError = `unified snapshot persist failed: ${this.safeMessage(error)}`;
-            this.logger.warn(this.statusValue.lastError);
-          });
-      }
     }
   }
 

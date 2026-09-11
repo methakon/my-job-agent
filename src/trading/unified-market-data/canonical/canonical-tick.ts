@@ -120,7 +120,12 @@ export type RejectionCode =
   | 'STALE';
 
 export type TickRejection = { ok: false; code: RejectionCode; reason: string; source: string };
-export type InterpreterResult = { ok: true; tick: CanonicalTick } | TickRejection;
+/**
+ * A provider CONTROL/ack record (connection, subscription, heartbeat): not a
+ * tick, so it is neither persisted nor counted as invalid market data.
+ */
+export type TickIgnored = { ok: false; skipped: true; reason: string; source: string };
+export type InterpreterResult = { ok: true; tick: CanonicalTick } | TickRejection | TickIgnored;
 
 export type TickBudgets = {
   /** Max broker lag for QUOTE/EXCHANGE ticks before rejection (default 60 s). */

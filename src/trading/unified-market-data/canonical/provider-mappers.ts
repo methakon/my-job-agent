@@ -13,6 +13,27 @@ import { RawObservation, TickSourceSemantics } from './canonical-tick';
 
 export type ResolvedInstrument = { symbol: string; exchange?: string | null };
 
+/**
+ * Identity the ADAPTER already knows from the SAME provider response and may
+ * hand to the mapper when the record itself is silent about it — the instrument
+ * key a chain row was requested for (`instrument_key=NSE_INDEX|Nifty 50`), or
+ * the contract metadata (expiry/strike/right) that lives on the envelope rather
+ * than on the leg. It is provider data, never a guess, and a mapper uses it ONLY
+ * for a field the payload did not carry: a value present in the payload always
+ * wins, so nothing is ever overridden.
+ */
+export type MapperIdentity = {
+  providerInstrumentId?: string | null;
+  providerSymbol?: string | null;
+  underlying?: string | null;
+  exchange?: string | null;
+  segment?: string | null;
+  instrumentType?: string | null;
+  expiry?: string | null;
+  strike?: number | null;
+  optionType?: string | null;
+};
+
 export type MapperContext = {
   receivedAt: Date;
   /**
@@ -21,9 +42,19 @@ export type MapperContext = {
    * cannot resolve, the mapper says so instead of inventing a symbol.
    */
   resolveSymbol?: (providerInstrumentId: string) => ResolvedInstrument | string | null;
+  /** Adapter-supplied identity fallback (see MapperIdentity). */
+  identity?: MapperIdentity;
 };
 
-export type MappedObservation = { ok: true; observation: RawObservation } | { ok: false; reason: string };
+export type MappedObservation =
+  | { ok: true; observation: RawObservation }
+  /**
+   * `skip` marks a provider CONTROL/ack/heartbeat record: it is not a tick at all,
+   * so it is ignored rather than counted as invalid market data. A record that
+   * carries tick values but no identity is NOT skipped — it is a malformed tick and
+   * is rejected.
+   */
+  | { ok: false; reason: string; skip?: boolean };
 export type ProviderMapper = (payload: unknown, ctx: MapperContext) => MappedObservation;
 
 const record = (payload: unknown): Record<string, unknown> =>
@@ -35,6 +66,29 @@ const pick = (source: Record<string, unknown>, ...keys: string[]): unknown => {
   }
   return null;
 };
+
+/** Did the record carry any tick VALUE? (control/ack record vs malformed tick) */
+const hasTickValue = (source: Record<string, unknown>, keys: readonly string[]): boolean =>
+  keys.some((key) => {
+    const value = source[key];
+    if (value === undefined || value === null || value === '') return false;
+    if (typeof value === 'object') return Array.isArray(value) ? value.length > 0 : Object.keys(value).length > 0;
+    return true;
+  });
+
+const FYERS_TICK_FIELDS = [
+  'ltp', 'lp', 'last_traded_price', 'vol_traded_today', 'volume', 'volume_traded', 'oi', 'open_interest',
+  'bid', 'ask', 'bid_price', 'ask_price', 'exch_feed_time', 'last_traded_time', 'open_price', 'high_price', 'low_price',
+] as const;
+
+const UPSTOX_TICK_FIELDS = [
+  'last_price', 'ltp', 'volume', 'volume_traded', 'oi', 'open_interest', 'bid', 'ask', 'bid_price', 'ask_price',
+  'underlying_spot_price', 'ohlc', 'depth', 'market_data', 'timestamp', 'last_trade_time',
+] as const;
+
+const KITE_TICK_FIELDS = [
+  'last_price', 'ltp', 'volume_traded', 'volume', 'oi', 'open_interest', 'depth', 'ohlc', 'exchange_timestamp', 'last_trade_time',
+] as const;
 
 /** Normalize a resolver result into { symbol, exchange }. */
 const resolved = (
@@ -75,7 +129,14 @@ export const fyersMapper: ProviderMapper = (payload, ctx) => {
   const tick = record(payload);
   const v = record(tick.v);
   const providerInstrumentId = pick(tick, 'symbol', 'n', 'symbolName', 'fyToken', 'instrument') as string | null;
-  if (!providerInstrumentId) return { ok: false, reason: 'FYERS payload has no symbol' };
+  if (!providerInstrumentId) {
+    // The data socket also carries connection/subscription control records ("socket
+    // is disconnected", subscribe acks): those are not ticks and are ignored. A
+    // record that DOES carry tick values but no symbol is a malformed tick.
+    return hasTickValue(tick, FYERS_TICK_FIELDS) || Object.keys(v).length
+      ? { ok: false, reason: 'FYERS payload has no symbol' }
+      : { ok: false, reason: 'FYERS control/ack record (not a tick)', skip: true };
+  }
   const feedTime = pick(tick, 'exch_feed_time', 'exchFeedTime', 'exchange_timestamp', 'timestamp', 'ts');
   const tradeTime = pick(tick, 'last_traded_time', 'lastTradedTime');
   const sourceTimestamp = feedTime ?? tradeTime;
@@ -122,8 +183,16 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
   // the outer row supplies the instrument identity.
   const nested = record(envelope.market_data);
   const quote = Object.keys(nested).length ? { ...envelope, ...nested } : envelope;
-  const providerInstrumentId = pick(envelope, 'instrument_token', 'instrumentKey', 'instrument_key', 'trading_symbol', 'symbol') as string | null;
-  if (!providerInstrumentId) return { ok: false, reason: 'Upstox payload has no instrument key/token' };
+  // Identity order: the record's own key, then the numeric-token master, then the
+  // key the adapter REQUESTED this row with (same provider call — see MapperIdentity).
+  const providerInstrumentId = (pick(envelope, 'instrument_token', 'instrumentKey', 'instrument_key', 'trading_symbol', 'symbol')
+    ?? ctx.identity?.providerInstrumentId
+    ?? null) as string | null;
+  if (!providerInstrumentId) {
+    return hasTickValue(quote, UPSTOX_TICK_FIELDS)
+      ? { ok: false, reason: 'Upstox payload has no instrument key/token' }
+      : { ok: false, reason: 'Upstox control/ack record (not a tick)', skip: true };
+  }
   const ohlc = record(quote.ohlc);
   const depth = fromDepth(quote.depth);
   const rawKey = String(providerInstrumentId);
@@ -133,9 +202,13 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
   if (tokenIsNumeric && !fromMaster) {
     return { ok: false, reason: `Upstox token ${rawKey} is unresolved (no instrument master entry)` };
   }
-  // Keyed form NSE_FO|SYMBOL carries the symbol itself; a numeric token needs the master.
-  const providerSymbol = fromMaster?.symbol ?? tail;
-  const exchange = fromMaster?.exchange ?? (rawKey.includes('_') ? rawKey.split('_')[0] : null);
+  // Keyed form NSE_FO|SYMBOL carries the symbol itself; a numeric token needs the
+  // master. The payload/its own key always wins over any adapter identity hint.
+  const providerSymbol = fromMaster?.symbol ?? (tokenIsNumeric ? null : tail);
+  const exchange = fromMaster?.exchange
+    ?? (rawKey.includes('_') ? rawKey.split('_')[0] : null)
+    ?? ctx.identity?.exchange
+    ?? null;
   // Values are passed through exactly as the provider sent them (unknown-ish) and
   // validated by the interpreter; the cast only reflects that the adapter does not
   // pre-judge them.
@@ -144,12 +217,19 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
     observation: ({
       providerInstrumentId: rawKey,
       providerSymbol,
-      underlying: (pick(quote, 'underlying', 'underlying_symbol') as string | null) ?? null,
+      underlying: (pick(quote, 'underlying', 'underlying_symbol') as string | null) ?? ctx.identity?.underlying ?? null,
       exchange: exchange as string | null,
       segment: (String(providerInstrumentId).includes('|') ? String(providerInstrumentId).split('|')[0].split('_').pop() : null) as string | null,
       // Upstox declares the contract kind on the instrument (OPT/FUT/INDEX/EQ).
-      instrumentType: pick(quote, 'instrument_type', 'instrumentType') as string | null,
-      ltp: pick(quote, 'last_price', 'ltp'),
+      instrumentType: (pick(quote, 'instrument_type', 'instrumentType') as string | null) ?? ctx.identity?.instrumentType ?? null,
+      // An INDEX chain row publishes its tape as `underlying_spot_price` (the row's
+      // own price field), not as `last_price`.
+      ltp: pick(quote, 'last_price', 'ltp') ?? pick(quote, 'underlying_spot_price') ?? null,
+      // Contract metadata rides on the envelope/request for a chain leg, so the
+      // adapter may supply it; the payload always wins when it carries its own.
+      expiry: (pick(quote, 'expiry', 'expiry_date') as string | null) ?? ctx.identity?.expiry ?? null,
+      strike: pick(quote, 'strike_price', 'strike') ?? ctx.identity?.strike ?? null,
+      optionType: (pick(quote, 'option_type', 'instrument_type') as string | null) ?? ctx.identity?.optionType ?? null,
       volume: pick(quote, 'volume', 'volume_traded'),
       oi: pick(quote, 'oi', 'open_interest'),
       previousOi: pick(quote, 'prev_oi', 'previous_oi'),
@@ -179,7 +259,11 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
 export const zerodhaMapper: ProviderMapper = (payload, ctx) => {
   const tick = record(payload);
   const token = pick(tick, 'instrument_token', 'instrumentToken', 'token');
-  if (token === null) return { ok: false, reason: 'Kite payload has no instrument_token' };
+  if (token === null) {
+    return hasTickValue(tick, KITE_TICK_FIELDS)
+      ? { ok: false, reason: 'Kite payload has no instrument_token' }
+      : { ok: false, reason: 'Kite control/ack record (not a tick)', skip: true };
+  }
   const providerInstrumentId = String(token);
   // A Kite tick carries only the numeric token: the instrument master is the ONLY
   // deterministic source of the symbol + exchange. Unresolved ⇒ reject, never guess.
