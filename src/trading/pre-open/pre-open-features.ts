@@ -17,6 +17,24 @@
  *   auctionImbalance   = buyQuantity - sellQuantity
  *   auctionImbalancePct = (buyQuantity - sellQuantity) / max(buyQuantity + sellQuantity, EPSILON)
  *
+ * OAI — OPEN AUCTION IMBALANCE (GATE 2 item 2, roadmap row 21)
+ *   OAI = (BuyQty - SellQty) / (BuyQty + SellQty)
+ *
+ * `auctionImbalancePct` IS the roadmap's OAI; the payload also carries it under the
+ * roadmap name (`oai`) so the roadmap term is traceable in the stored/replayed data.
+ * They are the SAME object — one computation, two names — and a test asserts the
+ * identity, so the two can never drift apart.
+ *
+ *   units   : dimensionless ratio in [-1, +1] (+1 all buy, -1 all sell, 0 balanced)
+ *   window  : auction phases only (PRE_OPEN / OPEN_AUCTION). Outside that window the
+ *             source's buy/sell totals are live market depth, so it reports
+ *             UNAVAILABLE/'outside_auction_phase' rather than a fabricated imbalance.
+ *   edge    : buy+sell == 0 → UNAVAILABLE ('no auction imbalance to measure'), never 0;
+ *             either side missing/non-finite → UNAVAILABLE; both sides 0 → UNAVAILABLE.
+ *             The IMBALANCE_EPSILON denominator guard exists only so a degenerate zero
+ *             total cannot produce NaN/Infinity — that case is already refused above,
+ *             so the guard never distorts a legitimate live value.
+ *
  * Auction features are defined ONLY inside an auction phase (PRE_OPEN /
  * OPEN_AUCTION). Outside that window the source's buy/sell totals are live
  * market depth, not auction imbalance, so the features report UNAVAILABLE with
@@ -25,7 +43,13 @@
 
 import { SessionPhase, isAuctionPhase } from './pre-open-session';
 
-export const PRE_OPEN_FEATURES_VERSION = 'po-v1';
+/**
+ * Bump when the derived payload's SHAPE or semantics change, so a stored row can be
+ * audited against the definition that produced it.
+ *   po-v1 → gapPoints/gapPct/auctionImbalance/auctionImbalancePct
+ *   po-v2 → + `oai` (roadmap name for auctionImbalancePct; same computation)
+ */
+export const PRE_OPEN_FEATURES_VERSION = 'po-v2';
 
 /** Denominator guard for auctionImbalancePct. */
 export const IMBALANCE_EPSILON = 1;
@@ -230,6 +254,8 @@ export type PreOpenFeatures = {
   gapPct: DerivedValue;
   auctionImbalance: DerivedValue;
   auctionImbalancePct: DerivedValue;
+  /** Roadmap name for `auctionImbalancePct` (GATE 2 item 2) — the SAME DerivedValue object. */
+  oai: DerivedValue;
   unavailable: string[];
 };
 
@@ -286,7 +312,8 @@ export function derivePreOpenFeatures(input: FeatureInput, ctx: FeatureContext =
       gapPct: blocked,
       auctionImbalance: blocked,
       auctionImbalancePct: blocked,
-      unavailable: ['gapPoints', 'gapPct', 'auctionImbalance', 'auctionImbalancePct'],
+      oai: blocked,
+      unavailable: ['gapPoints', 'gapPct', 'auctionImbalance', 'auctionImbalancePct', 'oai'],
     };
   }
 
@@ -327,7 +354,7 @@ export function derivePreOpenFeatures(input: FeatureInput, ctx: FeatureContext =
     auctionImbalance = ok((buy as number) - (sell as number));
     auctionImbalancePct = ok(((buy as number) - (sell as number)) / Math.max(qtySum, IMBALANCE_EPSILON));
   }
-  if (auctionImbalance.status === 'UNAVAILABLE') unavailableList.push('auctionImbalance', 'auctionImbalancePct');
+  if (auctionImbalance.status === 'UNAVAILABLE') unavailableList.push('auctionImbalance', 'auctionImbalancePct', 'oai');
 
   return {
     instrumentKey: input.instrumentKey,
@@ -339,6 +366,9 @@ export function derivePreOpenFeatures(input: FeatureInput, ctx: FeatureContext =
     gapPct,
     auctionImbalance,
     auctionImbalancePct,
+    // OAI (GATE 2 item 2 / row 21) = the same DerivedValue object, deliberately NOT a
+    // second computation: one formula, two names, and the test asserts the identity.
+    oai: auctionImbalancePct,
     unavailable: unavailableList,
   };
 }

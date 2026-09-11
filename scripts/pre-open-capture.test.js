@@ -12,6 +12,7 @@
  * runtime against the stored rows — see the runtime verification report.
  */
 const path = require('path');
+const fs = require('fs');
 const F = require(path.join(__dirname, '..', 'dist', 'trading', 'pre-open', 'pre-open-features'));
 const S = require(path.join(__dirname, '..', 'dist', 'trading', 'pre-open', 'pre-open-session'));
 
@@ -235,6 +236,72 @@ console.log('[S] sentinel zero / zero-quantity traps');
   eq('Sd an empty book never yields a 0 imbalance', f.auctionImbalance.status, 'UNAVAILABLE');
   eq('Se imbalance pct guarded at zero total', feat({ buyQuantity: 0, sellQuantity: 0 }).auctionImbalancePct.status, 'UNAVAILABLE');
   eq('Sf epoch timestamp is not an event time', obs({ eventTime: new Date(0) }).quality, 'INVALID');
+}
+
+// OAI — Open Auction Imbalance (GATE 2 item 2, roadmap row 21)
+//   OAI = (BuyQty - SellQty) / (BuyQty + SellQty)
+// doneWhen: same inputs → same result in replay, and edge cases return a safe explicit
+// state rather than a fabricated value.
+console.log('[O] OAI — open auction imbalance');
+{
+  const f = feat();
+  ok('Oa OAI is present on the derived payload', f.oai !== undefined && typeof f.oai === 'object');
+  ok('Ob OAI IS auctionImbalancePct — one computation, the roadmap name is an alias', f.oai === f.auctionImbalancePct);
+  eq('Oc OAI = (1200-800)/(1200+800)', f.oai.value, 0.2);
+  eq('Od status OK inside the auction window', f.oai.status, 'OK');
+  eq('Oe sell-heavy: (800-1200)/(800+1200)', feat({ buyQuantity: 800, sellQuantity: 1200 }).oai.value, -0.2);
+  eq('Of all-buy reaches the +1 bound', feat({ buyQuantity: 500, sellQuantity: 0 }).oai.value, 1);
+  eq('Og all-sell reaches the -1 bound', feat({ buyQuantity: 0, sellQuantity: 500 }).oai.value, -1);
+  eq('Oh a balanced book is exactly 0', feat({ buyQuantity: 400, sellQuantity: 400 }).oai.value, 0);
+  eq('Oi a tiny but legitimate total is not distorted by the denominator guard', feat({ buyQuantity: 1, sellQuantity: 0 }).oai.value, 1);
+
+  const zeroTotal = feat({ buyQuantity: 0, sellQuantity: 0 }).oai;
+  eq('Oj zero total → UNAVAILABLE, never a fabricated 0', [zeroTotal.status, zeroTotal.value], ['UNAVAILABLE', null]);
+  ok('Ok zero total explains itself', /no auction imbalance to measure/.test(String(zeroTotal.reason)), String(zeroTotal.reason));
+  const missing = feat({ buyQuantity: null }).oai;
+  eq('Ol a missing side → UNAVAILABLE with a null value', [missing.status, missing.value], ['UNAVAILABLE', null]);
+  ok('Om the missing-data reason is explicit', /unavailable/.test(String(missing.reason)), String(missing.reason));
+  const postOpen = feat({ sessionPhase: 'MARKET_OPEN' }).oai;
+  eq('On outside the auction window → UNAVAILABLE (depth is not auction imbalance)', postOpen.status, 'UNAVAILABLE');
+  ok('Oo the phase reason is explicit', /outside_auction_phase/.test(String(postOpen.reason)), String(postOpen.reason));
+  const stale = feat({ eventTime: new Date(PREOPEN - 10 * 60_000) }).oai;
+  eq('Op a stale reading never yields an OAI', [stale.status, stale.value], ['UNAVAILABLE', null]);
+  ok('Oq every refused OAI carries a reason and no number', [zeroTotal, missing, postOpen, stale].every((o) => o.status === 'UNAVAILABLE' && o.value === null && String(o.reason).length > 0));
+  ok('Or the payload lists oai among the unavailable features when it is refused', feat({ buyQuantity: 0, sellQuantity: 0 }).unavailable.includes('oai'));
+  ok('Os a usable OAI is not listed as unavailable', !feat().unavailable.includes('oai'));
+
+  eq('Ot OAI replays identically for identical inputs', feat().oai, feat().oai);
+  eq('Ou the whole payload replays identically', feat(), feat());
+  eq('Ov the version is stamped on the payload', f.featuresVersion, F.PRE_OPEN_FEATURES_VERSION);
+  ok('Ow the version records the OAI addition (po-v2)', F.PRE_OPEN_FEATURES_VERSION === 'po-v2', F.PRE_OPEN_FEATURES_VERSION);
+}
+
+// V. the feature version has ONE source of truth
+console.log('[V] feature version has a single source of truth');
+{
+  const dir = path.join(__dirname, '..', 'src', 'trading', 'pre-open');
+  const literals = [];
+  const runtimeAssignments = [];
+  for (const file of fs.readdirSync(dir)) {
+    if (!file.endsWith('.ts')) continue;
+    const text = fs.readFileSync(path.join(dir, file), 'utf8');
+    for (const match of text.matchAll(/['"](po-v\d+)['"]/g)) literals.push({ file, value: match[1] });
+    if (/featuresVersion\s*=\s*['"]po-v\d+['"]/.test(text)) runtimeAssignments.push(file);
+  }
+  eq('Va nothing assigns the feature version from a literal at runtime', runtimeAssignments, []);
+  const declaration = literals.filter((l) => l.file === 'pre-open-features.ts');
+  eq('Vb the constant is the single declaration of the version', declaration.length, 1);
+  // The remaining literal is the ORM column default, which TypeORM requires to be a
+  // literal in the DDL. It must still agree with the constant — assert that, so a
+  // future bump cannot leave stored-row defaults and runtime stamps disagreeing.
+  const ormDefaults = literals.filter((l) => l.file !== 'pre-open-features.ts');
+  ok('Vc only the ORM column default carries a literal', ormDefaults.length <= 1 && ormDefaults.every((l) => l.file === 'pre-open-observation.entity.ts'),
+    JSON.stringify(ormDefaults));
+  ok('Vd the ORM default agrees with the constant', ormDefaults.every((l) => l.value === F.PRE_OPEN_FEATURES_VERSION),
+    JSON.stringify(ormDefaults) + ' vs ' + F.PRE_OPEN_FEATURES_VERSION);
+  const features = fs.readFileSync(path.join(dir, 'pre-open-features.ts'), 'utf8');
+  ok('Ve the OAI formula is documented in the module', /OAI = \(BuyQty - SellQty\) \/ \(BuyQty \+ SellQty\)/.test(features));
+  ok('Vf the payload field is documented as the roadmap alias', /oai: auctionImbalancePct/.test(features));
 }
 
 console.log(`\n${pass} passed, ${failures.length} failed`);

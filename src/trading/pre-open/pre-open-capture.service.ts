@@ -7,6 +7,7 @@ import {
   derivePreOpenFeatures,
   ObservationQuality,
   preOpenDedupeKey,
+  PRE_OPEN_FEATURES_VERSION,
   PreOpenSourceValues,
   PreOpenFeatures,
 } from './pre-open-features';
@@ -280,7 +281,9 @@ export class PreOpenCaptureService implements OnModuleInit, OnModuleDestroy {
       receivedAtMs: ctx.nowMs,
     });
     row.rawPayload = this.sanitizeRaw(values);
-    row.featuresVersion = 'po-v1';
+    // Single source of truth for the feature version (the constant), never a literal —
+    // a stored row must be auditable against the exact definition that produced it.
+    row.featuresVersion = PRE_OPEN_FEATURES_VERSION;
     return row;
   }
 

@@ -128,8 +128,13 @@ export class PreOpenObservation {
   @Column({ type: 'json', nullable: true })
   rawPayload: Record<string, unknown> | null;
 
-  /** Formula/algorithm version used when this observation is turned into features. */
-  @Column({ type: 'varchar', length: 16, default: 'po-v1' })
+  /**
+   * Formula/algorithm version used when this observation is turned into features.
+   * The ORM needs a literal here (it becomes the DDL default); the RUNTIME value always
+   * comes from PRE_OPEN_FEATURES_VERSION in pre-open-features.ts, and the pre-open test
+   * asserts this literal agrees with that constant so a future bump cannot drift.
+   */
+  @Column({ type: 'varchar', length: 16, default: 'po-v2' })
   featuresVersion: string;
 
   @CreateDateColumn()
