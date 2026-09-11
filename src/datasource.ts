@@ -1,5 +1,6 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import * as path from 'path';
+import { mysqlPoolTuning } from './shared/db.config';
 
 /**
  * TypeORM DataSource for CLI and runtime.
@@ -19,6 +20,9 @@ const config: DataSourceOptions = {
   subscribers: [path.join(__dirname, '**', '*.subscriber{.ts,.js}')],
   migrations: [path.join(__dirname, 'migration', '*{.ts,.js}')],
   migrationsTableName: 'typeorm_migrations',
+  // Same driver-supported pool/connection reliability as the runtime config
+  // (keepalive + bounded idle reaping); see shared/db.config.ts.
+  extra: mysqlPoolTuning(),
 };
 
 const dataSource = new DataSource(config);

@@ -1,5 +1,25 @@
 import session from 'express-session';
 import { createPool, Pool } from 'mysql2/promise';
+import { mysqlPoolTuning } from '../shared/db.config';
+
+/**
+ * Options for the dedicated session pool. Split out (and exported) so the
+ * pool-reliability wiring is asserted by `scripts/db-pool-reliability.test.js`
+ * without opening a socket. `connectionLimit: 4` keeps the pool size unchanged;
+ * `maxIdle` (2) must stay below it for mysql2 to arm its idle reaper.
+ */
+export function sessionStorePoolOptions(): Record<string, unknown> {
+	return {
+		host: process.env.MYSQL_HOST || '127.0.0.1',
+		port: Number(process.env.MYSQL_PORT || 3306),
+		user: process.env.MYSQL_USER || 'root',
+		password: process.env.MYSQL_PASSWORD || '',
+		database: process.env.MYSQL_DATABASE || 'myjob_agent',
+		connectionLimit: 4,
+		namedPlaceholders: true,
+		...mysqlPoolTuning(),
+	};
+}
 
 /**
  * J-04 — MySQL-backed session store so logins survive pm2 restarts (the
@@ -15,15 +35,7 @@ export class MysqlSessionStore extends session.Store {
 	constructor(ttlMs = 24 * 60 * 60 * 1000) {
 		super();
 		this.ttlMs = ttlMs;
-		this.pool = createPool({
-			host: process.env.MYSQL_HOST || '127.0.0.1',
-			port: Number(process.env.MYSQL_PORT || 3306),
-			user: process.env.MYSQL_USER || 'root',
-			password: process.env.MYSQL_PASSWORD || '',
-			database: process.env.MYSQL_DATABASE || 'myjob_agent',
-			connectionLimit: 4,
-			namedPlaceholders: true,
-		});
+		this.pool = createPool(sessionStorePoolOptions());
 		this.pool
 			.query('SELECT 1')
 			.then(() => this.pool.query('DELETE FROM sessions WHERE expire < NOW()'))
