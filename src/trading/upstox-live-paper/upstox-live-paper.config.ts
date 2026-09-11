@@ -1,6 +1,35 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RiskPolicy, clampCapital, riskPolicyFromEnv } from './paper-risk';
+import { shortUniverse } from '../unified-market-data/feed-arbitration.state';
+
+/**
+ * Parse an explicit instrument-key -> Universe label map, e.g.
+ *   UPSTOX_LIVE_UNIVERSE_MAP="NSE_INDEX|Nifty 50=NIFTY"
+ *
+ * WHY THIS EXISTS (2026-09-11): the broker's index key for Nifty 50 is
+ * `NSE_INDEX|Nifty 50`, whose derived label is `NIFTY50` — while the option
+ * contract symbols the other feed subscribes produce `NIFTY`. Without an
+ * explicit label those are two different universes, so the single-active-feed
+ * arbiter could never see an overlap and failover between the two providers was
+ * impossible to exercise. The map is OPT-IN: with no env value the derived
+ * label is unchanged. Pure + exported for tests.
+ */
+export const parseUniverseMap = (raw: string | null | undefined): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const pair of String(raw ?? '').split(',')) {
+    const at = pair.indexOf('=');
+    if (at <= 0) continue;
+    const key = pair.slice(0, at).trim();
+    const universe = pair.slice(at + 1).trim().toUpperCase();
+    if (key && universe) out[key] = universe;
+  }
+  return out;
+};
+
+/** Universe label for one configured instrument key (explicit map wins). */
+export const universeForInstrument = (key: string, map: Record<string, string> = {}): string =>
+  String(map?.[String(key).trim()] ?? shortUniverse(key)).toUpperCase();
 
 /**
  * Upstox LIVE paper-trading configuration + safety model.
@@ -53,6 +82,11 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
   readonly liveAccessToken: string;
   readonly liveTokenExpiry: string | null;
   readonly liveInstruments: string[];
+  /**
+   * Optional explicit instrument-key → Universe label overrides (see
+   * parseUniverseMap). Empty by default: the derived label is used.
+   */
+  readonly liveUniverseMap: Record<string, string>;
   readonly liveWebSocketEnabled: boolean;
   /**
    * Expiry selection for the live option chain: always the NEAREST listed
@@ -105,6 +139,7 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
       .map((s) => s.trim())
       .filter(Boolean)
       .slice(0, 200);
+    this.liveUniverseMap = parseUniverseMap(config.get<string>('UPSTOX_LIVE_UNIVERSE_MAP'));
     this.liveWebSocketEnabled = /^(1|true|yes)$/i.test(config.get<string>('UPSTOX_LIVE_WS_ENABLED') ?? 'true');
     this.livePreferTodayExpiry = /^(1|true|yes)$/i.test(config.get<string>('UPSTOX_LIVE_PREFER_TODAY_EXPIRY') ?? 'true');
     this.liveStrikeWindow = Math.max(1, Math.min(50, Number(config.get<string>('UPSTOX_LIVE_STRIKE_WINDOW') ?? 10) || 10));

@@ -235,6 +235,33 @@ async function main() {
     ok('history reads untouched; kill switch honoured');
   }
 
+  // ── 11. Opt-in universe alias makes NIFTY a two-producer universe ─────────
+  {
+    const { parseUniverseMap, universeForInstrument } = require('../dist/trading/upstox-live-paper/upstox-live-paper.config');
+    const map = parseUniverseMap('NSE_INDEX|Nifty 50=NIFTY');
+    assert.deepEqual(map, { 'NSE_INDEX|Nifty 50': 'NIFTY' }, 'key -> universe alias parsed');
+    assert.deepEqual(parseUniverseMap(''), {}, 'no env value = no aliases (behaviour unchanged)');
+    assert.equal(universeForInstrument('NSE_INDEX|Nifty 50', map), 'NIFTY', 'alias wins over the derived label');
+    assert.equal(universeForInstrument('NSE_INDEX|Nifty 50', {}), 'NIFTY50', 'without the map the derived label is unchanged');
+    assert.equal(universeForInstrument('BSE_INDEX|SENSEX', map), 'SENSEX', 'unmapped keys are unaffected');
+    // With the alias BOTH feeds cover NIFTY — the premise of an outage demo.
+    const feeds = [
+      feed({ name: 'FYERS_WS', priority: 0, universes: A.optionUniversesFromSymbols(FYERS_SYMBOLS), ageMs: 1_000 }),
+      feed({ name: 'UPSTOX_REST', priority: 1, universes: ['SENSEX', universeForInstrument('NSE_INDEX|Nifty 50', map)], ageMs: 2_000 }),
+    ];
+    const normal = A.decideOwnership(['NIFTY', 'BANKNIFTY', 'SENSEX'], feeds, OPTIONS);
+    assert.equal(normal.find((d) => d.universe === 'NIFTY').owner, 'FYERS_WS', 'primary owns NIFTY while healthy');
+    assert.deepEqual(normal.find((d) => d.universe === 'NIFTY').standby, ['UPSTOX_REST']);
+    assert.equal(normal.find((d) => d.universe === 'SENSEX').owner, 'UPSTOX_REST', 'SENSEX stays with its only producer');
+    const during = feeds.map((f) => (f.name === 'FYERS_WS' ? { ...f, ageMs: null } : f));
+    const outage = A.decideOwnership(['NIFTY'], during, OPTIONS)[0];
+    assert.equal(outage.owner, 'UPSTOX_REST', 'a FYERS outage hands NIFTY to the standby');
+    assert.deepEqual(outage.standby, ['FYERS_WS']);
+    const recovered = A.decideOwnership(['NIFTY'], feeds, OPTIONS)[0];
+    assert.equal(recovered.owner, 'FYERS_WS', 'and control returns when FYERS recovers');
+    ok('opt-in universe alias gives NIFTY two producers (failover + failback become possible)');
+  }
+
   console.log(`\n${pass} checks passed, 0 failed`);
 }
 

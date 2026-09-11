@@ -8,7 +8,8 @@ import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
 import { FeedHealthService } from '../unified-market-data/feed-health.service';
 import { FeedArbitrationService } from '../unified-market-data/feed-arbitration.service';
 import { UnifiedMarketDataService } from '../unified-market-data/unified-market-data.service';
-import { ownedUniverses, shortUniverse, trackedUniversesFromSymbols } from '../unified-market-data/feed-arbitration.state';
+import { ownedUniverses, shortUniverse } from '../unified-market-data/feed-arbitration.state';
+import { universeForInstrument } from './upstox-live-paper.config';
 import { UPSTOX_LIVE_DATA_ISOLATION } from './upstox-live-paper.const';
 import { UpstoxLivePaperOptionQuote, UpstoxLivePaperMarketSnapshot } from './upstox-live-paper-entities';
 
@@ -281,7 +282,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     this.arbitration.register({
       name: UPSTOX_REST_FEED,
       priority: this.arbitrationPriority(),
-      universes: trackedUniversesFromSymbols(this.config.liveInstruments),
+      universes: this.trackedUniverses(),
       enabled: () => this.config.liveCredentialsPresent && this.config.liveInstruments.length > 0,
       credentialsOk: () => this.lastAuthOk,
       note: 'upstox-paper REST poll (secondary by default)',
@@ -292,8 +293,25 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   /** FEED_PRIORITY_UPSTOX_REST, fallback: secondary (1). */
   private arbitrationPriority(): number { return this.arbitration.priorityFor(UPSTOX_REST_FEED, 1); }
 
-  /** Option universes this desk's poll prices, derived from UPSTOX_LIVE_INSTRUMENTS. */
-  private trackedUniverses(): string[] { return trackedUniversesFromSymbols(this.config.liveInstruments); }
+  /**
+   * Option universes this desk's poll prices, from UPSTOX_LIVE_INSTRUMENTS.
+   *
+   * Universe labels are what the arbiter matches on, so they must agree with
+   * the other feed's labels for the SAME underlying: `NSE_INDEX|Nifty 50`
+   * derives `NIFTY50` while option contract symbols derive `NIFTY`. The opt-in
+   * UPSTOX_LIVE_UNIVERSE_MAP makes the broker key register as `NIFTY`, so the
+   * universe genuinely has two producers and failover between them is possible
+   * (empty map = derived labels, unchanged behaviour).
+   */
+  private trackedUniverses(): string[] {
+    return [
+      ...new Set(
+        this.config.liveInstruments
+          .map((key) => universeForInstrument(key, this.config.liveUniverseMap))
+          .filter(Boolean),
+      ),
+    ].sort();
+  }
 
   async onModuleInit(): Promise<void> {
     if (!this.config.liveInstruments.length) { this.logger.warn('[UPSTOX-LIVE] no instruments — market ingestion no-op'); return; }
@@ -359,7 +377,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     // Serve what the arbiter awarded, or — when nothing contests us — our own
     // configured universes.
     const wanted = owned.length ? owned : universes;
-    const keys = this.config.liveInstruments.filter((k) => wanted.includes(shortUniverse(k))).slice(0,50);
+    const keys = this.config.liveInstruments
+      .filter((k) => wanted.includes(universeForInstrument(k, this.config.liveUniverseMap)))
+      .slice(0, 50);
     if (!keys.length) return {fetched:0,errors:['no instruments']};
     const headers = await this.liveAuthHeaders();
     if (!headers) {
