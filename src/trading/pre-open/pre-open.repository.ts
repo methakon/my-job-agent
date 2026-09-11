@@ -89,6 +89,25 @@ export class PreOpenRepository {
     return Array.from(seen.values());
   }
 
+  /**
+   * The session's observations for ONE instrument whose event time is at or before
+   * `at`, oldest first — the tape a capture-time series metric is computed from.
+   * Rows with a null event time (unauditable) and INVALID rows are excluded; the
+   * caller bounds the window further.
+   */
+  async seriesAsOf(instrumentKey: string, sessionDate: string, at: Date, limit = 240): Promise<PreOpenObservation[]> {
+    return this.repo
+      .createQueryBuilder('o')
+      .where('o.instrumentKey = :k', { k: instrumentKey })
+      .andWhere('o.sessionDate = :d', { d: sessionDate })
+      .andWhere('o.eventTime IS NOT NULL')
+      .andWhere('o.eventTime <= :at', { at })
+      .andWhere("o.quality != 'INVALID'")
+      .orderBy('o.eventTime', 'ASC')
+      .take(limit)
+      .getMany();
+  }
+
   async countForSession(sessionDate: string): Promise<{ total: number; byQuality: Record<string, number>; instruments: number }> {
     const rows = await this.repo.find({ where: { sessionDate }, select: ['quality', 'instrumentKey'] });
     const byQuality: Record<string, number> = {};

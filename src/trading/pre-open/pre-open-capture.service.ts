@@ -5,12 +5,15 @@ import { PreOpenObservation } from './pre-open-observation.entity';
 import {
   assessObservation,
   derivePreOpenFeatures,
+  IMBALANCE_EPSILON,
+  isUsableQty,
   ObservationQuality,
   preOpenDedupeKey,
   PRE_OPEN_FEATURES_VERSION,
   PreOpenSourceValues,
   PreOpenFeatures,
 } from './pre-open-features';
+import { buildOaiSeries } from './pre-open-oai-series';
 import { PreOpenRepository, PriorClose } from './pre-open.repository';
 import {
   MARKET_OPEN_START_MIN,
@@ -185,6 +188,7 @@ export class PreOpenCaptureService implements OnModuleInit, OnModuleDestroy {
         const built = await this.buildObservation(instrumentKey, values, { nowMs, phase: gate.phase, brokerPhase, brokerStatus: fetch.marketStatus });
         rows.push(built);
       }
+      await this.attachOaiSeries(rows);
       const inserted = await this.repo.insertIgnore(rows);
       this.evaluatedTotal += rows.length;
       this.persistedTotal += inserted;
@@ -332,6 +336,47 @@ export class PreOpenCaptureService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Attach the OAI series block to rows about to be stored (row 22). The metrics are
+   * computed ONCE here — from the session's own observations up to each row's event
+   * time, plus the row itself — and then travel with the row, so a reader audits the
+   * value that was used at decision time instead of recomputing it later.
+   */
+  private async attachOaiSeries(rows: PreOpenObservation[]): Promise<void> {
+    for (const row of rows) {
+      if (!row.eventTime) continue;
+      try {
+        const prior = await this.repo.seriesAsOf(row.instrumentKey, row.sessionDate, row.eventTime);
+        const samples = prior
+          .filter((r) => r.id !== row.id && r.eventTime !== null)
+          .map((r) => ({ atMs: r.eventTime!.getTime(), oai: this.oaiOf(r) }))
+          .filter((s): s is { atMs: number; oai: number } => s.oai !== null);
+        const own = this.oaiOf(row);
+        if (own !== null) samples.push({ atMs: row.eventTime.getTime(), oai: own });
+        row.derived = {
+          oaiSeries: buildOaiSeries({
+            samples,
+            sessionPhase: row.sessionPhase as SessionPhase,
+            cutoffMs: row.eventTime.getTime(),
+          }),
+        };
+      } catch (error) {
+        // Never lose the observation because its derived context could not be built.
+        this.logger.warn(`OAI series not attached for ${row.instrumentKey}: ${(error as Error).message}`);
+      }
+    }
+  }
+
+  /** OAI for a stored/buildable observation, or null when the imbalance is not usable. */
+  private oaiOf(row: PreOpenObservation): number | null {
+    const buy = row.buyQuantity === null ? null : Number(row.buyQuantity);
+    const sell = row.sellQuantity === null ? null : Number(row.sellQuantity);
+    if (!isUsableQty(buy) || !isUsableQty(sell)) return null;
+    const sum = (buy as number) + (sell as number);
+    if (sum <= 0) return null;
+    return ((buy as number) - (sell as number)) / Math.max(sum, IMBALANCE_EPSILON);
+  }
+
   private async doForcedTick(): Promise<{ evaluated: number; inserted: number; skipped: string | null }> {
     if (this.inFlight) return { evaluated: 0, inserted: 0, skipped: 'previous poll still in flight' };
     this.inFlight = true;
@@ -350,6 +395,7 @@ export class PreOpenCaptureService implements OnModuleInit, OnModuleDestroy {
       for (const [instrumentKey, values] of Object.entries(fetch.values)) {
         rows.push(await this.buildObservation(instrumentKey, values, { nowMs, phase: this.phase, brokerPhase, brokerStatus: fetch.marketStatus }));
       }
+      await this.attachOaiSeries(rows);
       const inserted = await this.repo.insertIgnore(rows);
       this.evaluatedTotal += rows.length;
       this.persistedTotal += inserted;

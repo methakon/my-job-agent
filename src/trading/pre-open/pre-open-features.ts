@@ -287,8 +287,13 @@ export function featureBlockReason(input: FeatureInput, ctx: FeatureContext = {}
   return null;
 }
 
-const unavailable = (reason: string): DerivedValue => ({ value: null, status: 'UNAVAILABLE', reason });
-const ok = (value: number): DerivedValue => ({ value: round(value), status: 'OK', reason: null });
+/**
+ * Derived-value constructors. Exported so every derived producer in this module family
+ * (including the OAI series block) builds the SAME {value,status,reason} contract —
+ * a refusal always carries a reason and a null value, never a fabricated number.
+ */
+export const unavailable = (reason: string): DerivedValue => ({ value: null, status: 'UNAVAILABLE', reason });
+export const ok = (value: number): DerivedValue => ({ value: round(value), status: 'OK', reason: null });
 
 /**
  * Derive opening features from ONE observation. Deliberately takes no "now" and

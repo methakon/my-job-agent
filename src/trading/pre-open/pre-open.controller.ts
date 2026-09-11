@@ -150,6 +150,8 @@ const publicView = (row: PreOpenObservation, asOfMs: number) => ({
   bestAsk: row.bestAsk,
   bestAskQty: row.bestAskQty,
   derived: derivePreOpenFeatures(asFeatureInput(row), gateCtx(row, asOfMs)),
+  // The STORED decision-time block (row 22) — read back as written, never recomputed.
+  oaiSeries: (row.derived as { oaiSeries?: unknown } | null)?.oaiSeries ?? null,
 });
 
 /**

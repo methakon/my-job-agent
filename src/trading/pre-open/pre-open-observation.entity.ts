@@ -129,6 +129,15 @@ export class PreOpenObservation {
   rawPayload: Record<string, unknown> | null;
 
   /**
+   * Derived context computed AT CAPTURE TIME and never recomputed (row 22): currently
+   * the OAI series block (level, slope, acceleration, persistence) with its cutoff,
+   * phase, sample counts and formula version — everything a reviewer needs to audit
+   * the value that was used at decision time.
+   */
+  @Column({ type: 'json', nullable: true })
+  derived: Record<string, unknown> | null;
+
+  /**
    * Formula/algorithm version used when this observation is turned into features.
    * The ORM needs a literal here (it becomes the DDL default); the RUNTIME value always
    * comes from PRE_OPEN_FEATURES_VERSION in pre-open-features.ts, and the pre-open test

@@ -12,7 +12,7 @@
     "test:upstox-token": "npm run build && node scripts/upstox-token-oauth.test.js",
     "test:gate-exemptions": "node scripts/gate-exemptions.test.js",
     "test:pattern": "npm run build && node scripts/feed-arbitration.test.js && node scripts/pattern-engine.test.js",
-    "test:pre-open": "npm run build && node scripts/pre-open-capture.test.js",
+    "test:pre-open": "npm run build && node scripts/pre-open-capture.test.js && node scripts/pre-open-oai-series.test.js",
     "test:precleared": "npm run build && node scripts/upstox-live-paper-instructions.test.js",
     "test:clarifications": "npm run build && node scripts/verify-clarifications.js",
     "test:desks": "npm run build && node scripts/upstox-live-paper.test.js && node scripts/upstox-live-paper-instructions.test.js && node scripts/feed-arbitration.test.js && node scripts/fnf-shared-quote-fallback.test.js && node scripts/pattern-engine.test.js",
