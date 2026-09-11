@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import * as crypto from 'crypto';
 import { MailAccount } from './mail-account.entity';
+import { isSubmissionBlocked } from './sandbox-safety';
 
 export interface ApplicationEmail {
 	to: string;
@@ -90,11 +91,20 @@ export class MailService implements OnModuleInit {
 		});
 	}
 
-	/** Send via the PRIMARY account only (user rule 2026-08-28: all application
-	 *  emails go through swarna.s.jobs@gmail.com; Naukri/LinkedIn keep the old
-	 *  email via their own portal credentials — never fall back to the old
-	 *  mailbox for sends). Daily cap per mailbox keeps volume human. */
+		/** Send via the PRIMARY account only (user rule 2026-08-28: all application
+		 *  emails go through swarna.s.jobs@gmail.com; Naukri/LinkedIn keep the old
+		 *  email via their own portal credentials — never fall back to the old
+		 *  mailbox for sends). Daily cap per mailbox keeps volume human.
+		 *
+		 *  JA-002: blocked independently of any caller — direct low-level
+		 *  invocation cannot bypass the sandbox / kill switch. */
 	async send(app: ApplicationEmail): Promise<{ ok: boolean; via?: string; error?: string }> {
+		// JA-002: block every real send independently — direct low-level
+		// invocation cannot bypass the guard.
+		if (isSubmissionBlocked()) {
+			return { ok: false, error: 'submission-blocked-sandbox-or-kill-switch' };
+		}
+
 		// Daily rollover: the 15/day mailbox cap resets with the calendar
 		// (2026-08-27 defect: a stale sentToday permanently blocked the only
 		// active mailbox, so every send fell through to dead portal rows).

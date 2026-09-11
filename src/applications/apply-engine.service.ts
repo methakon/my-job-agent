@@ -13,6 +13,7 @@ import { AtsCvBuilder } from './ats-cv-builder.service';
 import { ProfileOptimizer } from '../profile/profile-optimizer.service';
 import { ProcessLearningService, DetectedProcess } from './process-learning.service';
 import { PortalCredentialService } from './portal-credential.service';
+import { isSubmissionBlocked } from './sandbox-safety';
 import { NaukriAdapter } from '../scout/naukri.adapter';
 import { MonsterAdapter } from '../scout/monster.adapter';
 import { FinnAdapter } from '../scout/finn.adapter';
@@ -93,18 +94,26 @@ export class ApplyEngineService implements OnModuleInit {
 		return [...this.adapters.values()].map((a) => ({ source: a.source, label: a.label }));
 	}
 
+	/** GLOBAL KILL SWITCH / SANDBOX check — every real submission path consults
+	 * the shared guard so the behaviour is identical whether the call goes through
+	 * the engine, a retry, a scheduled sweep or a direct low-level invocation. */
 	async ensureSettings(): Promise<void> {
 		await this.settingsRepo.ensureDefaults(this.listSources().map((s) => s.source));
-		if (process.env.APPLY_KILL_SWITCH === 'true') this.logger.warn('GLOBAL KILL SWITCH is ON — no submissions will go out');
+		if (isSubmissionBlocked()) {
+			const reason = process.env.SANDBOX === 'true' ? 'SANDBOX' : 'APPLY_KILL_SWITCH';
+			this.logger.warn(`${reason} is ON — no real submissions will go out (JA-002)`);
+		}
 	}
 
 	private killSwitchOn(): boolean {
-		return process.env.APPLY_KILL_SWITCH === 'true';
+		return isSubmissionBlocked();
 	}
 
-	/** Sandbox mode (user rule): full pipeline runs, nothing actually sent. */
+	/** Sandbox mode (user rule): full pipeline runs, nothing actually sent.
+	 * Uses the shared sandbox-safety guard so the engine, low-level mailers and
+	 * browser-form all consult the same SANDBOX / APPLY_KILL_SWITCH source of truth. */
 	sandboxOn(): boolean {
-		return process.env.SANDBOX === 'true';
+		return isSubmissionBlocked();
 	}
 
 	/**

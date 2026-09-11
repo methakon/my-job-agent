@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
+import { isSubmissionBlocked } from './sandbox-safety';
 
 export interface ApplicationEmail {
 	to: string;
@@ -41,6 +42,10 @@ export class DirectApplyMailer {
 	}
 
 	async send(app: ApplicationEmail): Promise<{ ok: boolean; error?: string }> {
+		// JA-002: block every real send independently — direct low-level
+		// invocation cannot bypass the guard.
+		if (isSubmissionBlocked()) return { ok: false, error: 'submission-blocked-sandbox-or-kill-switch' };
+
 		const transport = this.getTransport();
 		if (!transport) return { ok: false, error: 'smtp-not-configured' };
 		try {

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import * as fs from 'fs';
 import * as path from 'path';
+import { isSubmissionBlocked } from './sandbox-safety';
 
 export interface FormFillPlan {
 	url: string;
@@ -30,6 +31,10 @@ const SHOT_DIR = path.join(process.cwd(), 'generated', 'browser');
  * playwright-core (system Chrome, no bundled download). Fills ATS portal
  * forms from profile data; stops before final submit unless explicitly
  * allowed. Screenshots every step to generated/browser/ for audit.
+ *
+ * JA-002: the autoSubmit path is guarded — when SANDBOX=true or
+ * APPLY_KILL_SWITCH=true, the submit click is never performed, even if the
+ * caller set autoSubmit=true. Fill-only behaviour is unaffected.
  */
 @Injectable()
 export class BrowserFormService {
@@ -43,7 +48,13 @@ export class BrowserFormService {
 	}
 
 	async fillAndSubmit(plan: FormFillPlan): Promise<BrowserApplyResult> {
-		const result: BrowserApplyResult = { ok: false, status: 'failed', filledFields: [], unansweredQuestions: [], screenshots: [] };
+		const result: BrowserApplyResult = {
+			ok: false,
+			status: 'failed',
+			filledFields: [],
+			unansweredQuestions: [],
+			screenshots: [],
+		};
 		let browser: Browser | null = null;
 		try {
 			browser = await chromium.launch({
@@ -51,7 +62,11 @@ export class BrowserFormService {
 				headless: true,
 				// stealth flags: SmartRecruiters et al. run a device-verification
 				// interstitial that stalls default headless Chrome (2026-08-27).
-				args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-blink-features=AutomationControlled'],
+				args: [
+					'--no-sandbox',
+					'--disable-dev-shm-usage',
+					'--disable-blink-features=AutomationControlled',
+				],
 			});
 			const ctx: BrowserContext = await browser.newContext({
 				viewport: { width: 1280, height: 900 },
@@ -91,14 +106,18 @@ export class BrowserFormService {
 					.locator('input:not([type=hidden]), textarea, select')
 					.first()
 					.waitFor({ state: 'visible', timeout: 20_000 })
-					.catch(() => this.logger.warn(`browser form ${plan.url}: no form fields appeared after CTA`));
+					.catch(() =>
+						this.logger.warn(`browser form ${plan.url}: no form fields appeared after CTA`),
+					);
 				result.screenshots.push(await this.shot(page, 'apply-clicked'));
 			}
 
 			// collect visible form fields (text/email/tel/url/textarea/select + file).
 			// locator() pierces shadow DOM (SmartRecruiters oneclick-ui renders its
 			// form in shadow roots — $$eval never sees them, 2026-08-27).
-			const fieldEls = page.locator('input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select');
+			const fieldEls = page.locator(
+				'input:not([type=hidden]):not([type=submit]):not([type=button]), textarea, select',
+			);
 			const fieldCount = await fieldEls.count();
 			const fields: Array<{
 				index: number;
@@ -124,7 +143,8 @@ export class BrowserFormService {
 							id: e.id || null,
 							placeholder: (e as HTMLInputElement).placeholder || null,
 							label:
-								e.id && document.querySelector(`label[for="${e.id}"]`)
+								e.id &&
+								document.querySelector(`label[for="${e.id}"]`)
 									? (document.querySelector(`label[for="${e.id}"]`) as HTMLElement).innerText.trim()
 									: null,
 							aria: e.getAttribute('aria-label'),
@@ -136,7 +156,13 @@ export class BrowserFormService {
 
 			const norm = (s: string | null) => (s ?? '').toLowerCase().replace(/[^a-z]/g, '');
 			const valueFor = (f: (typeof fields)[number]): string | null => {
-				const keys = [norm(f.label), norm(f.name), norm(f.id), norm(f.placeholder), norm(f.aria)].filter(Boolean);
+				const keys = [
+					norm(f.label),
+					norm(f.name),
+					norm(f.id),
+					norm(f.placeholder),
+					norm(f.aria),
+				].filter(Boolean);
 				for (const key of keys) {
 					for (const [vk, vv] of Object.entries(plan.values)) {
 						if (key.includes(norm(vk)) || norm(vk).includes(key)) return vv;
@@ -150,7 +176,8 @@ export class BrowserFormService {
 				if (f.type === 'file') continue; // handled below
 				const val = valueFor(f);
 				if (!val) {
-					if (f.required) result.unansweredQuestions.push(f.label ?? f.name ?? f.id ?? 'unknown required field');
+					if (f.required)
+						result.unansweredQuestions.push(f.label ?? f.name ?? f.id ?? 'unknown required field');
 					continue;
 				}
 				const el = fieldEls.nth(f.index);
@@ -172,7 +199,9 @@ export class BrowserFormService {
 				const fileInputs = page.locator('input[type=file]');
 				const n = await fileInputs.count();
 				for (let i = 0; i < n; i++) {
-					await fileInputs.nth(i).setInputFiles(plan.cvPath).catch((e) => this.logger.warn(`cv upload failed: ${e}`));
+					await fileInputs.nth(i).setInputFiles(plan.cvPath).catch((e) =>
+						this.logger.warn(`cv upload failed: ${e}`),
+					);
 				}
 			}
 			result.screenshots.push(await this.shot(page, 'filled'));
@@ -180,16 +209,31 @@ export class BrowserFormService {
 			if (result.unansweredQuestions.length > 0) {
 				result.status = 'needs_info';
 			} else if (plan.autoSubmit) {
-				await page.locator('button[type=submit], input[type=submit], button:has-text("Submit"), button:has-text("Apply")').first().click();
-				await page.waitForLoadState('domcontentloaded');
-				result.screenshots.push(await this.shot(page, 'submitted'));
-				result.status = 'submitted';
+				// JA-002: block the real browser submit independently — even when the
+				// caller set autoSubmit=true, the guard must be honored.
+				if (isSubmissionBlocked()) {
+					result.status = 'filled';
+					result.errorDetail = 'submission-blocked-sandbox-or-kill-switch';
+					this.logger.warn(`browser form ${plan.url}: submit blocked by sandbox/kill-switch`);
+				} else {
+					await page
+						.locator(
+							'button[type=submit], input[type=submit], button:has-text("Submit"), button:has-text("Apply")',
+						)
+						.first()
+						.click();
+					await page.waitForLoadState('domcontentloaded');
+					result.screenshots.push(await this.shot(page, 'submitted'));
+					result.status = 'submitted';
+				}
 			} else {
 				// safety default: leave filled for human review
 				result.status = 'filled';
 			}
 			result.ok = true;
-			this.logger.log(`browser form ${plan.url}: ${filledCount} filled, status=${result.status}, ${result.unansweredQuestions.length} unanswered`);
+			this.logger.log(
+				`browser form ${plan.url}: ${filledCount} filled, status=${result.status}, ${result.unansweredQuestions.length} unanswered`,
+			);
 		} catch (err) {
 			result.errorDetail = String(err).slice(0, 500);
 			this.logger.warn(`browser apply failed: ${result.errorDetail}`);
