@@ -90,6 +90,38 @@ export class UpstoxLivePaperAutoEntryService {
     return this.config.liveInstruments;
   }
 
+  /**
+   * The desk's OWN stores key option quotes and index snapshots by the
+   * NORMALIZED symbol — UpstoxLivePaperMarketService.symbolFromKey maps the broker
+   * instrument key 'BSE_INDEX|SENSEX' to 'SENSEX' and writes that value into
+   * upstox_live_paper_option_quotes.underlying / ..._market_snapshots.instrument.
+   * UPSTOX_LIVE_INSTRUMENTS carries the BROKER key (correct for the market-data
+   * API, wrong for these stores). Querying the stores with the raw broker key
+   * matched nothing, so the ATM universe came back empty and no candidate was EVER
+   * recorded (2026-09-11 audit: 0 rows for 'BSE_INDEX|SENSEX' vs 36,951 for
+   * 'SENSEX' in the 240-minute lookback; candidates/instructions/trades all 0).
+   * All desk-store lookups therefore use this normalized form.
+   */
+  private get deskUnderlying(): string {
+    return String(this.underlyings[0] ?? '')
+      .split('|')
+      .pop()!
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+  }
+
+  /** Throttled [UPSTOX] diagnostics (operator spec 2026-09-11): one line per
+   *  distinct state, at most one repeat every 5 minutes. Never logs secrets. */
+  private lastDiagLine = '';
+  private lastDiagAt = 0;
+  private logThrottled(line: string, everyMs = 300_000): void {
+    const now = Date.now();
+    if (line === this.lastDiagLine && now - this.lastDiagAt < everyMs) return;
+    this.lastDiagLine = line;
+    this.lastDiagAt = now;
+    this.logger.log(line);
+  }
+
   private istMinutes(now: number): number {
     const t = new Date(now + IST_OFFSET_MS);
     return t.getUTCHours() * 60 + t.getUTCMinutes();
@@ -182,6 +214,21 @@ export class UpstoxLivePaperAutoEntryService {
         account.scan = await this.scanForEntries(portfolio, snapshot, now);
         (summary.accounts as unknown[]).push(account);
       }
+      // [UPSTOX][SIGNAL] / [UPSTOX][NO_TRADE] — one clear line per cycle state.
+      for (const account of summary.accounts as Array<Record<string, unknown>>) {
+        const scan = (account.scan ?? {}) as Record<string, unknown>;
+        if (account.entrySkipped) {
+          this.logThrottled(`[UPSTOX][NO_TRADE] ${account.label}: reason=${account.entrySkipped}`);
+          continue;
+        }
+        this.logThrottled(
+          `[UPSTOX][SIGNAL] ${account.label}: evaluated=${scan.evaluated ?? 0} considered=${scan.considered ?? 0} ` +
+            `qualified=${scan.qualified ?? 0} opened=${scan.opened ? String(scan.opened) : 'none'}`,
+        );
+        if (!scan.opened) {
+          this.logThrottled(`[UPSTOX][NO_TRADE] ${account.label}: reason=${scan.skipped ?? 'no qualified entry this cycle'}`);
+        }
+      }
       summary.labelled = await this.labelStaleCandidates();
       return summary;
     } finally {
@@ -193,7 +240,7 @@ export class UpstoxLivePaperAutoEntryService {
   private async atmUniverse(portfolio: UpstoxLivePaperPortfolio, snapshot: PaperRiskSnapshot) {
     const thresholds = entryPolicyThresholdsFromEnv();
     const since = new Date(Date.now() - this.lookbackMinutes * 60_000);
-    const underlying = String(this.underlyings[0] ?? '');
+    const underlying = this.deskUnderlying;
 
     const rows = await this.quotes.find({
       where: { underlying, ts: MoreThanOrEqual(since) },
@@ -281,14 +328,23 @@ export class UpstoxLivePaperAutoEntryService {
   private async scanForEntries(portfolio: UpstoxLivePaperPortfolio, snapshot: PaperRiskSnapshot, now: number): Promise<Record<string, unknown>> {
     const built = await this.atmUniverse(portfolio, snapshot);
     const thresholds = built.thresholds;
+    // [UPSTOX][MARKET_DATA] — the first line to read when nothing trades.
+    const newest = await this.quotes.findOne({ where: { underlying: this.deskUnderlying }, order: { ts: 'DESC' } });
+    const ageMs = newest ? Math.max(0, now - new Date(newest.ts).getTime()) : null;
+    this.logThrottled(
+      `[UPSTOX][MARKET_DATA] source=UPSTOX_LIVE universe=${this.deskUnderlying} status=${newest ? 'TICKS' : 'NO_TICKS'} ` +
+        `last_tick=${newest ? new Date(newest.ts).toISOString() : 'none'} age_ms=${ageMs === null ? 'n/a' : ageMs}`,
+    );
     if (!built.universe || !built.legs.length) {
-      return { considered: 0, evaluated: 0, qualified: 0, opened: null, skipped: built.stale ?? 'no ATM universe' };
+      const reason = built.stale ?? 'no ATM universe';
+      this.logThrottled(`[UPSTOX][NO_TRADE] universe=${this.deskUnderlying} considered=0 reason=${reason}`);
+      return { considered: 0, evaluated: 0, qualified: 0, opened: null, skipped: reason };
     }
     const sessionDate = await this.risk.todayIst(now);
     const nowIstMinutes = this.istMinutes(now);
     const since = new Date(now - this.lookbackMinutes * 60_000);
     const strikes = new Set<number>([...built.universe.ce, ...built.universe.pe].map((l) => Number(l.strike)));
-    const chain = await this.chainLegs(String(this.underlyings[0] ?? ''), built.universe.ce[0]?.expiry ?? built.universe.pe[0]?.expiry ?? '', strikes, since);
+    const chain = await this.chainLegs(this.deskUnderlying, built.universe.ce[0]?.expiry ?? built.universe.pe[0]?.expiry ?? '', strikes, since);
     const patternThresholds = patternThresholdsFromEnv();
 
     let evaluated = 0;
@@ -299,7 +355,7 @@ export class UpstoxLivePaperAutoEntryService {
     // CE and PE of the ATM strike both get a fair evaluation; the better setup
     // wins, and only one may be taken (max 1 open position).
     for (const leg of [...built.universe.ce, ...built.universe.pe]) {
-      const { option, underlying: underlyingCandles } = await this.candlesFor(leg.contractSymbol, String(this.underlyings[0] ?? ''), since);
+      const { option, underlying: underlyingCandles } = await this.candlesFor(leg.contractSymbol, this.deskUnderlying, since);
       if (option.length < 4) continue;
       evaluated += 1;
 
@@ -348,7 +404,7 @@ export class UpstoxLivePaperAutoEntryService {
         portfolioId: portfolio.id,
         sessionDate,
         contractSymbol: leg.contractSymbol,
-        underlying: String(this.underlyings[0] ?? ''),
+        underlying: this.deskUnderlying,
         expiry: leg.expiry,
         strike: leg.strike,
         optionType: leg.optionType,
@@ -439,7 +495,7 @@ export class UpstoxLivePaperAutoEntryService {
       await this.learning.markEntered(candidate.id, { tradeId: trade.id, entryPrice: Number(trade.entryPrice) });
       opened = trade.id;
       this.logger.log(
-        `[UPSTOX-AUTO-V1] OPEN ${leg.contractSymbol} ${sizing.lots} lot(s) @ ₹${leg.ltp} · ` +
+        `[UPSTOX][PAPER] OPEN ${leg.contractSymbol} ${sizing.lots} lot(s) @ ₹${leg.ltp} · ` +
         `conf ${decision.confidence.toFixed(3)} · stop ₹${decision.stop?.toFixed(2)} target ₹${decision.target?.toFixed(2)} · ` +
         `risk ₹${decision.risk.plannedRisk?.toFixed(2)} (${decision.risk.plannedRiskPct?.toFixed(2)}% of ₹${decision.risk.configuredCapital})`,
       );
@@ -479,7 +535,7 @@ export class UpstoxLivePaperAutoEntryService {
       if (candidate) await this.learning.updateExcursion(candidate.id, ltp);
 
       const since = new Date(new Date(entryTs).getTime() - 60_000);
-      const { option, underlying: underlyingCandles } = await this.candlesFor(trade.instrument, String(this.underlyings[0] ?? ''), since);
+      const { option, underlying: underlyingCandles } = await this.candlesFor(trade.instrument, this.deskUnderlying, since);
       const optionAtr = atr(option, 14);
       const optionType: 'CE' | 'PE' = (String(candidate?.optionType ?? (trade.instrument.endsWith('PE') ? 'PE' : 'CE')).toUpperCase() === 'PE' ? 'PE' : 'CE');
 
@@ -496,7 +552,7 @@ export class UpstoxLivePaperAutoEntryService {
       let setupInvalidated = false;
       let adverseReversalScore: number | null = null;
       const expiry = candidate?.expiry ? String(candidate.expiry).slice(0, 10) : (latest.expiry ? String(latest.expiry).slice(0, 10) : sessionDate);
-      const chain = await this.chainLegs(String(this.underlyings[0] ?? ''), expiry, new Set([Number(latest.strike)]), since);
+      const chain = await this.chainLegs(this.deskUnderlying, expiry, new Set([Number(latest.strike)]), since);
       if (option.length >= 4 && optionType === (String(latest.optionType).toUpperCase() === 'PE' ? 'PE' : 'CE')) {
         const assessment = assessPattern({
           optionCandles: option,
@@ -510,7 +566,7 @@ export class UpstoxLivePaperAutoEntryService {
             iv: latest.impliedVolatility === null ? null : Number(latest.impliedVolatility),
           },
           optionType,
-          spot: await this.latestSpot(String(this.underlyings[0] ?? '')),
+          spot: await this.latestSpot(this.deskUnderlying),
           thresholds: patternThresholdsFromEnv(),
         } as never);
         setupInvalidated = assessment.signal === 'NO_TRADE' && assessment.entryState !== 'EARLY_REVERSAL';
