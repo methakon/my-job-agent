@@ -54,6 +54,38 @@ const fromCsv = (value: string): string[] =>
     .filter(Boolean);
 
 /**
+ * Bound ANY single lease/DB operation so a hung read or write can never freeze a
+ * provider's liveness. Measured 2026-09-11: the FYERS producer kept ticking and
+ * persisting, but its ownership-poll await on a slow lease READ never returned,
+ * so its heartbeat stopped advancing for 7+ minutes; the arbiter then saw the
+ * primary as DOWN and kept the universe on the standby even after the primary
+ * had recovered. Pure + exported for the hung-read regression test.
+ *
+ * A timeout REJECTS: callers must treat it exactly like any other failure. It
+ * never fabricates a result, so a timed-out lease operation cannot create or
+ * preserve ownership — ownership stays the arbiter's decision alone.
+ */
+export const withTimeout = async <T>(
+  operation: Promise<T> | (() => Promise<T>),
+  ms: number,
+  label: string,
+): Promise<T> => {
+  const promise = typeof operation === 'function' ? operation() : operation;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms (${label})`)), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
+/**
  * Single-active-feed arbiter (brief s2/s6/s12).
  *
  * The two paper desks keep SEPARATE trades and balances, may consume each
@@ -81,6 +113,8 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
   private readonly downAfterMs: number;
   private readonly leaseTtlMs: number;
   private readonly heartbeatMs: number;
+  /** Upper bound for one lease read/write (FEED_DB_TIMEOUT_MS). */
+  private readonly dbTimeoutMs: number;
   private readonly cacheMs = 2_000;
 
   private cache: { at: number; decisions: OwnershipDecision[]; candidates: FeedArbitrationStatus['candidates'] } | null = null;
@@ -99,6 +133,7 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
     this.downAfterMs = Math.max(this.staleAfterMs + 1_000, Number(process.env.FEED_DOWN_AFTER_MS ?? process.env.MARKET_DATA_DOWN_AFTER_MS ?? DEFAULT_FEED_DOWN_AFTER_MS));
     this.leaseTtlMs = Math.max(this.downAfterMs, Number(process.env.FEED_LEASE_TTL_MS ?? 90_000));
     this.heartbeatMs = Math.max(2_000, Number(process.env.FEED_HEARTBEAT_MS ?? 15_000));
+    this.dbTimeoutMs = Math.max(1_000, Number(process.env.FEED_DB_TIMEOUT_MS ?? 8_000));
   }
 
   onModuleInit(): void {
@@ -151,7 +186,10 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
 
   /** Non-expired lease rows from other processes, as candidates. */
   private async leaseCandidates(now: number): Promise<{ candidates: FeedCandidate[]; freshNames: Set<string> }> {
-    const rows = await this.leases.find();
+    // Bounded: a hung lease read must fail (and thus fail OPEN for local
+    // producers) rather than hang the caller. No ownership is implied by a
+    // failed read — the arbiter simply has no lease candidates to rank.
+    const rows = await withTimeout(() => this.leases.find(), this.dbTimeoutMs, 'lease read');
     const candidates: FeedCandidate[] = [];
     const freshNames = new Set<string>();
     for (const row of rows) {
@@ -267,7 +305,10 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
       note: patch.note ?? registration?.note ?? null,
     };
     try {
-      await this.leases.upsert(row as MarketDataFeedLease, ['feedName']);
+      // Bounded: on timeout/failure we do NOT record the beat as delivered, so
+      // the next poll retries; the lease keeps its previous value and nothing is
+      // half-written (the write is a single atomic upsert).
+      await withTimeout(() => this.leases.upsert(row as MarketDataFeedLease, ['feedName']), this.dbTimeoutMs, `lease write ${feedName}`);
       this.lastHeartbeatMs.set(feedName, nowMs);
       this.lastState.set(feedName, state);
       this.cache = null;

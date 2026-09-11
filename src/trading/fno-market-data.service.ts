@@ -119,6 +119,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private arbiterOwnerByUniverse = new Map<string, string | null>();
   private arbiterDecisionAt: number | null = null;
   private arbiterPollTimer: ReturnType<typeof setInterval> | null = null;
+  private arbiterWarnAt = 0;
   /** Live credentials present (arbiter eligibility + lease honesty). */
   private credentialsOk = false;
 
@@ -257,22 +258,39 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private startArbiterOwnershipWatch(): void {
     if (this.arbiterPollTimer) return;
     const tick = async (): Promise<void> => {
+      // 1. LIVENESS FIRST, from local truth only. Publishing the heartbeat must
+      //    never wait on a lease read: measured 2026-09-11 a hung lease READ
+      //    froze this provider's heartbeat for 7+ minutes while it kept
+      //    producing ticks, so the arbiter held its universe on the standby
+      //    even after the provider had recovered.
       try {
-        const decisions = await this.arbitration.decisions();
-        const owners = new Map<string, string | null>();
-        for (const decision of decisions) owners.set(shortUniverse(decision.universe), decision.owner ?? null);
-        this.arbiterOwnerByUniverse = owners;
-        this.arbiterDecisionAt = Date.now();
-        const owned = [...owners.entries()].filter(([, owner]) => owner === this.feedName).map(([universe]) => universe);
+        const owned = this.arbiterOwnerByUniverse.size
+          ? [...this.arbiterOwnerByUniverse.entries()]
+              .filter(([, owner]) => owner === this.feedName)
+              .map(([universe]) => universe)
+          : this.arbiterUniverses;
         await this.arbitration.beat(this.feedName, {
           state: this.statusValue.connected ? 'ACTIVE' : 'STANDBY',
+          // Coverage, not a claim of ownership (until the first award is known):
+          // the arbiter alone elects the owner from health + priority.
           universes: owned,
           credentialsOk: this.credentialsOk,
           lastTickAt: this.statusValue.lastTickAt ? new Date(this.statusValue.lastTickAt) : null,
           note: this.statusValue.connected ? null : 'socket down — awaiting credentials/reconnect',
         });
       } catch (error) {
-        this.logger.warn(`[FEED-ARBITER] ownership poll failed: ${this.safeMessage(error)}`);
+        this.arbiterWarn(`[FEED-ARBITER] heartbeat failed: ${this.safeMessage(error)}`);
+      }
+      // 2. Then refresh this process's award snapshot (the read is bounded
+      //    inside the arbiter, so it cannot stall the next heartbeat either).
+      try {
+        const decisions = await this.arbitration.decisions();
+        const owners = new Map<string, string | null>();
+        for (const decision of decisions) owners.set(shortUniverse(decision.universe), decision.owner ?? null);
+        this.arbiterOwnerByUniverse = owners;
+        this.arbiterDecisionAt = Date.now();
+      } catch (error) {
+        this.arbiterWarn(`[FEED-ARBITER] award refresh failed: ${this.safeMessage(error)}`);
       }
     };
     void tick();
@@ -297,6 +315,14 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     if (this.arbiterDecisionAt === null) return true;
     const owner = this.arbiterOwnerByUniverse.get(short);
     return !owner || owner === this.feedName;
+  }
+
+  /** One warning per 5 min — the heartbeat retries on every poll. */
+  private arbiterWarn(message: string): void {
+    const now = Date.now();
+    if (now - this.arbiterWarnAt < 300_000) return;
+    this.arbiterWarnAt = now;
+    this.logger.warn(message);
   }
 
 
