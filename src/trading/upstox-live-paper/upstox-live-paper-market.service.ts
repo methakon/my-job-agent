@@ -179,6 +179,15 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   private lastAuthOk = false;
   /** Last time a chain leg without its own instrument_key was reported (throttled). */
   private lastLegKeyWarnMs = 0;
+  /**
+   * Deterministic token → symbol map built from the broker's OWN contract master
+   * (/v2/option/contract). Real v2 option-chain legs carry a NUMERIC instrument
+   * key (e.g. `BSE_FO|862843`), which carries no identity by itself: the
+   * canonical interpreter refuses to guess one, so the adapter supplies the
+   * broker's own symbols here instead.
+   */
+  private readonly symbolByInstrumentKey = new Map<string, { symbol: string; exchange: string | null }>();
+  private readonly symbolByToken = new Map<string, { symbol: string; exchange: string | null }>();
 
   slippageBps(): number { return this.config.defaultSlippageBps; }
   staleThresholdMs(): number { return this.config.staleQuoteMaxAgeMs; }
@@ -237,6 +246,24 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
    */
   private captureContractMaster(key: string, rows: UpstoxV2ContractRow[], expiry: string | null): void {
     const short = underlyingShortName(key);
+    const exchange = String(key).split('|')[0].split('_')[0] || null;
+    // The same response is the ONLY honest source of a numeric token's identity:
+    // remember instrument_key → trading_symbol so the canonical interpreter can
+    // resolve a chain leg instead of rejecting it (never a guessed symbol).
+    for (const row of rows) {
+      const instrumentKey = String(row.instrument_key ?? '').trim();
+      const tradingSymbol = String(row.trading_symbol ?? '').trim();
+      if (!instrumentKey || !tradingSymbol) continue;
+      const identity = { symbol: tradingSymbol, exchange };
+      this.symbolByInstrumentKey.set(instrumentKey.toUpperCase(), identity);
+      const token = instrumentKey.split('|').pop() ?? '';
+      if (/^\d+$/.test(token)) this.symbolByToken.set(token, identity);
+    }
+    if (this.symbolByToken.size > 100_000) {
+      // Bound the map: the master is re-read per underlying/expiry anyway.
+      this.symbolByToken.clear();
+      this.symbolByInstrumentKey.clear();
+    }
     const counts = new Map<number, number>();
     for (const row of rows) {
       const raw = finite(row.lot_size) ?? finite(row.lotSize);
@@ -257,6 +284,21 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     if (previous !== size) {
       this.logger.log(`[UPSTOX-LIVE] contract master: ${short} lot size ${size} across ${rows.length} contract rows (expiry ${expiry ?? '?'}) — source /v2/option/contract`);
     }
+  }
+
+  /**
+   * Deterministic instrument-key/token → symbol resolution for the canonical
+   * interpreter, taken from the broker's OWN contract master (never guessed).
+   * A token the master has never described stays unresolved and the tick is
+   * rejected by the interpreter — visible in its rejection counters.
+   */
+  private resolveContractSymbol(providerInstrumentId: string): { symbol: string; exchange: string | null } | null {
+    const key = String(providerInstrumentId ?? '').trim();
+    if (!key) return null;
+    const direct = this.symbolByInstrumentKey.get(key.toUpperCase());
+    if (direct) return direct;
+    const token = key.split('|').pop() ?? key;
+    return /^\d+$/.test(token) ? this.symbolByToken.get(token) ?? null : null;
   }
 
   constructor(config: UpstoxLivePaperConfig,
@@ -631,6 +673,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     void this.interpreter
       .ingestMessage('UPSTOX_LIVE', leg, {
         receivedAt: ts,
+        // A numeric leg key carries no identity: the broker's own contract master
+        // (read this cycle) is the only deterministic resolver.
+        resolveSymbol: (id) => this.resolveContractSymbol(id),
         identity: {
           providerInstrumentId: instrumentKey || null,
           underlying: symbol,

@@ -76,6 +76,14 @@ const hasTickValue = (source: Record<string, unknown>, keys: readonly string[]):
     return true;
   });
 
+/**
+ * Brokers publish 0 for a book side that simply has no quote (routine on illiquid
+ * strikes and after hours). That is provider semantics for "absent", not a quote of
+ * zero, so it is carried as absent instead of being rejected as an impossible price.
+ * A 0 LAST PRICE is untouched: that is a real value and the interpreter rejects it.
+ */
+const zeroIsAbsent = (value: unknown): unknown => (Number(value) === 0 ? null : value);
+
 const FYERS_TICK_FIELDS = [
   'ltp', 'lp', 'last_traded_price', 'vol_traded_today', 'volume', 'volume_traded', 'oi', 'open_interest',
   'bid', 'ask', 'bid_price', 'ask_price', 'exch_feed_time', 'last_traded_time', 'open_price', 'high_price', 'low_price',
@@ -155,10 +163,10 @@ export const fyersMapper: ProviderMapper = (payload, ctx) => {
       ltp: pick(tick, 'ltp', 'lp', 'last_traded_price') ?? pick(v, 'lp', 'ltp'),
       volume: pick(tick, 'vol_traded_today', 'volume', 'volume_traded') ?? pick(v, 'vol_traded_today', 'volume'),
       oi: pick(tick, 'oi', 'open_interest', 'openInterest') ?? pick(v, 'oi'),
-      bid: pick(tick, 'bid', 'bid_price') ?? pick(v, 'bid'),
-      ask: pick(tick, 'ask', 'ask_price') ?? pick(v, 'ask'),
-      bidQty: pick(tick, 'bid_size', 'bidQty', 'bid_qty') ?? pick(v, 'bid_size'),
-      askQty: pick(tick, 'ask_size', 'askQty', 'ask_qty') ?? pick(v, 'ask_size'),
+      bid: zeroIsAbsent(pick(tick, 'bid', 'bid_price') ?? pick(v, 'bid')),
+      ask: zeroIsAbsent(pick(tick, 'ask', 'ask_price') ?? pick(v, 'ask')),
+      bidQty: zeroIsAbsent(pick(tick, 'bid_size', 'bidQty', 'bid_qty') ?? pick(v, 'bid_size')),
+      askQty: zeroIsAbsent(pick(tick, 'ask_size', 'askQty', 'ask_qty') ?? pick(v, 'ask_size')),
       open: pick(tick, 'open_price'),
       high: pick(tick, 'high_price'),
       low: pick(tick, 'low_price'),
@@ -195,6 +203,10 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
   }
   const ohlc = record(quote.ohlc);
   const depth = fromDepth(quote.depth);
+  // Upstox publishes 0 for a side that simply has no quote (common on illiquid
+  // strikes): that is provider semantics for "absent", not a quote of zero, so it
+  // is carried as absent instead of being rejected as an impossible price. A 0
+  // LAST PRICE stays a real 0 and is rejected by the interpreter.
   const rawKey = String(providerInstrumentId);
   const tail = rawKey.split('|').pop() ?? rawKey;
   const tokenIsNumeric = /^\d+$/.test(tail);
@@ -233,10 +245,10 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
       volume: pick(quote, 'volume', 'volume_traded'),
       oi: pick(quote, 'oi', 'open_interest'),
       previousOi: pick(quote, 'prev_oi', 'previous_oi'),
-      bid: pick(quote, 'bid', 'bid_price') ?? depth.bid,
-      ask: pick(quote, 'ask', 'ask_price') ?? depth.ask,
-      bidQty: pick(quote, 'bid_qty', 'bid_size') ?? depth.bidQty,
-      askQty: pick(quote, 'ask_qty', 'ask_size') ?? depth.askQty,
+      bid: zeroIsAbsent(pick(quote, 'bid', 'bid_price') ?? depth.bid),
+      ask: zeroIsAbsent(pick(quote, 'ask', 'ask_price') ?? depth.ask),
+      bidQty: zeroIsAbsent(pick(quote, 'bid_qty', 'bid_size') ?? depth.bidQty),
+      askQty: zeroIsAbsent(pick(quote, 'ask_qty', 'ask_size') ?? depth.askQty),
       open: pick(ohlc, 'open'),
       high: pick(ohlc, 'high'),
       low: pick(ohlc, 'low'),

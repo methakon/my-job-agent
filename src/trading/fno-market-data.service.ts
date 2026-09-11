@@ -117,6 +117,8 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private arbiterOwnerByUniverse = new Map<string, string | null>();
   private arbiterDecisionAt: number | null = null;
   private arbiterPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Diagnostic canonical-pipeline summary (read-only; no decision depends on it). */
+  private canonicalSummaryTimer: ReturnType<typeof setInterval> | null = null;
   private arbiterWarnAt = 0;
   /** Live credentials present (arbiter eligibility + lease honesty). */
   private credentialsOk = false;
@@ -423,6 +425,10 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     // OPTION coverage even while the socket is down, so a universe this feed
     // cannot currently serve can be elected to the other live feed.
     this.registerArbiterCoverage();
+    // Canonical pipeline read-out for THIS process (the socket owner): a compact
+    // periodic line so the live verification can read acceptance/rejection rates
+    // and measured latency from the worker that actually produces FYERS ticks.
+    this.startCanonicalSummaryWatch();
     if (!this.statusValue.enabled) {
       this.statusValue.lastMessage = 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure FYERS credentials';
       this.logger.log(this.statusValue.lastMessage);
@@ -460,6 +466,10 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy(): void {
     this.destroyed = true;
+    if (this.canonicalSummaryTimer) {
+      clearInterval(this.canonicalSummaryTimer);
+      this.canonicalSummaryTimer = null;
+    }
     if (this.fyersRetryTimer) {
       clearInterval(this.fyersRetryTimer);
       this.fyersRetryTimer = null;
@@ -665,6 +675,27 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     if (now - last < this.persistEveryMs) return false;
     this.lastPersistedAt.set(tick.instrumentKey, now);
     return true;
+  }
+
+  /**
+   * Periodic, diagnostic-only read-out of the canonical interpreter's counters
+   * (accepted / rejected by code / persisted / withheld / ignored + latency).
+   * Read-only: it changes no decision and gates nothing. This worker owns the
+   * socket and runs no HTTP server, so its log is where FYERS-side pipeline
+   * health is observed (the app's `GET /market-data/canonical` covers its own).
+   */
+  private startCanonicalSummaryWatch(): void {
+    if (this.canonicalSummaryTimer) return;
+    const every = Math.max(60_000, Number(process.env.CANONICAL_SUMMARY_MS ?? 300_000));
+    this.canonicalSummaryTimer = setInterval(() => {
+      const m = this.interpreter.metrics();
+      const codes = Object.entries(m.rejectionsByCode).map(([code, n]) => `${code}=${n}`).join(' ') || 'none';
+      this.logger.log(
+        `[CANONICAL] accepted=${m.accepted} persisted=${m.persisted} rejected=${m.rejected} (${codes}) withheld=${m.withheld} ignored=${m.ignored} ` +
+        `latency p50=${m.latency.p50Ms ?? '-'}ms p95=${m.latency.p95Ms ?? '-'}ms budgetBreaches=${m.latencyBudgetExceeded} last=${m.lastSample ? `${m.lastSample.source}:${m.lastSample.instrumentKey}${m.lastSample.accepted ? '' : ' REJECTED'}` : '-'}`,
+      );
+    }, every);
+    this.canonicalSummaryTimer.unref?.();
   }
 
   private recordTicks(ticks: Tick[], provider: string): void {

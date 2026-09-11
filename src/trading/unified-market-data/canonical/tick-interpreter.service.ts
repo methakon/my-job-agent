@@ -48,19 +48,22 @@ export type InterpreterMetrics = {
   lastSample: { source: string; instrumentKey: string; lagMs: number | null; accepted: boolean } | null;
 };
 
+/** Deterministic token/key → symbol resolver (see MapperContext). */
+export type ResolveSymbol = NonNullable<MapperContext['resolveSymbol']>;
+
 export type InterpretAndPersistInput = {
   source: string;
   payload: unknown;
   receivedAt?: Date;
   /** Deterministic token → symbol resolution for brokers whose ticks carry only a token. */
-  resolveSymbol?: (providerInstrumentId: string) => string | null;
+  resolveSymbol?: ResolveSymbol;
   /** Identity the adapter already knows from the same provider response (see MapperIdentity). */
   identity?: MapperIdentity;
 };
 
 export type IngestOptions = {
   receivedAt?: Date;
-  resolveSymbol?: (providerInstrumentId: string) => string | null;
+  resolveSymbol?: ResolveSymbol;
   identity?: MapperIdentity;
   /**
    * The producer's own publication gate, applied AFTER validation and BEFORE

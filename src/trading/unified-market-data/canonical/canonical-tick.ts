@@ -223,7 +223,21 @@ export function parseOptionSymbol(symbol: unknown, now = new Date()): {
 } {
   const tail = String(symbol ?? '').trim().split('|').pop()!.split(':').pop()!;
   const match = tail.toUpperCase().match(new RegExp(`^([A-Z]+?)(\\d{2})(${MONTH_NAMES})(\\d+(?:\\.\\d+)?)(CE|PE)$`));
-  if (!match) return { underlying: null, expiry: null, strike: null, optionType: null };
+  if (!match) {
+    // The other documented broker order puts the right BEFORE the date and spells
+    // the year out: UNDERLYING + STRIKE + CE|PE + DD + MON + YY (Upstox BSE F&O
+    // trading symbols, e.g. SENSEX73900CE17SEP26). Still not a guess: every part is
+    // present in the symbol, and an unparseable tail stays null.
+    const alternate = tail.toUpperCase().match(new RegExp(`^([A-Z]+?)(\\d+(?:\\.\\d+)?)(CE|PE)(\\d{2})(${MONTH_NAMES})(\\d{2})$`));
+    if (!alternate) return { underlying: null, expiry: null, strike: null, optionType: null };
+    const alternateStrike = Number(alternate[2]);
+    return {
+      underlying: alternate[1],
+      expiry: `20${alternate[6]}-${MARKET_MONTHS[alternate[5]]}-${alternate[4]}`,
+      strike: Number.isFinite(alternateStrike) ? alternateStrike : null,
+      optionType: alternate[3] as 'CE' | 'PE',
+    };
+  }
   const strike = Number(match[4]);
   const day = match[2].padStart(2, '0');
   const month = MARKET_MONTHS[match[3]];
@@ -258,6 +272,34 @@ export function canonicalInstrumentKey(symbolOrId: unknown, exchange?: unknown):
   return declaredExchange ? `${declaredExchange}:${tail}` : tail;
 }
 
+/**
+ * The canonical SYMBOL form for an option contract, rebuilt from the contract's
+ * own fields: `EXCHANGE:UNDERLYING + DD + MON + STRIKE + CE|PE`.
+ *
+ * Brokers spell the same contract differently — Upstox writes
+ * `SENSEX73900CE17SEP26`, FYERS writes `SENSEX17SEP73900CE` — so a key taken from
+ * the provider's own symbol text is NOT comparable across providers. Rebuilding it
+ * from underlying/expiry/strike/right gives BOTH providers the same canonical key
+ * (this is what makes one contract one identity). NSE/BSE symbology carries no
+ * year, so the canonical key carries none either.
+ */
+export function canonicalOptionSymbol(
+  exchange: string | null | undefined,
+  underlying: string | null | undefined,
+  expiry: string | null | undefined,
+  strike: number | null | undefined,
+  optionType: 'CE' | 'PE' | null | undefined,
+): string | null {
+  const name = String(underlying ?? '').trim().toUpperCase();
+  const exchangeName = String(exchange ?? '').trim().toUpperCase();
+  if (!name || !exchangeName || strike === null || strike === undefined || !Number.isFinite(Number(strike)) || !optionType) return null;
+  const iso = String(expiry ?? '').trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!iso) return null;
+  const month = Object.entries(MARKET_MONTHS).find(([, m]) => m === iso[2])?.[0];
+  if (!month) return null;
+  return `${exchangeName}:${name}${iso[3]}${month}${Number(strike)}${optionType}`;
+}
+
 /** Index/equity/option classification from the identity text alone. */
 export function classifyInstrument(instrumentKey: string, declared?: unknown): InstrumentType {
   const declaredType = String(declared ?? '').trim().toUpperCase();
@@ -268,6 +310,8 @@ export function classifyInstrument(instrumentKey: string, declared?: unknown): I
   if (declaredType.startsWith('EQ')) return 'EQUITY';
   const tail = instrumentKey.split(':').pop() ?? instrumentKey;
   if (/(CE|PE)$/.test(tail)) return 'OPTION';
+  // The alternate broker order puts the right before the date: SENSEX73900CE17SEP26.
+  if (/\d(CE|PE)\d{2}[A-Z]{3}\d{2}$/.test(tail)) return 'OPTION';
   if (/(FUT)$/.test(tail)) return 'FUTURE';
   if (/INDEX|^NIFTY50$|^SENSEX$|^BANKNIFTY$/.test(tail.replace(/[^A-Z0-9]/g, ''))) return 'INDEX';
   return 'UNKNOWN';
@@ -331,10 +375,17 @@ export function interpretObservation(
   const optionType = normalizeOptionType(observation.optionType) ?? parsed.optionType;
   const strike = num(observation.strike) ?? parsed.strike;
   const expiry = normalizeExpiry(observation.expiry) ?? parsed.expiry;
-  const underlying = String(observation.underlying ?? '').trim().toUpperCase() || parsed.underlying || null;
+  // For an OPTION the contract's own SYMBOL is the strongest identity evidence:
+  // brokers spell the same contract differently and a desk's own label is not the
+  // exchange's underlying name, so the parsed underlying wins where it exists.
+  const declaredUnderlying = String(observation.underlying ?? '').trim().toUpperCase();
+  const underlying = instrumentType === 'OPTION'
+    ? parsed.underlying ?? declaredUnderlying ?? null
+    : declaredUnderlying || parsed.underlying || null;
   // Segment: what the provider declares, else the definitional consequence of the
   // instrument type (an option/future IS an F&O contract) — never a guess.
   const declaredSegment = String(observation.segment ?? '').trim().toUpperCase();
+  const exchange = String(observation.exchange ?? '').trim().toUpperCase() || instrumentKey.split(':')[0] || null;
   const segment =
     declaredSegment ||
     (instrumentType === 'OPTION' || instrumentType === 'FUTURE'
@@ -344,11 +395,16 @@ export function interpretObservation(
         : instrumentType === 'EQUITY'
           ? 'EQ'
           : null);
+  // ONE identity per contract across providers: rebuild the option key from the
+  // contract's own fields (see canonicalOptionSymbol) instead of keeping whichever
+  // spelling the provider happened to send.
+  const canonicalKey = instrumentType === 'OPTION' ? canonicalOptionSymbol(exchange, underlying, expiry, strike, optionType) : null;
+  const effectiveKey = canonicalKey ?? instrumentKey;
 
   // An OPTION without its identity parts cannot be placed on a chain: reject
   // rather than persist a contract that desks would have to guess about.
   if (instrumentType === 'OPTION' && (!expiry || strike === null || !optionType)) {
-    return reject('SCHEMA', `option ${instrumentKey} is missing expiry/strike/right`, name);
+    return reject('SCHEMA', `option ${effectiveKey} is missing expiry/strike/right`, name);
   }
 
   const ltp = num(observation.ltp);
@@ -401,11 +457,11 @@ export function interpretObservation(
   return {
     ok: true,
     tick: {
-      instrumentKey,
+      instrumentKey: effectiveKey,
       source: name,
       providerInstrumentId: String(observation.providerInstrumentId ?? observation.providerSymbol ?? instrumentKey).trim(),
       underlying,
-      exchange: String(observation.exchange ?? '').trim().toUpperCase() || instrumentKey.split(':')[0] || null,
+      exchange,
       segment,
       instrumentType,
       expiry,

@@ -16,8 +16,14 @@ import { BypassAuth } from './auth/bypass-auth.decorator';
  * Deliberately narrow: only API-shaped sub-paths are handed back. Bare page
  * paths (e.g. /upstox-live-paper) keep the shell, so nothing a user types
  * starts 404-ing.
+ *
+ * `/market-data/` is delegated for the same reason: /market-data/health,
+ * /market-data/arbitration and /market-data/canonical are JSON APIs owned by
+ * UnifiedMarketDataModule (imported), and they were being answered with the
+ * login shell — HTTP 200, no data — which silently hid the market-data health
+ * and canonical-pipeline read-outs from every scripted check.
  */
-const DELEGATED_PREFIXES = ['/api/', '/upstox-live-paper/', '/fnf-trading/'];
+const DELEGATED_PREFIXES = ['/api/', '/upstox-live-paper/', '/fnf-trading/', '/market-data/'];
 
 /**
  * SPA fallback — MUST stay the LAST entry in AppModule.controllers.

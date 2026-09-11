@@ -442,7 +442,64 @@ async function main() {
     assert.equal(viaBrokerKey.source, 'FYERS_LIVE', 'the true producer travels to the consumer');
     const viaSymbol = await readerService.sharedQuote({ contractSymbol: 'NIFTY26SEP23000PE' }, { maxAgeMs: 600_000, now: RECEIVED_AT.getTime() });
     assert.ok(viaSymbol, 'a canonical row is found from the bare contract symbol too');
+
+    // Diagnostic read-outs only — a route and a periodic log line, no mode, no gate.
+    const healthSrc = fs.readFileSync(path.join(SRC, 'trading/unified-market-data/market-data-health.controller.ts'), 'utf8');
+    assert.ok(/@Get\('canonical'\)/.test(healthSrc) && healthSrc.includes('this.interpreter.metrics()'),
+      'the canonical pipeline exposes a read-only diagnostic route');
+    const feedSrc = fs.readFileSync(path.join(SRC, 'trading/fno-market-data.service.ts'), 'utf8');
+    assert.ok(feedSrc.includes('[CANONICAL]'), 'the socket owner logs a periodic canonical summary');
+    assert.ok(feedSrc.includes('CANONICAL_SUMMARY_MS'), 'the summary cadence is configurable');
+    // the diagnostic JSON API must not be swallowed by the SPA fallback shell
+    const fallbackSrc = fs.readFileSync(path.join(SRC, 'app-fallback.controller.ts'), 'utf8');
+    assert.ok(fallbackSrc.includes("'/market-data/'"), 'the SPA fallback delegates /market-data/ so the read-out is reachable');
+    // a NUMERIC provider key must be resolved from the broker's own contract master
+    const upstoxSrc = fs.readFileSync(path.join(SRC, 'trading/upstox-live-paper/upstox-live-paper-market.service.ts'), 'utf8');
+    assert.ok(upstoxSrc.includes('resolveSymbol:') && upstoxSrc.includes('symbolByInstrumentKey'),
+      'the Upstox adapter resolves numeric leg keys from the broker contract master, never a guessed symbol');
+    for (const key of ['withheld', 'ignored', 'rejectionsByCode', 'latency']) {
+      assert.ok(key in gated.metrics(), `metrics expose ${key}`);
+    }
     ok('canonical pipeline is mandatory (no mode, no fallback) and canonical desk reads resolve');
+  }
+
+  // ── 11. One contract = ONE identity even when brokers spell it differently ─
+  {
+    // SENSEX 17SEP 73900 CE: FYERS writes the contract BSE:SENSEX17SEP73900CE,
+    // Upstox writes the trading symbol SENSEX73900CE17SEP26 and keys the chain leg
+    // by a numeric token (BSE_FO|862843 — the real shape seen live).
+    const fyersSensex = interpret('FYERS_LIVE', { symbol: 'BSE:SENSEX17SEP73900CE', ltp: 1247.35, bid: 1245, ask: 1250, exch_feed_time: Math.floor(QUOTE_AT.getTime() / 1000) });
+    assert.equal(fyersSensex.ok, true, fyersSensex.ok ? '' : fyersSensex.reason);
+    const upstoxLeg = { instrument_key: 'BSE_FO|862843', market_data: { ltp: 1247.35, bid_price: 1245, ask_price: 1250 } };
+    const resolvedLeg = mapperFor('UPSTOX_LIVE')(upstoxLeg, {
+      receivedAt: RECEIVED_AT,
+      resolveSymbol: (id) => (id === 'BSE_FO|862843' ? { symbol: 'SENSEX73900CE17SEP26', exchange: 'BSE' } : null),
+    });
+    assert.equal(resolvedLeg.ok, true, 'the numeric leg key resolves from the broker contract master');
+    const upstoxSensex = interpretObservation('UPSTOX_LIVE', resolvedLeg.observation, RECEIVED_AT);
+    assert.equal(upstoxSensex.ok, true, upstoxSensex.ok ? '' : upstoxSensex.reason);
+    assert.equal(fyersSensex.tick.instrumentKey, 'BSE:SENSEX17SEP73900CE');
+    assert.equal(upstoxSensex.tick.instrumentKey, fyersSensex.tick.instrumentKey,
+      'two different broker spellings converge on ONE canonical identity');
+    assert.equal(upstoxSensex.tick.underlying, 'SENSEX');
+    assert.equal(upstoxSensex.tick.optionType, 'CE');
+    assert.equal(upstoxSensex.tick.strike, 73900);
+    assert.equal(upstoxSensex.tick.expiry, '2026-09-17');
+    assert.equal(upstoxSensex.tick.providerInstrumentId, 'BSE_FO|862843', 'the broker token stays provenance, never the identity');
+    // An unresolved numeric token is still refused: nothing is invented.
+    const unresolvedLeg = mapperFor('UPSTOX_LIVE')(upstoxLeg, { receivedAt: RECEIVED_AT, resolveSymbol: () => null });
+    assert.equal(unresolvedLeg.ok, false);
+    assert.match(unresolvedLeg.reason, /unresolved/i);
+
+    // A zero book side means "no quote on that side", not a quote of zero.
+    const zeroBid = interpret('UPSTOX_LIVE', { instrument_token: 'NSE_FO|NIFTY26SEP23000PE', last_price: 99.8, bid_price: 0, ask_price: 100.1 });
+    assert.equal(zeroBid.ok, true, zeroBid.ok ? '' : zeroBid.reason);
+    assert.strictEqual(zeroBid.tick.bid, null, 'a zero bid is carried as absent, never fabricated');
+    assert.equal(zeroBid.tick.ask, 100.1);
+    // …while a zero LAST PRICE is still an impossible price.
+    assert.equal(interpret('UPSTOX_LIVE', { instrument_token: 'NSE_FO|NIFTY26SEP23000PE', last_price: 0 }).code, 'IMPOSSIBLE_VALUE');
+    assert.equal(interpret('FYERS_LIVE', { symbol: 'NSE:NIFTY26SEP23000PE', ltp: 99.8, bid: 0 }).tick.bid, null, 'FYERS zero sides behave the same');
+    ok('one contract = one canonical identity across broker spellings; zero book sides are absent, zero prices are not');
   }
 
   console.log(`\n${pass} checks passed, 0 failed`);

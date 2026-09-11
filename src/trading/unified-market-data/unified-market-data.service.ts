@@ -385,6 +385,19 @@ export class UnifiedMarketDataService {
         if (query.optionType) fallback.optionType = String(query.optionType).toUpperCase();
         where.push(fallback);
       }
+      // A desk knows its contract by FIELDS (underlying/expiry/strike/right) even
+      // when its broker spells the symbol differently from the canonical key, so a
+      // field-level candidate is added whenever those fields are supplied. This can
+      // only widen the lookup — it never fabricates a row.
+      if (query.underlying && query.strike !== null && query.strike !== undefined && query.optionType) {
+        const byFields: Record<string, unknown> = {
+          underlying: String(query.underlying).toUpperCase(),
+          strike: query.strike,
+          optionType: String(query.optionType).toUpperCase(),
+        };
+        if (query.expiry) byFields.expiry = String(query.expiry);
+        where.push(byFields);
+      }
       const row = await this.quotes.findOne({ where, order: { receivedTimestamp: 'DESC' } });
       return freshEnough(row) ? row : null;
     } catch (error) {
