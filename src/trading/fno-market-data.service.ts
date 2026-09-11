@@ -9,6 +9,7 @@ import { shouldAcceptTick } from './market-feed-guard';
 import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
 import { FeedHealthService } from './unified-market-data/feed-health.service';
 import { FeedArbitrationService } from './unified-market-data/feed-arbitration.service';
+import { TickInterpreterService } from './unified-market-data/canonical/tick-interpreter.service';
 import { optionUniversesFromSymbols, shortUniverse } from './unified-market-data/feed-arbitration.state';
 
 // The FYERS package currently ships JavaScript without TypeScript declarations.
@@ -130,6 +131,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     private readonly unified: UnifiedMarketDataService,
     private readonly feedHealth: FeedHealthService,
     private readonly arbitration: FeedArbitrationService,
+    // Deterministic canonical interpreter (shadow-measures this raw provider
+    // message; see canonical/tick-interpreter.service.ts).
+    private readonly interpreter: TickInterpreterService,
   ) {
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
       .split(',')
@@ -639,6 +643,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   }
 
   private onMessage(message: unknown): void {
+    // Canonical interpreter (shadow by default): interprets the RAW provider
+    // message and measures it; never writes, never throws, never gates a desk.
+    this.interpreter.observe('FYERS_LIVE', message);
     this.recordTicks(this.parseMessage(message), 'fyers');
   }
 

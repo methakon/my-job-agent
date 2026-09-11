@@ -19,6 +19,7 @@
     "test:feed-beat": "npm run build && node scripts/feed-beat-liveness.test.js",
     "test:db-pool": "npm run build && node scripts/db-pool-reliability.test.js",
     "test:lease-connection": "npm run build && node scripts/lease-connection.test.js",
+    "test:canonical-ticks": "npm run build && node scripts/canonical-tick-interpreter.test.js",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "test:learning": "node scripts/option-trade-learning.js --selfcheck",

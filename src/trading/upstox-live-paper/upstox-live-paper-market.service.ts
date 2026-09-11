@@ -7,6 +7,7 @@ import { UpstoxLivePaperConfig } from './upstox-live-paper.config';
 import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
 import { FeedHealthService } from '../unified-market-data/feed-health.service';
 import { FeedArbitrationService } from '../unified-market-data/feed-arbitration.service';
+import { TickInterpreterService } from '../unified-market-data/canonical/tick-interpreter.service';
 import { UnifiedMarketDataService } from '../unified-market-data/unified-market-data.service';
 import { ownedUniverses, shortUniverse } from '../unified-market-data/feed-arbitration.state';
 import { universeForInstrument } from './upstox-live-paper.config';
@@ -264,7 +265,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     private readonly feedHealth: FeedHealthService,
     private readonly tokenService: UpstoxLivePaperTokenService,
     private readonly arbitration: FeedArbitrationService,
-    private readonly unified: UnifiedMarketDataService) {
+    private readonly unified: UnifiedMarketDataService,
+    // Canonical interpreter (shadow by default): measures this RAW Upstox leg.
+    private readonly interpreter: TickInterpreterService) {
     this.config = config; this.optionQuotes = optionQuotes; this.marketSnapshots = marketSnapshots;
     this.paperOnly = config.paperOnly; this.safetyLockActive = config.safetyLockActive;
     // Feed-health gate registration (brief s6/s8): the Upstox desk's own REST
@@ -602,6 +605,8 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     if (!md) return null;
     const ltp = finite(md.ltp) ?? finite(md.last_price);
     if (ltp === null || ltp <= 0) return null; // no honest tick without a traded price
+    // Canonical interpreter (shadow by default) on the RAW leg payload.
+    this.interpreter.observe('UPSTOX_LIVE', leg);
     const oi = finite(md.oi) ?? finite(md.open_interest);
     const prevOi = finite(md.prev_oi);
     const iv = finite(leg?.option_greeks?.iv);

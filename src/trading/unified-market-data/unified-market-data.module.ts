@@ -7,6 +7,7 @@ import { UnifiedMarketDataService } from './unified-market-data.service';
 import { FeedHealthService } from './feed-health.service';
 import { FeedArbitrationService } from './feed-arbitration.service';
 import { DedicatedLeaseStore, LEASE_STORE } from './lease-connection.store';
+import { TickInterpreterService } from './canonical/tick-interpreter.service';
 import { MarketDataHealthController } from './market-data-health.controller';
 
 /**
@@ -35,7 +36,9 @@ import { MarketDataHealthController } from './market-data-health.controller';
     FeedArbitrationService,
     // One dedicated connection for the arbitration control path only.
     { provide: LEASE_STORE, useFactory: () => new DedicatedLeaseStore() },
+    // Deterministic, provider-independent canonical tick interpreter.
+    TickInterpreterService,
   ],
-  exports: [UnifiedMarketDataService, FeedHealthService, FeedArbitrationService],
+  exports: [UnifiedMarketDataService, FeedHealthService, FeedArbitrationService, TickInterpreterService],
 })
 export class UnifiedMarketDataModule {}
