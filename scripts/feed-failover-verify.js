@@ -25,7 +25,11 @@
  *   npm run verify:failover                # 100 s bounded outage (default)
  *   npm run verify:failover -- --seconds 100
  *
- * All windows use a client-computed UTC cutoff (the DB server clock is hours off).
+ * All windows use a client-computed cutoff rendered on the RIGHT wall-clock basis:
+ * `createdAt` (server-filled, UTC) is compared with utcWall(), while the client-written
+ * columns (receivedTimestamp, heartbeatAt, ts) are stored in IST. Mixing the two opens a
+ * window 5 h 30 m too wide — that was the measured "20x row count" trap. windowFor() picks
+ * the basis, probeTimeBases() re-checks it against live data. See scripts/lib/market-session.js.
  */
 const fs = require('fs');
 const path = require('path');
@@ -59,14 +63,19 @@ async function ownership(db) {
 
 /** Which producer actually PUBLISHED rows for a universe inside the last N seconds. */
 async function publishers(db, universe, lookbackS = 60) {
-	const cutoff = ms.utcWall(new Date(Date.now() - lookbackS * 1000));
+	const minutes = lookbackS / 60;
+	// createdAt is the server-filled UTC column, so the client-computed cutoff is compared
+	// like-for-like. The client-written columns on these tables (receivedTimestamp, ts) are
+	// IST — windowing them with a UTC cutoff would open the window 5 h 30 m too wide.
+	const qw = ms.windowFor('unified_option_quotes', minutes);
+	const sw = ms.windowFor('unified_market_snapshots', minutes);
 	const [quotes] = await db.query(
 		`SELECT source, COUNT(*) rows_, COUNT(DISTINCT instrumentKey) instruments FROM unified_option_quotes
-		  WHERE underlying = ? AND createdAt > ? GROUP BY source ORDER BY rows_ DESC`, [universe, cutoff]);
+		  WHERE underlying = ? AND ${qw.predicate} GROUP BY source ORDER BY rows_ DESC`, [universe, qw.cutoff]);
 	const [snaps] = await db.query(
 		`SELECT source, COUNT(*) rows_ FROM unified_market_snapshots
-		  WHERE (underlying = ? OR symbol IN (?, ?)) AND createdAt > ? GROUP BY source ORDER BY rows_ DESC`,
-		[universe, `${universe}`, `NSE:${universe}`, cutoff]);
+		  WHERE (underlying = ? OR symbol IN (?, ?)) AND ${sw.predicate} GROUP BY source ORDER BY rows_ DESC`,
+		[universe, `${universe}`, `NSE:${universe}`, sw.cutoff]);
 	return { quotes, snapshots: snaps };
 }
 
@@ -85,7 +94,10 @@ async function main() {
 	}
 
 	const db = await ms.pool();
-	const evidence = { asOf: startedAt.toISOString(), ist: ms.istStamp(startedAt), seconds, stages: {}, arbitration: null };
+	const bases = await ms.probeTimeBases(db);
+	const evidence = { asOf: startedAt.toISOString(), ist: ms.istStamp(startedAt), seconds, timeBases: bases, stages: {}, arbitration: null };
+	console.log('  column bases probed live (newest value vs server UTC now):');
+	for (const [key, info] of Object.entries(bases)) console.log(`    ${key}: ${info.basis}${info.deltaMin === undefined ? '' : ` (delta ${info.deltaMin} min)`}`);
 	const stage = async (name, extra = {}) => {
 		const [leases, arb, fyers, upstox] = await Promise.all([
 			ownership(db),
