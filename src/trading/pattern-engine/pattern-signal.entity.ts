@@ -153,7 +153,15 @@ export class PatternSignal {
    * if it were a result.
    */
   @Column({ type: 'json', nullable: true })
-  outcomes: { horizons: unknown[]; coverageMinutes?: number } | null;
+  outcomes: {
+    /** Per-horizon measurements; see HorizonOutcome in pattern-features.ts. */
+    horizons: any[];
+    coverageMinutes?: number;
+    /** Frozen feature cutoff the labels were measured AFTER (row 159) — auditable per row. */
+    featureCutoffMs?: number | null;
+    /** Strategy version the frozen features belong to. */
+    strategyVersion?: string | null;
+  } | null;
 
   // ── Per-desk dispatch (isolated; each desk decides independently) ─────────
   @Column({ type: 'json', nullable: true })

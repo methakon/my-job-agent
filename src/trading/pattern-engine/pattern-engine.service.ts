@@ -11,6 +11,9 @@ import {
 } from './pattern-features';
 import { PatternSignal } from './pattern-signal.entity';
 import { PatternSignalDispatchService } from './pattern-signal-dispatch.service';
+import {
+  buildLabelPatch, featureCutoffOf, headlineLabel, labelEnvelope, LabelPatch, validateLabelWrite, withFeatureCutoff,
+} from './label-integrity';
 
 type UniverseScan = {
   universe: string;
@@ -360,7 +363,7 @@ export class PatternEngineService implements OnModuleInit, OnModuleDestroy {
       vega: latest.vega === null ? null : Number(latest.vega),
       pcr: assessment.chain.pcr === null ? null : round(assessment.chain.pcr),
       targetPct, stopPct,
-      features: {
+      features: withFeatureCutoff({
         components: assessment.components, weights: undefined, penalties: assessment.penalties,
         reversalParts: assessment.reversal.parts, reversalFlags: assessment.reversal.flags,
         momentum: assessment.momentum, oi: assessment.oi, iv: assessment.iv,
@@ -370,7 +373,15 @@ export class PatternEngineService implements OnModuleInit, OnModuleDestroy {
         liquidity: { score: assessment.liquidity.score, reasons: assessment.liquidity.reasons },
         breakout: { class: assessment.breakout.classification, distancePct: assessment.breakout.distancePct, volumeRatio: assessment.breakout.volumeRatio, spreadAtBreakout: assessment.breakout.spreadAtBreakout },
         entryState: assessment.entryState,
-      },
+      }, {
+        // FROZEN FEATURE CUTOFF (row 159): the newest input this vector was allowed
+        // to read. It is recorded once, here, and never rewritten — the label writer
+        // is refused outright if it so much as mentions a feature field
+        // (label-integrity.validateLabelWrite).
+        featureCutoffMs: new Date(latest.ts).getTime(),
+        bucketMs: this.bucketMs,
+        strategyVersion: STRATEGY_VERSION,
+      }),
       outcomeLabel: 'PENDING',
     } as Partial<PatternSignal>);
     try {
@@ -397,7 +408,7 @@ export class PatternEngineService implements OnModuleInit, OnModuleDestroy {
     for (const row of rows) {
       const entryPrice = Number(row.ltp ?? 0);
       if (!(entryPrice > 0)) {
-        await this.signals.update({ id: row.id }, { outcomeLabel: 'PENDING', labelledAt: new Date() });
+        await this.writeLabel(row, buildLabelPatch({ outcomeLabel: 'PENDING', labelledAtMs: Date.now() }));
         continue;
       }
       const future = await this.quotes.find({
@@ -413,20 +424,44 @@ export class PatternEngineService implements OnModuleInit, OnModuleDestroy {
       if (!outcomes.length) continue;
       const maxFavourable = Math.max(...outcomes.map((o) => o.maxFavourablePct ?? 0));
       const maxAdverse = Math.min(...outcomes.map((o) => o.maxAdversePct ?? 0));
-      // The headline label describes the LONGEST horizon the tape actually
-      // covered — never a horizon the future has not reached yet.
+      // The headline label describes the LONGEST horizon the tape actually covered —
+      // never a horizon the future has not reached yet (headlineLabel, row 159).
       const covered = outcomes.filter((o) => o.covered !== false);
-      const label = (covered.length ? covered[covered.length - 1] : outcomes[outcomes.length - 1]).label;
-      await this.signals.update({ id: row.id }, {
-        outcomes: { horizons: outcomes, coverageMinutes: covered.length ? covered[covered.length - 1].horizonMinutes : 0 },
+      const label = headlineLabel(outcomes);
+      if (!label) continue;
+      const wrote = await this.writeLabel(row, buildLabelPatch({
+        outcomeLabel: label,
+        labelledAtMs: Date.now(),
         maxFavourablePct: round(maxFavourable, 6),
         maxAdversePct: round(maxAdverse, 6),
-        outcomeLabel: label,
-        labelledAt: new Date(),
-      });
-      labelled++;
+        // The envelope echoes the row's FROZEN cutoff, so a reader can see per row that
+        // the labels were measured from a tape starting after the feature boundary.
+        outcomes: labelEnvelope({
+          outcomes,
+          coverageMinutes: covered.length ? covered[covered.length - 1].horizonMinutes : 0,
+          cutoffMs: featureCutoffOf(row),
+          strategyVersion: row.strategyVersion ?? null,
+        }),
+      }));
+      if (wrote) labelled++;
     }
     return labelled;
+  }
+
+  /**
+   * The ONLY path that writes label fields on the learning dataset (row 159). The
+   * patch is built from the measurement inputs alone and validated against the frozen
+   * feature set BEFORE it touches the row: a refused write is logged and skipped, never
+   * forced through and never "repaired" by rewriting features.
+   */
+  private async writeLabel(row: PatternSignal, patch: LabelPatch): Promise<boolean> {
+    const verdict = validateLabelWrite(row, patch as unknown as Record<string, unknown>);
+    if (!verdict.ok) {
+      this.logger.warn(`[PATTERN] label write REFUSED for ${row.id} (${row.contractSymbol}): ${verdict.violations.join(', ')}`);
+      return false;
+    }
+    await this.signals.update({ id: row.id }, patch as Partial<PatternSignal>);
+    return true;
   }
 
   /** Dashboard payload (brief s20): current pattern per universe + WHY. */

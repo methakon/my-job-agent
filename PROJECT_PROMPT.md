@@ -95,6 +95,32 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 01:45) — row 159 DONE (strict future-only labels, frozen feature cutoffs) + Dhargent Option A executed
+
+- **Dhargent Option A (operator-approved, executed read-only everywhere else):**
+  `/home/ubuntu/trading-agent/.env` gained `UNIFIED_DUAL_WRITE=false`; then
+  `pm2 restart trading-agent --update-env` + `pm2 save` (backup:
+  `.env.bak-dualwrite-20260912-012535`). The foreign pre-canonical writer stopped dead:
+  **0** `FYERS_LIVE` rows in `unified_option_quotes` / `unified_market_snapshots` after
+  19:55:35Z vs 3,136 in the 30 min before. FNF desk writes kept flowing
+  (`fnf_option_quotes` fyers: 128 rows / 5 min, newest 19:58Z), the canonical producer and
+  both leases were unaffected (NIFTY/BANKNIFTY = FYERS_WS, hb 8-12 s). Revert = delete the
+  line + restart. FNF writes, FYERS ownership, tokens, capital, risk and arbitration were
+  not touched.
+- **Row 159 (GATE 12 #5) → done** — `src/trading/pattern-engine/label-integrity.ts` (new,
+  pure): `withFeatureCutoff()` records the newest input the feature vector was allowed to
+  read (`features.cutoff.featureCutoffMs`), `validateLabelWrite()` refuses any patch naming
+  a feature field or an unknown field (fail closed) and any horizon without coverage
+  provenance, `splitFeatureInputs()`/`leakedFeatureInputs()` name post-cutoff ticks,
+  `headlineLabel()` only ever promotes a COVERED horizon. The engine's label writer is now
+  a single choke point (`writeLabel()`), and the stored label envelope echoes the row's
+  frozen cutoff. `scripts/label-integrity.test.js` (**60/60**, `npm run test:labels`) is the
+  timestamp/leakage proof, including a static scan that no `signals.update()` inline patch
+  names a frozen field. Runtime check: 508 rows all keep their features, all 54 labelled
+  rows still carry the original vector.
+- Existing suites green (`test:pattern`, `test:desks`, `test:labels`); app rebuilt +
+  restarted (listening 3010, no new errors, arbitration unchanged).
+
 ## Progress (2026-09-11 21:30) — canonical interpreter is the MANDATORY production pipeline (mode removed) + roadmap row 878 + live Upstox proof
 
 **Operator decisions (2026-09-11)**
