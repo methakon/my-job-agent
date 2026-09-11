@@ -18,6 +18,7 @@
     "test:desks": "npm run build && node scripts/upstox-live-paper.test.js && node scripts/upstox-live-paper-instructions.test.js && node scripts/feed-arbitration.test.js && node scripts/fnf-shared-quote-fallback.test.js && node scripts/pattern-engine.test.js",
     "test:feed-beat": "npm run build && node scripts/feed-beat-liveness.test.js",
     "test:db-pool": "npm run build && node scripts/db-pool-reliability.test.js",
+    "test:lease-connection": "npm run build && node scripts/lease-connection.test.js",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "test:learning": "node scripts/option-trade-learning.js --selfcheck",

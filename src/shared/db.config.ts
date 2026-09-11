@@ -1,9 +1,9 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 /**
- * mysql2 connection/pool reliability knobs, shared by EVERY pool this project
- * opens against the one Oracle Cloud MySQL (reachable only through the SSH
- * tunnel published as 127.0.0.1:3307).
+ * mysql2 connection/pool reliability knobs, shared by EVERY connection this
+ * project opens against the one Oracle Cloud MySQL (reachable only through the
+ * SSH tunnel published as 127.0.0.1:3307).
  *
  * Why (measured 2026-09-11): that tunnel drops connections silently, so a pool
  * can end up holding a black-holed socket — a query assigned to it never
@@ -28,10 +28,23 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
  * is untouched, no query semantics change, and no trading, risk, sizing,
  * arbitration or ownership behaviour is affected.
  */
-export function mysqlPoolTuning(): Record<string, number | boolean> {
+
+/**
+ * TCP keepalive for ANY mysql2 connection this project opens — a pool member or
+ * a single long-lived connection (the dedicated feed-arbitration lease
+ * connection uses this without the pool-only reaper options).
+ */
+export function mysqlKeepAliveOptions(): Record<string, number | boolean> {
 	return {
 		enableKeepAlive: true,
 		keepAliveInitialDelay: 10_000,
+	};
+}
+
+/** Keepalive + the pool-only bounded idle reaping (see the note above). */
+export function mysqlPoolTuning(): Record<string, number | boolean> {
+	return {
+		...mysqlKeepAliveOptions(),
 		maxIdle: 2,
 		idleTimeout: 30_000,
 	};

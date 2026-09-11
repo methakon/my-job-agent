@@ -1,7 +1,6 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { MarketDataFeedLease } from './market-data-feed-lease.entity';
+import { LEASE_STORE, LeaseStore } from './lease-connection.store';
 import {
   ArbitrationMode,
   DEFAULT_FEED_DOWN_AFTER_MS,
@@ -124,8 +123,13 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
   private readonly host = process.env.HOSTNAME ?? process.env.COMPUTERNAME ?? 'unknown-host';
 
   constructor(
-    @InjectRepository(MarketDataFeedLease)
-    private readonly leases: Repository<MarketDataFeedLease>,
+    // The lease transport is a DEDICATED single connection, deliberately NOT the
+    // shared application pool: measured 2026-09-11 the arbiter's lease read/write
+    // timed out on the shared pool while that pool kept serving ~48 market-data
+    // inserts/s, which froze the provider's heartbeat for minutes. See
+    // lease-connection.store.ts. Ownership is still decided only by the arbiter.
+    @Inject(LEASE_STORE)
+    private readonly leases: LeaseStore,
   ) {
     this.enabled = !/^(0|false|no|off)$/i.test(process.env.FEED_ARBITRATION_ENABLED ?? 'true');
     this.mode = String(process.env.FEED_EXCLUSIVITY_MODE ?? 'universe').toLowerCase() === 'global' ? 'global' : 'universe';
@@ -220,6 +224,11 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
       leaseRows = leased.candidates;
       freshNames = leased.freshNames;
     } catch (error) {
+      // The dedicated lease connection is recycled after a failure/timeout: a
+      // wedged socket must never be reused, and the provider's heartbeat must not
+      // be paced by it. Nothing is recorded as delivered, so the lease simply
+      // stops being renewed and the TTL rules below take over.
+      this.leases.recycle?.('lease read failed');
       const nowMs = Date.now();
       if (nowMs - this.lastFailOpenWarnMs > 300_000) {
         this.lastFailOpenWarnMs = nowMs;
@@ -313,6 +322,11 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
       this.lastState.set(feedName, state);
       this.cache = null;
     } catch (error) {
+      // A failed/timed-out write is NOT a delivered beat (no lastHeartbeatMs, no
+      // lastState), so the next poll retries and the previous lease value stands.
+      // The dedicated connection is recycled so the retry gets a fresh socket: a
+      // lease that cannot be renewed ages out of its TTL instead of staying fresh.
+      this.leases.recycle?.(`lease write failed for ${feedName}`);
       const now2 = Date.now();
       if (now2 - this.lastFailOpenWarnMs > 300_000) {
         this.lastFailOpenWarnMs = now2;

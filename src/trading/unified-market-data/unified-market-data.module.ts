@@ -6,6 +6,7 @@ import { MarketDataFeedLease } from './market-data-feed-lease.entity';
 import { UnifiedMarketDataService } from './unified-market-data.service';
 import { FeedHealthService } from './feed-health.service';
 import { FeedArbitrationService } from './feed-arbitration.service';
+import { DedicatedLeaseStore, LEASE_STORE } from './lease-connection.store';
 import { MarketDataHealthController } from './market-data-health.controller';
 
 /**
@@ -18,13 +19,23 @@ import { MarketDataHealthController } from './market-data-health.controller';
  * The store is the ONE place live ticks are normalized and persisted, and the
  * arbiter (market_data_feed_leases) is how producers in DIFFERENT processes
  * agree on which single feed is active per instrument universe.
+ *
+ * The arbiter's lease/heartbeat operations run on their OWN dedicated single
+ * MySQL connection (LEASE_STORE → DedicatedLeaseStore), so the hot market-data
+ * write path on the shared pool can never starve the liveness heartbeat.
  */
 @Module({
   imports: [
     TypeOrmModule.forFeature([UnifiedOptionQuote, UnifiedMarketSnapshot, MarketDataFeedLease]),
   ],
   controllers: [MarketDataHealthController],
-  providers: [UnifiedMarketDataService, FeedHealthService, FeedArbitrationService],
+  providers: [
+    UnifiedMarketDataService,
+    FeedHealthService,
+    FeedArbitrationService,
+    // One dedicated connection for the arbitration control path only.
+    { provide: LEASE_STORE, useFactory: () => new DedicatedLeaseStore() },
+  ],
   exports: [UnifiedMarketDataService, FeedHealthService, FeedArbitrationService],
 })
 export class UnifiedMarketDataModule {}
