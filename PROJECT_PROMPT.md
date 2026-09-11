@@ -95,6 +95,58 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-11 late) — one common live feed for both desks + FYERS lease-liveness incident
+
+**Shipped (pushed to `dev`)**
+- `9a7056c` — one common live feed for both paper desks. The FYERS producer now
+  participates in the single-active-feed arbiter (`FYERS_WS`, priority 0, OPTION
+  coverage only, DB lease every 15 s, publishes only the universes it is awarded), and
+  the FNF chain read falls back to the common normalized store when its own broker
+  store has nothing fresh (`FNO_SHARED_QUOTE_FALLBACK`; provenance preserved, fresher
+  row wins, history reads untouched, kill switch honoured). 11/11 checks in
+  `scripts/fnf-shared-quote-fallback.test.js`.
+- `a81fae3` — NIFTY becomes a two-producer universe. `UPSTOX_LIVE_UNIVERSE_MAP` (opt-in
+  alias) maps the broker key `NSE_INDEX|Nifty 50` to the universe `NIFTY`, because the
+  derived label is `NIFTY50` while option contract symbols derive `NIFTY` — without the
+  alias the two feeds never overlapped and failover could not be exercised at all.
+  `UPSTOX_LIVE_INSTRUMENTS` gained NIFTY as the SECOND key, so the desk's tradable
+  universe (`underlyings[0]`) stays SENSEX: feed coverage only, no new entry surface.
+- `cb17e41` — the single roadmap row for this workstream: GATE 0 item 10 (row **877**),
+  `in_progress`, deliberately NOT marked done while its doneWhen is unmet.
+- `30e6c50` — provider-liveness fix (operator-authorised): heartbeat published FIRST
+  from local truth, award refresh after; `withTimeout` (`FEED_DB_TIMEOUT_MS`, 8 s)
+  bounds one lease read/write; a timed-out operation is never counted as delivered and
+  cannot create or preserve ownership; `scripts/feed-beat-liveness.test.js` 6/6
+  including the hung-read regression. `npm run test:feed-beat`.
+
+**Bounded outage demo (100 s, market hours) — failover PROVEN, failback OPEN**
+- With FYERS stopped: the arbiter handed NIFTY to `UPSTOX_REST` (lease
+  `ACTIVE [NIFTY,SENSEX]`, `FYERS_WS` stale/`[]`), and the standby really served it —
+  `unified_option_quotes [UPSTOX] underlying=NIFTY50`, 42 instruments, ~4 s old, and the
+  app logged `option chain: 84 quotes persisted from 2 underlying(s)` (was 42 / 1).
+- On restore the agent reconnected (`connected; subscribing to 35 symbol(s)`), FYERS
+  NIFTY ticks were fresh within seconds, and the agent's own decision state reclaimed
+  NIFTY — but the cross-process lease heartbeat froze, so the app never observed the
+  reclaim and UPSTOX still holds NIFTY. **Controlled failback NOT demonstrated**, and
+  producer-level single-owner for NIFTY is currently violated (two producers, distinct
+  instrument keys). Engine-level integrity holds: each desk reads its own store and the
+  common-store fallback never engaged (its own store stayed fresh).
+
+**Open (recorded as row 877's gap)** — the agent's lease read/write times out (the bound
+fires in production: `lease read failed (timed out after 8000ms (lease read))`) while its
+quote writes succeed and the DB itself is healthy (`SELECT 1` 558 ms; 32 sessions, 31
+idle, no long-running query, no metadata-lock wait; `innodb_trx`/`data_locks` unreadable
+— no PROCESS grant). Pool saturation from un-cancelled `Promise.race` timeouts was
+investigated and REFUTED. Root cause unidentified; no further code/config changes made.
+
+**Infrastructure** — the OCI SSH path failed ~11:44 IST (TCP/22 accepted, no SSH banner:
+`TCP_REACHABLE_BANNER_UNAVAILABLE`), which killed the DB tunnel and crash-looped the app
+(54 restarts) and starved the agent. Recovery is outside the application; when the banner
+returned the tunnel was rebuilt with the identical configuration, `SELECT 1` was proven
+BEFORE restarting anything, both processes were restarted, port 3010 is back and the
+app's restart counter is frozen (no crash-loop). The FYERS socket owner is unchanged:
+the headless `trading-agent`, with the app making zero connect attempts.
+
 ## Progress (2026-09-11) — Upstox LIVE token self-service (FYERS parity) + committed drift-guard exemption source
 
 - **Upstox token acquisition is now self-service** (`f4b1de9`): `/api/upstox/token/init` builds the documented dialog `https://api.upstox.com/v2/login/authorization/dialog` (the old `apps.upstox.com/...` host does not resolve; probed live → 302 to `login.upstox.com`); `/api/upstox/callback` is no longer a stub — it validates a single-use 5-minute state and performs the real server-side exchange (`POST /v2/login/authorization/token`, form-encoded: client_id + client_secret + redirect_uri + grant_type=authorization_code), takes the expiry from the token's own `exp` claim and REFUSES to store a token of unknown lifetime. The callback is public by design and guarded by the state instead (Upstox cannot send `x-operator-password` — that is exactly why token delivery never reached us before); the sanctioned notifier intake stays as the scripted fallback. `/upstox-live-paper.html` gained a status/expiry/remaining-time card with a GET THE TOKEN button and a result banner; the raw token is never returned or logged. Tests: `scripts/upstox-token-oauth.test.js` 16/0 (`npm run test:upstox-token`), `pre-open-capture.test.js` 71/0, live verification 15/15 against the running app (pm2 `my-job-agent`, 3010).
@@ -202,6 +254,8 @@ push `origin/dev` — never skip even on interrupt.
 > The list below is historical context; on "continue" start from the DB log
 > (first `in_progress`/`pending` by id), NOT from this numbered list.
 
+0. **Common-feed workstream (row 877 = GATE 0 #10) — restore single-owner and demonstrate controlled failback.** The `FYERS_WS` lease heartbeat no longer publishes from the agent process (its lease read/write times out while its quote writes succeed and the DB is healthy), so `UPSTOX_REST` keeps NIFTY and producer-level single-owner is violated. Failover itself is PROVEN (`UPSTOX` served NIFTY during a real 100 s FYERS outage). Next step is an operator decision: a second narrow pass on the agent lease path (bad pool/datasource, single-flight + backoff) or an env-only `FEED_DB_TIMEOUT_MS` experiment. Do not mark row 877 done until the full doneWhen holds.
+0. **FYERS token lifetime** — the DB token expires 06:00 IST daily and `FYERS_PIN` is absent, so the re-login at `http://127.0.0.1:3010/auth/fyers/login` is a standing morning dependency (the socket rebuilds itself once a fresh token lands; no restart needed).
 0. **Tue 2026-09-15 08:57 IST — the re-armed pre-open window capture** (jobs `gate2-preopen-capture-20260915` fb2b3340dcc2 + review `gate2-preopen-review-20260915` a20aa715de88). Preconditions: machine powered on before 08:55 IST (the gateway unit is enabled+Linger, so it only needs the host up) and a fresh Upstox token after 03:30 IST — tokens die daily. The plan for 2026-09-11 itself WAS executed correctly up to the window and was lost to the host being off (04:23–10:40); the review found nothing to sync, so no Gate 2 row moved. The first real operator OAuth click is STILL the only thing that closes row 876's gap.
 
 0. **Upstox LIVE token — supply a fresh one here in the console, then prove the first real operator OAuth click** (row 876 `UPSTOX AUTO TRADING #1` stays `in_progress`; that click is its only outstanding doneWhen and I cannot self-verify it). Token expires 03:30 IST daily; the sanctioned route is the desk button → `GET /api/upstox/token/init` → `login.upstox.com` → public state-validated callback. With a live token the GATE 2 slice-1 pre-open capture (09:00–09:15 IST, cron `gate2-preopen-window-capture` 792771ea078c, armed 08:57) can finally run and prove the Upstox index auction fields (`indicative_equilibrium_price`, `indicative_imbalance_quantity_total/market`), which stay unproven outside a real window.
