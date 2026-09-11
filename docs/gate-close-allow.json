@@ -28,6 +28,15 @@
       "recorded": "2026-09-11T04:0x+05:30 (session handling the operator's LIVE Upstox token intake, roadmap row 876)",
       "evidence": "git show --name-only 4d65f3a lists only src/job-application-roadmap/* files; author/committer bapay.9@gmail.com; email-routing is infrastructure for the JA workstream, not a trading roadmap item.",
       "expires_hint": "Entry can be deleted once 4d65f3a leaves the guard's commit window (default: last 15 code commits)."
+    },
+    "6b2431ae134f14bcd81fd5937eba92f2f279e4e6": {
+      "short": "6b2431a",
+      "reason": "Same separate Job Application workstream, same module path: JA-002 final-submission sandbox safety guard (src/applications/* + scripts/ja-002-sandbox-safety.test.js). Tracked in its own job_application_roadmap_items control plane; project_checklist_items holds no row for it and none should be invented.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row); applied to the same module. Delete this entry to revoke.",
+      "recorded": "2026-09-12T00:2x+05:30 (session finishing roadmap rows 877/878; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only 6b2431a lists only src/applications/* files and the JA test script; no market-data/trading code.",
+      "expires_hint": "Delete once 6b2431a leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
