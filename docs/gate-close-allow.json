@@ -37,6 +37,15 @@
       "recorded": "2026-09-12T00:2x+05:30 (session finishing roadmap rows 877/878; commit authored by the parallel JA session)",
       "evidence": "git show --name-only 6b2431a lists only src/applications/* files and the JA test script; no market-data/trading code.",
       "expires_hint": "Delete once 6b2431a leaves the guard commit window (default: last 15 code commits)."
+    },
+    "bfaa17786978df4150f83e360bdce1bf791972d0": {
+      "short": "bfaa177",
+      "reason": "Same separate Job Application workstream, same module path: JA-003 regression baseline — automated baseline tests proving the JA-002 submission safety invariant across all real submission paths including direct low-level invocation (scripts/ja-003-regression-baseline.test.js). Tracked in its own job_application_roadmap_items control plane; project_checklist_items holds no row for it and none should be invented.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row); applied to the same module. Delete this entry to revoke.",
+      "recorded": "2026-09-12T01:2x+05:30 (session completing JA-003 regression baseline; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only bfaa177 lists only scripts/ja-003-regression-baseline.test.js; no src/ changes, no .env changes, no market-data/trading code.",
+      "expires_hint": "Delete once bfaa177 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
