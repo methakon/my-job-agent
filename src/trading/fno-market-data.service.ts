@@ -105,6 +105,9 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private destroyed = false;
   private readonly fyersRetryMs: number;
   private fyersRetryTimer: ReturnType<typeof setInterval> | null = null;
+  private ownershipPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Age of the newest observation in the COMMON store (non-owner processes only). */
+  private commonAgeMs: number | null = null;
   private connectedTokenHash: string | null = null;
 
   constructor(
@@ -153,14 +156,45 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     // Feed-health gate registration (brief s6/s8): this feed backs the FnF
     // engine. A disabled feed is reported but never satisfies the new-trading
     // gate (age provider stays null until real ticks arrive).
-    this.feedHealth.registerFeed('FYERS_LIVE', 'fnf', {
-      enabled: () => this.statusValue.enabled,
-      ageMs: () => {
-        const at = this.statusValue.lastTickAt;
-        if (!at) return null;
-        return Math.max(0, Date.now() - new Date(at).getTime());
-      },
-    });
+    if (this.isFeedOwner) {
+      this.feedHealth.registerFeed('FYERS_LIVE', 'fnf', {
+        enabled: () => this.statusValue.enabled,
+        ageMs: () => {
+          const at = this.statusValue.lastTickAt;
+          if (!at) return null;
+          return Math.max(0, Date.now() - new Date(at).getTime());
+        },
+      });
+    } else {
+      // Not the socket owner (the headless trading-agent owns it): report the
+      // COMMON store's freshness instead of a local socket, so health reflects
+      // whether data is actually flowing.
+      this.feedHealth.registerFeed('FYERS_LIVE', 'fnf', {
+        enabled: () => true,
+        ageMs: () => this.commonAgeMs,
+      });
+    }
+  }
+
+  /**
+   * Exactly ONE process may own the FYERS socket. Both entrypoints import this
+   * module — my-job-agent's AppModule (status/UI) and the headless
+   * trading-agent (feed + session driver) — so an unguarded onModuleInit opened
+   * TWO live connections for one account as soon as FNO_MARKET_DATA_ENABLED was
+   * true, violating the one-live-stream rule. Ownership is therefore explicit:
+   * the headless agent entrypoint owns the socket by default; the other process
+   * opens no socket and reports freshness from the common store.
+   *   FNO_FEED_OWNER=agent  → only the headless worker owns the socket
+   *   FNO_FEED_OWNER=app    → only the web app owns it (box without a worker)
+   *   unset                 → default: the headless worker owns it
+   */
+  private get isFeedOwner(): boolean {
+    const declared = (process.env.FNO_FEED_OWNER ?? '').trim().toLowerCase();
+    const entry = String(require.main?.filename ?? '').replace(/\\/g, '/');
+    const headless = /\/trading-agent\/main\.(js|ts)$/.test(entry);
+    if (declared === 'app') return !headless;
+    if (declared === 'agent') return headless;
+    return headless;
   }
 
 
@@ -245,6 +279,18 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(this.statusValue.lastMessage);
       return;
     }
+    if (!this.isFeedOwner) {
+      // No socket in this process — the headless trading-agent owns it. Report the
+      // COMMON store's freshness so status/health track real data without a second
+      // live connection.
+      this.statusValue.enabled = false;
+      this.statusValue.connected = false;
+      this.statusValue.lastMessage =
+        'FYERS socket owned by the headless trading-agent — this process reports status only (no second live connection)';
+      this.logger.log(this.statusValue.lastMessage);
+      this.startOwnershipFreshnessWatch();
+      return;
+    }
     if (!this.statusValue.enabled) {
       this.statusValue.lastMessage = 'disabled; set FNO_MARKET_DATA_ENABLED=true and configure FYERS credentials';
       this.logger.log(this.statusValue.lastMessage);
@@ -283,6 +329,10 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     if (this.fyersRetryTimer) {
       clearInterval(this.fyersRetryTimer);
       this.fyersRetryTimer = null;
+    }
+    if (this.ownershipPollTimer) {
+      clearInterval(this.ownershipPollTimer);
+      this.ownershipPollTimer = null;
     }
     if (this.yahooPollTimer) {
       clearInterval(this.yahooPollTimer);
@@ -334,6 +384,29 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     if (this.fyersRetryTimer) return;
     this.fyersRetryTimer = setInterval(() => void this.tryFyersReconnect(), this.fyersRetryMs);
     this.fyersRetryTimer.unref?.();
+  }
+
+  /**
+   * Non-owner processes (the web app) never open a socket; they report the age of
+   * the newest observation in the COMMON normalized store instead, so /trading/
+   * market-feed/status and the feed-health view reflect flowing data rather than
+   * this process's (absent) socket. Read-only; no ingestion, no connection.
+   */
+  private startOwnershipFreshnessWatch(): void {
+    if (this.ownershipPollTimer) return;
+    const tick = async (): Promise<void> => {
+      try {
+        const f = (await this.unified.storeFreshness()) as unknown as { lastTs?: Date | string | null };
+        const ts = f?.lastTs ? new Date(f.lastTs) : null;
+        this.commonAgeMs = ts && !Number.isNaN(ts.getTime()) ? Math.max(0, Date.now() - ts.getTime()) : null;
+        if (ts && !Number.isNaN(ts.getTime())) this.statusValue.lastTickAt = ts.toISOString();
+      } catch {
+        this.commonAgeMs = null;
+      }
+    };
+    void tick();
+    this.ownershipPollTimer = setInterval(() => void tick(), 30_000);
+    this.ownershipPollTimer.unref?.();
   }
 
   private async tryFyersReconnect(): Promise<void> {
