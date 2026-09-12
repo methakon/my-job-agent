@@ -33,6 +33,10 @@ const crypto = require('crypto');
 const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent';
 require(path.join(ROOT, 'node_modules/dotenv')).config({ path: path.join(ROOT, '.env') });
 const mysql = require(path.join(ROOT, 'node_modules/mysql2/promise'));
+// Render verification lives in one tested place (scripts/lib/gate-render-verify.js): it asserts
+// the row's ACTIVE status button, not a word that also appears in every other button and in the
+// evidence text. See references/status-page-discrepancy-audit.md in the control-plane skill.
+const { rowChunk, verifyRenderedStatus, verifyMarkerRendered } = require('./lib/gate-render-verify');
 
 const BASE = process.env.PROJECT_STATUS_BASE || process.env.DESK_API_BASE || 'http://127.0.0.1:3010';
 const STATUSES = ['pending', 'in_progress', 'done', 'blocked', 'n/a'];
@@ -165,19 +169,22 @@ const stripTags = (html) => html.replace(/<[^>]*>/g, ' ').replace(/&amp;/g, '&')
 	console.log(`wrote : POST /project-status/item/${row.id}/note   -> HTTP ${noteHttp}`);
 
 	// ── 4. independent verification through the rendered page ─────────────────
+	// The status check asserts the row's ACTIVE status button, never a word in the HTML:
+	// "done" also appears in every row's other buttons and in the note this writer just wrote
+	// ("done by agent"), so substring matching could pass a write that never rendered.
 	let res = await fetch(`${BASE}/project-status`, { headers: authHeaders });
 	const html = await res.text();
-	const chunk = html.split('<tr ').find((c) => c.includes(`/project-status/item/${row.id}/status`)) ?? '';
+	const chunk = rowChunk(html, row.id);
 	const marker = tag;
-	const rendered = stripTags(chunk);
-	const hasStatus = chunk.includes(`value="${target}" selected`) || chunk.includes(`>${target}<`) || rendered.includes(target);
-	const hasNote = stripTags(chunk).includes(marker) || chunk.includes(marker);
+	const statusCheck = verifyRenderedStatus(html, row.id, target);
+	const hasNote = verifyMarkerRendered(html, row.id, tag);
 	const readBack = (await q('SELECT id, status, note FROM project_checklist_items WHERE id = ?', [row.id]))[0];
+	const activeLabel = statusCheck.buttons.find((b) => b.active);
 
 	const checks = [
 		[res.status === 200, `GET /project-status renders (HTTP ${res.status})`],
 		[chunk.length > 0, `row [${row.id}] present in the rendered page`],
-		[hasStatus, `rendered row shows status "${target}"`],
+		[statusCheck.ok, `rendered row's ACTIVE status button is "${target}" (got ${statusCheck.activeStatus ?? 'none'}${activeLabel ? `, label "${activeLabel.label}"` : ''}${statusCheck.reason ? ` — ${statusCheck.reason}` : ''})`],
 		[hasNote, `rendered row shows this write (marker ${marker})`],
 		[readBack.status === target, `DB read-back status = ${target} (got ${readBack.status})`],
 		[readBack.note.includes(marker), 'DB read-back note contains this write'],
