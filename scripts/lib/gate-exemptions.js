@@ -36,9 +36,17 @@ const SHA_RE = /^[0-9a-f]{7,40}$/;
  * (`\.test`). Nothing else is covered — a feature script, a service test or any
  * src/ path still has to be recorded on a row. Keep this list narrow: widening it
  * is how a guard gets quietly neutered.
+ *
+ * ONE src/ path is listed, BY EXACT FILENAME, and for a specific reason:
+ * `src/project-status/project-status-page.controller.ts` IS the control plane's own UI — it
+ * renders `project_checklist_items` for the roadmap page, so a change to it (e.g. sending
+ * `Cache-Control: no-store` so a browser cannot show a superseded status) can never belong to a
+ * trading roadmap row. It is deliberately NOT `src/project-status/.*`: every other file in that
+ * module (the service, the entity, the seed) still has to be recorded on a row, and a commit that
+ * mixes this file with anything else is not control-plane-only.
  */
 const CONTROL_PLANE_PATTERN =
-	/^(AGENTS\.md|CLAUDE\.md|package\.json|docs\/.+|scripts\/hooks\/.+|scripts\/lib\/gate-[a-z-]+(\.test)?\.js|scripts\/gate-[a-z-]+(\.test)?\.js)$/;
+	/^(AGENTS\.md|CLAUDE\.md|package\.json|docs\/.+|scripts\/hooks\/.+|scripts\/lib\/gate-[a-z-]+(\.test)?\.js|scripts\/gate-[a-z-]+(\.test)?\.js|src\/project-status\/project-status-page\.controller\.ts)$/;
 
 /** True when every changed path is control-plane tooling (and there is at least one). */
 function isControlPlaneCommit(files) {

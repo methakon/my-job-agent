@@ -31,8 +31,7 @@ const JA4_SHA = 'bfaa1776345a0986f6a45ea2ec1d6af3068c2f5c'; // JA-003 regression
 const JA5_SHA = '4ce0ab84717faa3b9849f93e632881cafb6d1966'; // IMAP crash safety (agent queue item 76)
 const JA6_SHA = 'a80422dbcda591fd8e625cef5a62bc1f1dba816d'; // JA-010 qualification engine test (parallel session)
 const JA7_SHA = 'b185d858885d4eb4bd71122a600cae806f80655d'; // JA-010 qualification engine wiring (parallel session)
-const CP1_SHA = '3afe11c1e699960cf01d490e6353c055f64bddb3'; // control-plane hardening: /project-status no-store (operator-directed)
-const AUDITED = [JA_SHA, JA2_SHA, JA3_SHA, JA4_SHA, JA5_SHA, JA6_SHA, JA7_SHA, CP1_SHA];
+const AUDITED = [JA_SHA, JA2_SHA, JA3_SHA, JA4_SHA, JA5_SHA, JA6_SHA, JA7_SHA];
 
 const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit } = require(LIB);
 
@@ -183,6 +182,21 @@ t('control-plane scope does NOT cover feature code, feature tests or other scrip
 	assert.equal(isControlPlaneCommit(['scripts/gate0-regression.test.js']), false, 'only the gate-* family is tracking layer');
 	assert.equal(isControlPlaneCommit(['scripts/gate-close-check.js', 'src/trading/x.ts']), false, 'a mixed commit is NOT control-plane-only');
 	assert.equal(isControlPlaneCommit([]), false, 'an empty changeset is not control-plane tooling');
+});
+
+// ── the ONE src/ path in the scope, pinned by exact filename ──────────────────
+t('control-plane scope covers exactly the /project-status page controller — not the rest of its module', () => {
+	// the control plane's own UI: it renders project_checklist_items, so it can never be a trading row
+	assert.equal(isControlPlaneCommit(['src/project-status/project-status-page.controller.ts']), true);
+	// every sibling in that module still needs a row
+	assert.equal(isControlPlaneCommit(['src/project-status/project-status.service.ts']), false);
+	assert.equal(isControlPlaneCommit(['src/project-status/project-clarification.service.ts']), false);
+	assert.equal(isControlPlaneCommit(['src/project-status/project-checklist-item.entity.ts']), false);
+	assert.equal(isControlPlaneCommit(['src/project-status/checklist-v4.seed.json']), false, 'the status-bearing seed is NOT tracking layer');
+	// and mixing the page with anything else is not control-plane-only
+	assert.equal(isControlPlaneCommit(['src/project-status/project-status-page.controller.ts', 'src/trading/x.ts']), false);
+	// the scope must stay name-scoped: no wildcard over the module or over src/
+	assert.ok(!/src\\\/(project-status\\\/\.\*|\.\*)/.test(CONTROL_PLANE_PATTERN.source), 'the pattern must not gain a wildcard over src/');
 });
 
 // ── the guard actually uses it, and the drift branch is intact ───────────────
