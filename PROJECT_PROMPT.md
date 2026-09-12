@@ -95,6 +95,21 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 05:00) — row 81 DONE; GATE 7 complete except data-blocked row 79
+
+- **Row 81 (GATE 7 #9) → done, `0d5397f`** — `ivrule-v1`: the prohibition is encoded in **code**, not a prompt or
+  operator memory. An option rationale whose **only** cited dimension is the IV regime is REJECTED
+  (`IV_REGIME_ALONE`, i.e. "high IV ⇒ sell"), as is one that explicitly cites `HIGH_IV_IMPLIES_SELL`
+  (`PROHIBITED_RULE_CITED`); nothing cited ⇒ `NO_RATIONALE`. Any rationale citing at least one non-IV dimension
+  is ALLOWED, so it is a **targeted** negative rule rather than a blanket block, and it tests the STRUCTURE of
+  the reasoning — never a numeric IV level — so it cannot be tuned. Test **30/30** including the **deliberate
+  negative test** the row's doneWhen requires.
+- **GATE 7 status:** rows **66, 67, 69, 71, 73, 75, 77, 81, 83 DONE** (9 of 10); **row 79**
+  ("measure option-expression performance separately from underlying directional accuracy") is **DATA-BLOCKED**
+  — the option-expression outcome history does not exist yet (`upstox_live_paper_trades` 0,
+  `upstox_live_paper_orders` 0, `upstox_trades` 0, `fnf_trades` 14 total), so the metric cannot be reproduced
+  from archived data with a meaningful sample size. No synthetic outcomes were created.
+
 ## Progress (2026-09-13 04:45) — row 77 DONE (direction/movement/IV-regime/holding kept separate, GATE 7 #7)
 
 - **Row 77 (GATE 7 #7) → done, `cca5a71`** — `selbrief-v1`: the four selection dimensions are four SEPARATE,
