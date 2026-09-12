@@ -95,6 +95,19 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 04:30) — row 75 DONE (vanna/charm, GATE 7 #6)
+
+- **Row 75 (GATE 7 #6) → done, `18245af`** — `vannacharm-v1`: vanna (∂delta/∂σ) and charm (∂delta/∂t) per
+  contract, computed by **central difference on the REUSED local BSM greeks** (row 71) so the signs are
+  consistent with the desk delta by construction instead of a hand-copied convention. Steps `volStep=0.0005`
+  (absolute vol) and `timeStepDays=0.5` are documented numeric-method constants, not tuned thresholds; the
+  spec states input availability and the timestamp boundary (no clock read). Refusals are always null-valued:
+  NO_QUOTES / NO_SPOT / NO_IV / NO_EXPIRY / **SMALL_T** (never clamped) / NO_GREEKS. Research-only (no
+  production importer, asserted) — satisfies the row's "research/shadow mode without changing production".
+- Evidence: `test:vanna-charm` **33/33** (including agreement with a WIDER independent central difference on
+  the reused model); archive replay (2026-09-11, Upstox chain + FYERS session-median spot) valued **102
+  contracts** (digest `8ec30afb371fd9ba`). Control plane row 75 render-verified.
+
 ## Progress (2026-09-13 04:15) — WhatsApp connected to the Hermes gateway; row 73 DONE (GEX, GATE 7)
 
 - **WhatsApp connected (operator request; target = Hermes agent gateway).** Enabled the existing WhatsApp bridge for
