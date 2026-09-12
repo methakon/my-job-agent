@@ -35,6 +35,8 @@
     "verify:gap-candidates": "node scripts/gap-candidates-replay.js",
     "test:gap-range-pos": "npm run build && node scripts/gap-range-pos.test.js",
     "verify:gap-range-pos": "node scripts/gap-range-pos-replay.js",
+    "test:gap-acceptance": "npm run build && node scripts/gap-acceptance.test.js",
+    "verify:gap-acceptance": "node scripts/gap-acceptance-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",
     "verify:failover": "node scripts/feed-failover-verify.js",
     "market-data:canonical": "node scripts/market-data-canonical-status.js",
