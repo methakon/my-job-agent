@@ -95,6 +95,47 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 11:05) — row 38 DONE (gap taxonomy over a real 1,242-session series, GATE 4 #1)
+
+- **Selection (roadmap re-read first):** GATE 2 has 4 pending rows (23–26) and GATE 3 is complete,
+  so GATE 4 (grp_order 5) is next in dependency order. All four GATE 2 rows are DATA-blocked, not
+  code-blocked: their doneWhens need pre-open evidence, and the archive holds **zero rows in the
+  09:00–09:15 IST window on every recorded day** plus only 3 off-hours `pre_open_observations`
+  rows with NULL symbol (the first archived tape row of any session is ~10:55 IST). Nothing was
+  marked done on partial/synthetic evidence.
+- **Row 38 (GATE 4 #1, "Build taxonomy: common, breakaway, runaway/continuation, exhaustion,
+  island and older-gap interaction") → done, commit `e7b8851`.** Two pure modules (no clock, no
+  I/O, no AI, no randomness) + a replay:
+  * `src/trading/gap-engine/gap-session-series.ts` — adapter. Two MEASURED input facts, both
+    verified against independent data: the feed's `close` column is the broker's PREVIOUS close,
+    not the session's own (the 2026-09-11 row quotes 23477.80 = the index tape's 2026-09-10
+    close exactly; NIFTYBANK 56471.90 vs tape 56471.95), so `close(S)` comes from the NEXT
+    session's quote and the newest session is marked INCOMPLETE instead of guessed; and sessions
+    are labelled by the broker `ts` (IST) inside the market window, never by `createdAt`, which
+    carries over past midnight. The complete bar = widest high-low span (ties: earliest ts, then
+    source id) so selection is order-free. Unusable rows are excluded with named reasons.
+  * `src/trading/gap-engine/gap-taxonomy.ts` — the component. Pinned precedence ISLAND →
+    BREAKAWAY → RUNAWAY_CONTINUATION → EXHAUSTION → COMMON, materiality requiring BOTH the
+    percent and the prior-range ratio, ONE definition of fill used everywhere (up: low <=
+    prevClose), thresholds in a single config, an explicit enabled/disabled switch whose disabled
+    path computes nothing, older-open-gap interaction scanning, a prevClose-vs-prior-row integrity
+    measure, and UNAVAILABLE-with-reason for every missing input. Fill TIMING is reported
+    UNAVAILABLE because OHLC cannot time a fill — never invented.
+  * `npm run test:gap-taxonomy` **80/80**; `npm run verify:gap-taxonomy` replays the ARCHIVE:
+    **1,242 real sessions for NSE:NIFTY50-INDEX (2021-09-01 → 2026-09-11)**, 1,240 assessed,
+    978 material gaps, prevClose integrity **1240 agree / 0 mismatch**, order-free digest.
+    Distribution as found (not tuned): NONE 262, COMMON 428, EXHAUSTION 113, ISLAND 103,
+    BREAKAWAY 1, RUNAWAY_CONTINUATION 0, UNCLASSIFIED 333.
+  * Writing the test caught a REAL defect: openness and `fillState` briefly used different
+    definitions of fill (zone entry vs origin touch); both now use the origin.
+  * Not wired into any production module (asserted by a static test) — no service, schema or
+    decision-path change; research/shadow only.
+- **Findings worth an operator decision (reported, not acted on):** (a) with these thresholds on
+  index data, gaps are almost always filled intraday (1,236 of 1,240) so the unfilled-gap classes
+  are rare (BREAKAWAY 1, RUNAWAY 0) — the classes are reachable (proven by fixtures) but the
+  thresholds may need tuning for a fade/continue study; (b) the daily series is index-level only;
+  options/underlyings would need their own series source.
+
 ## Progress (2026-09-12 10:20) — row 27 DONE (time-align before inference) + desk app crash-loop repaired + DB backups working again
 
 - **Row 27 (GATE 2 #6, "Time-align all pre-open and cross-market information before
