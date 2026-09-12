@@ -315,6 +315,11 @@ ${gateHtml}
 </div>
 </body></html>`;
 
+		// A status page must never come out of a cache. Before this, the response carried only a
+		// weak ETag and NO Cache-Control, so a browser could reuse a pre-write copy (bfcache /
+		// heuristic freshness) and show statuses that were already superseded in the database —
+		// the stale-display class of bug the 2026-09-12 control-plane audit hunted.
+		res.set('Cache-Control', 'no-store');
 		res.type('html').send(html);
 	}
 
