@@ -103,16 +103,38 @@ server capacity — it is fewer round trips.**
 
 ## 3. Target architecture
 
+**Correction (2026-09-12, operator clarification — this section was wrong before):** an earlier
+version of this diagram had the trading desks reading prices from a Redis-backed cache. That made the
+decision path depend on Redis consumer-group progress. **Redis must never sit in the trading hot
+path at all.** The hot path stays in-process and synchronous:
+
 ```
-  FYERS socket ─┐                       ┌─ consumer group: persist-fyers  →  batched MySQL (canonical quotes/snaps)
-                ├→ canonical interpreter → validation → XADD   (Redis Streams, bounded)
-  Upstox REST ──┘   (mandatory, unchanged)      │
-                                                ├─ consumer group: desk-read-cache → Redis read cache (latest quote/chain)
-                                                └─ consumer group: metrics        → lag/age counters (no DB)
+  FYERS socket ─┐
+                ├→ canonical interpreter → validation → TRADING ENGINE → signal → risk → execution
+  Upstox REST ──┘   (mandatory, unchanged)        │            (in-process, no Redis, no MySQL wait)
+                                                  │
+                                     non-blocking hand-off (enqueue only, never await)
+                                                  ↓
+                                   bounded in-process persistence queue
+                                                  ↓
+                             Redis Streams (side channel)  →  batched MySQL persistence
 
   trading-critical writes (orders, fills, positions, capital, risk, audit):
-        desks ─────────────────────────────────────────────────────────→ MySQL (direct, synchronous, unchanged)
+        desks ───────────────────────────────────────────────→ MySQL (direct, synchronous, unchanged)
 ```
+
+**The one rule that makes this safe:** the tick is handed to the engine *first and synchronously*, and
+only *enqueued* (an O(1) array append) for persistence. Nothing on the decision path awaits Redis, a
+batch flush, or a MySQL write. If persistence is blocked, slow, or dead, the engine keeps deciding and
+exits/stops keep firing; only the *persistence* copy degrades (bounded, counted drops) — never a
+decision. This is the opposite of the current code, where `await this.quotes.save(row)` in
+`fnf-option-chain.service.ts:198` / `unified-market-data.service.ts:229` puts a measured ~287 ms WAN
+write inside the tick path.
+
+Entry **and especially EXIT/stop-loss** decisions therefore cannot be delayed by persistence: the
+stop-loss path reads the in-process latest-tick state (today's `latestQuotes` map pattern) and acts
+immediately. Redis read models are allowed **for observability only** (dashboards, status endpoints),
+never as an input to signal, risk or execution.
 
 Streams (one per provider family × data class, so a stall in one cannot starve the other and
 provenance stays explicit):
@@ -292,10 +314,61 @@ interpreter's mandatory status, the feed lease ownership model, `.env` credentia
 trading-critical write path. No schema change is proposed here; the only DB-side recommendation
 (deterministic id on the existing PK) requires no DDL.
 
-## 8. Open decisions for the operator
+## 8. Decisions (APPROVED by the operator, 2026-09-12)
 
-1. Approve the deterministic-id prerequisite (writer change, no DDL)?
-2. Approve Redis install + the 256 MB `noeviction`/AOF configuration on the app host?
-3. Approve shadow-mode calibration on Monday before any live read-path change?
-4. Confirm the fail-closed rule for Redis-served prices: **refuse to act** when the tick is older
-   than the staleness bound (and which bound).
+1. **Deterministic canonical ID prerequisite — APPROVED, implemented first, no DDL.** Delivered in
+   `src/trading/unified-market-data/canonical-row-id.ts`, wired into both canonical writers
+   (`unified-market-data.service.ts` `ingestQuote` + `ingestSnapshot`). `rowid-v1` =
+   uuidv5 of `source | instrumentKey | sourceTimestamp(ISO) | providerPayloadHash | economic-content
+   hash` against the existing uuid primary key. The per-process `sequenceNumber` is deliberately NOT
+   part of identity (it resets on restart); `receivedTimestamp` and row bookkeeping are excluded too.
+   A weak identity returns `null` and the writer falls back to the generator rather than minting a
+   guessable key. Tested: 37/37 (`npm run test:canonical-row-id`).
+2. **Redis instance — APPROVED on the app host**: 256 MB `maxmemory`, `noeviction`, AOF `everysec`,
+   local-only access, bounded streams/backlog. Never authoritative for orders, fills, positions,
+   capital, risk or audit state.
+3. **Monday shadow-mode calibration — APPROVED.** Do not switch trading reads immediately: measure
+   peak-session behaviour and derive the smallest stable batch parameters from evidence (§6).
+4. **Staleness contract — the EXISTING `staleQuoteMaxAgeMs`** (no competing threshold). Stale or
+   unavailable cached prices must never make a trading decision.
+5. **Isolation rule (CRITICAL).** Batching and MySQL persistence must never block the trading
+   decision or execution path; a slow Redis/MySQL path must not delay a stop-loss or other exit.
+   Proven — see §9.
+
+**Implementation order (operator-directed):** deterministic ID → Redis implementation → shadow
+calibration → evidence → only then consider a controlled read-path migration.
+
+## 9. Isolation proof: a blocked/slow persistence writer cannot delay a decision
+
+Implemented as a pure boundary plus a hostile-sink simulation (research/shadow only; nothing in
+production imports it yet).
+
+- Boundary: `src/trading/unified-market-data/tick-fanout.ts` — `ingest(tick, decide)` hands the tick
+  to the engine FIRST, synchronously, then does an O(1) ring-buffer append for persistence. No
+  `await`, no promise, no timer, no clock (the host injects the clock for a bounded drain), no I/O.
+- Simulation: `scripts/tick-fanout.test.js` (`npm run test:tick-fanout`), 44/44.
+
+| Scenario | Result |
+|---|---|
+| Persistence writer HUNG forever (10,000 ticks) | all 10,000 decisions taken, decision p99 < 1 ms, 10,000 ingested in < 100 ms, queue bounded at capacity, overflow counted as drops-for-persistence, sink never called on the hot path |
+| Persistence writer SLOW at the measured MySQL p50 (287 ms/batch) | 1,000/1,000 decisions, decision p99 < 1 ms, no persistence ran during ingest, the drain (not the engine) paid 287 ms |
+| Persistence writer THROWS every time | 300/300 decisions, failure counted, batch retained in order as retryable, no unhandled rejection |
+| EXIT/stop-loss with a hung writer AND a full queue | the exit fired in < 1 ms and the position closed on the breaching tick; only the persistence copy of that tick was dropped |
+| Bounded shutdown drain | persisted what fit the deadline, reported the remainder + timeout; a persistently failing sink stops the loop instead of spinning |
+
+**Separated latency accounting (the operator's requirement, measured in one run):**
+
+| Path | n | p50 | p95 | p99 |
+|---|---|---|---|---|
+| decision → execution (signal/risk/entry/exit) | 2,000 | **0.0006 ms** | 0.0039 ms | 0.0048 ms |
+| persistence (per 100-row batch) | 5 | **287.7 ms** | 287.8 ms | — |
+
+Separation factor ≈ **517,000×** — the two latencies are measured independently, so a slow or dead
+persistence path is visible in the persistence column and provably absent from the decision column.
+
+### 8.1 Open item
+
+The Redis market-data-persistence offload workstream has **no trading-roadmap row of its own** (the
+nearest rows, 109 / 356 / 388, are latency *modelling*, not the persistence path). Per the control
+plane's rule, rows are operator-created: flagged as **roadmap coverage missing** — awaiting a
+decision (create a dedicated row, or attach this workstream to the canonical row 878).

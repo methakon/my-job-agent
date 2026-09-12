@@ -4,6 +4,7 @@ import { Like, Repository } from 'typeorm';
 import { UnifiedOptionQuote } from './unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './unified-market-snapshot.entity';
 import { canonicalInstrumentKey } from './canonical/canonical-tick';
+import { canonicalRowId } from './canonical-row-id';
 
 /**
  * Normalized feed shape accepted from any broker adapter (brief s5).
@@ -189,6 +190,16 @@ export class UnifiedMarketDataService {
       sourceTsInvalid || (ltp === null && bid === null && ask === null) ? 'INVALID' : 'GOOD';
 
     const row = this.quotes.create({
+      // Deterministic id derived from canonical identity (docs/REDIS_HOT_PATH_OFFLOAD.md): the same
+      // economic tick always maps to the same primary key, so a replayed batch cannot duplicate a
+      // row. No DDL - it is the existing uuid PK. `undefined` keeps TypeORM's default generator for
+      // an identity too weak to be replay-safe.
+      id: canonicalRowId({
+        source,
+        instrumentKey,
+        sourceTimestamp: ts,
+        content: { ltp, bid, ask, bidQty: finite(input.bidQty), askQty: finite(input.askQty), volume: finite(input.volume), oi: finite(input.oi) },
+      }) ?? undefined,
       instrumentKey,
       underlying: String(input.underlying ?? '').trim() || null,
       exchange: String(input.exchange ?? '').trim() || null,
@@ -249,6 +260,14 @@ export class UnifiedMarketDataService {
     const dataQuality = sourceTsInvalid || ltp === null ? 'INVALID' : 'GOOD';
 
     const row = this.snapshots.create({
+      // Deterministic id (see ingestQuote): same economic snapshot -> same primary key, so a replayed
+      // batch cannot duplicate it. No DDL; `undefined` falls back to the default generator.
+      id: canonicalRowId({
+        source,
+        instrumentKey: symbol,
+        sourceTimestamp: ts,
+        content: { ltp, volume: finite(input.volume), open: finite(input.open), high: finite(input.high), low: finite(input.low), close: finite(input.close) },
+      }) ?? undefined,
       symbol,
       underlying: String(input.underlying ?? '').trim() || null,
       exchange: String(input.exchange ?? '').trim() || null,

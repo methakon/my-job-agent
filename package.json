@@ -12,6 +12,8 @@
     "test:upstox-token": "npm run build && node scripts/upstox-token-oauth.test.js",
     "test:gate-exemptions": "node scripts/gate-exemptions.test.js",
     "test:gate-verify": "node scripts/gate-verify.test.js",
+    "test:tick-fanout": "npm run build && node scripts/tick-fanout.test.js",
+    "test:canonical-row-id": "npm run build && node scripts/canonical-row-id.test.js",
     "test:pattern": "npm run build && node scripts/feed-arbitration.test.js && node scripts/pattern-engine.test.js",
     "test:pre-open": "npm run build && node scripts/pre-open-capture.test.js && node scripts/pre-open-oai-series.test.js",
     "test:precleared": "npm run build && node scripts/upstox-live-paper-instructions.test.js",
