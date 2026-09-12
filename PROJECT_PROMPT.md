@@ -95,6 +95,45 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 11:27) — row 40 DONE (GAP-FADE + FAILED-ORB candidates, GATE 4 #3)
+
+- **Row 40 → done, commit `aebf6e8`** (control plane synced + render-verified; pushed, `dev` =
+  `aebf6e8`, unpushed 0). doneWhen: "The component can be enabled/disabled independently and its
+  output can be inspected in a historical replay." Row instruction satisfied: a separate, versioned
+  module with declared inputs, output schema and missing-data/failure behaviour.
+- **Two candidates, never one blended score** (`src/trading/gap-engine/gap-candidates.ts`, `gap-cand-v1`,
+  pure: no clock, no I/O, no randomness, no AI): each has its own switch, input contract and refusal
+  list.
+  - **GAP_FADE** consumes the taxonomy's assessments (gap geometry is never re-derived) and reads
+    ONLY pre-open fields, with an explicit look-ahead barrier: target = gap origin (previous close),
+    invalidation = session open. The test mutates every post-open field (session close/high/low, fill
+    state, and the outcome-derived class) and proves the verdict cannot move.
+  - **FAILED_ORB** builds the 15-minute opening range from real intraday observations, then finds the
+    first breakout and the first re-entry inside the range. A path that does not cover the 09:15 open
+    is REFUSED with its measured lag (`LATE_START`) instead of becoming a mislabelled proxy. (The
+    traded price is the `price` column — the row's `close` is the broker's previous close; the
+    session's own close never enters.)
+- **Thresholds**: structural defaults in ONE documented config (maxGapRatio 1.0, rangeMinutes 15,
+  maxStartLagMinutes 5), never tuned against outcomes; the module reports counts and never selects,
+  ranks or optimises (asserted, including a code-not-prose scan). Every emittable reason is published
+  in `CANDIDATE_REFUSAL_TOKENS` and documented in the candidate spec.
+- **Two real defects the tests caught**: ordering by session date alone left same-date inputs in
+  caller order, so the report digest depended on input order (canonical order now breaks ties on the
+  row's own pre-open identity content); and a propagated taxonomy reason was emitted outside the
+  published vocabulary.
+- **Evidence**: `test:gap-candidates` 63/63; `verify:gap-candidates` replay — GAP_FADE **767
+  candidates over 1,242 sessions** (473 not applicable, 211 too large for a fade, 2 unavailable);
+  FAILED_ORB **7 of 9** archived intraday paths (the 2 sessions whose tape begins at 10:55/11:17 IST
+  are refused `LATE_START`); digest `e9a54d30e75cbfac`. Regressions: gap-taxonomy 80/80,
+  gap-hypotheses 78/78. `scripts/lib/gap-archive.js` gained the shared intraday loader (one SQL).
+- **Descriptive finding (reported, NOT tuned):** with ~15 s intraday sampling every evaluated session
+  showed a breakout that later re-entered, so FAILED_ORB is 7/7 of evaluated — the definition is
+  deliberately permissive and the natural place to sharpen it is GATE 4 items 41–43 (geometry, value
+  area, early acceptance/rejection state), not a threshold chosen to flatter results.
+- **Untouched**: live-dependent rows (20/22/23–26, 427, 438, 876, 877, 878), all trading/risk/execution
+  code, `.env`, capital, and the Job Agent workstream. The gap engine remains research/shadow-only —
+  a test asserts no production module imports it.
+
 ## Progress (2026-09-12 11:00) — control-plane hardening (audit accepted; NO roadmap status changed)
 
 - **Audit outcome (accepted by the operator):** the reported "/project-status does not reflect rows
