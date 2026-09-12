@@ -95,6 +95,46 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 01:35) — SESSION CLOSE: rows 41, 42, 43, 44, 60, 61, 62, 63 DONE
+
+- **Session summary (trading workstream only).** Eight roadmap rows closed, each independently verified,
+  render-verified on `/project-status`, committed on `dev` and pushed:
+  - **41** GapRangePos vs the prior-day range (`81a8bea`, `gaprangepos-v1`)
+  - **43** early gap acceptance/rejection (`0fe88e2`, `gapacc-v1`)
+  - **44** independent FadeScore / FollowScore (`60897c2`, `gapscore-v1`)
+  - **60** prior-day value profile POC/VAH/VAL/HVN/LVN (`720a2ac`, `valprof-v1`) — this UNBLOCKED row 42
+  - **42** opening position vs the prior value area (`470e91f`, `oppos-v1`)
+  - **61** value-area construction method versioned (`6d05755`, `va-70pct-expand1-v1`)
+  - **62** failed-auction detection (`afb3ea9`, `failauc-v1`)
+  - **63** value migration across sessions (`7b1ca3c`, `valmig-v1`)
+- **Control plane at close: 57 done / 7 in progress / 164 pending.** `npm run gate:check` IN SYNC on
+  every commit; every row moved with `npm run gate:status` and its ACTIVE status button verified.
+- **Test state at close (all green, run in bounded parallel):** value-migration 57, failed-auction 52,
+  opening-position 52, value-profile 90, gap-range-pos 94, gap-acceptance 85, gap-scores 49,
+  gap-candidates 63, gap-taxonomy 80, gap-hypotheses 78.
+- **Cross-gate dependency established and then resolved:** GATE 4 #5 (row 42) could not be done before
+  GATE 6 #1 (row 60) — no value-area source existed anywhere in `src/`. Row 60 was implemented as that
+  prerequisite (a documented reason, not a gate jump), and row 42 then consumed it.
+- **THE BINDING CONSTRAINT FOR THE NEXT SESSION — archived intraday density is recent-only.** Verified:
+  the median in-window observation count per session is **1** (2021–2025 sessions carry a single
+  in-window row, i.e. the daily bar); only ~28 sessions carry real intraday density. Consequences
+  reported honestly at each step: value-profile **28/1242 OK**, opening-position **27 OK**,
+  failed-auction **25 OK**, value-migration **SAMPLE SIZE 27 pairs**. Every component REFUSES rather
+  than proxying a thin tape. Populating GATE 6/9 measurements needs deeper intraday history, which is a
+  data-acquisition decision for the operator — it is NOT a code defect.
+- **Findings not yet acted on (reported, not suppressed):**
+  - FadeScore and FollowScore (row 44) are **exact complements** (`FadeScore = 4 − FollowScore`), so
+    they are independently switchable but not two orthogonal signals.
+  - Volume is non-zero only on `source='fyers-history'` rows; every live `fyers`/`yahoo` row stores
+    `0.00` — so the value profile's AUTO basis chooses TPO almost everywhere.
+  - Zero FAILED_AUCTION on the archive is a coverage artefact, not a rule failure.
+- **Still blocked, unchanged:** 877/878 (live exchange proof — next market session), 20/22/23–26
+  (pre-open live evidence), 876 (operator OAuth click), 427/438 (data/execution-cost dependent),
+  45/46/47 (#8/#9/#10 — event data / GATE 5 / execution-cost model), 48 (depends on 45–47), 49.
+- **Untouched throughout:** the Job Agent workstream and its control plane. The other agent's in-progress
+  edits (`public/dashboard.html`, `src/app.module.ts`) were left unstaged and never committed by me, and
+  `docs/TODO.md` (its tracker) was not modified.
+
 ## Progress (2026-09-13 01:23) — row 62 DONE (failed-auction detection, GATE 6 #3)
 
 - **Row 62 → done, commit `afb3ea9`** (control plane synced + render-verified; pushed). doneWhen: "A
