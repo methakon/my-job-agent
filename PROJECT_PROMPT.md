@@ -95,6 +95,51 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 11:00) — control-plane hardening (audit accepted; NO roadmap status changed)
+
+- **Audit outcome (accepted by the operator):** the reported "/project-status does not reflect rows
+  21/27/38/39/159" was **not reproducible**. DB said `done`; the origin page (127.0.0.1:3010) and the
+  public route (cloudflared `berhampore.in` → localhost:3010) both rendered the `done` button as the
+  row's ACTIVE status with the newest `gate-sync` markers. One app, one DB, one page route
+  (`ProjectStatusPageController` → `ProjectStatusService.grouped()`, no cache/snapshot/seed render);
+  nginx :80 serves static files only and does not proxy the app; the VM runs only `trading-agent`.
+  The false reading came from the audit's own substring test. **No roadmap status was modified.**
+- **Three hardenings implemented, tested and verified live:**
+  1. `/project-status` now sends `Cache-Control: no-store` (it had only a weak ETag, so a browser
+     could display a superseded status from cache/bfcache). Commit `3afe11c`.
+  2. The gate writer's render check asserts the row's **ACTIVE status button**
+     (`scripts/lib/gate-render-verify.js` + `scripts/gate-verify.test.js`, 40 checks). The old check
+     could not fail — every row renders a button labelled `done`, and the evidence text contains
+     "done by agent", so `>done<`/`rendered.includes('done')` were true for EVERY row. Commit `d63a6f5`.
+  3. `scripts/lib/gate-auth.js` fails immediately when `MYSQL_HOST`/`MYSQL_PORT` are unset instead of
+     letting mysql2 default to `localhost:3306` — a MySQL listener DOES exist on this host's
+     `127.0.0.1:3306` (never a store here) and the silent fallback masked itself as `ETIMEDOUT`
+     during the audit. Commit `d63a6f5`.
+- **Guard scope (commit `2fa51c4`):** the exemption mechanism is job-application-only by design (its
+  own test enforces that), so the page's no-store change is classified instead by adding ONE src/
+  path to `CONTROL_PLANE_PATTERN` — by exact filename (`src/project-status/project-status-page.controller.ts`,
+  the control plane's own UI) — deliberately not a wildcard over the module or src/. A new test pins
+  that boundary. The out-of-scope exemption entry was reverted (allow-list back to its 7 designed
+  job-application SHAs).
+- **DEPLOYED:** built HEAD in a detached worktree with the controller overlaid, backed up the old
+  `dist` (`/tmp/dist.bak.20260912_105357`), swapped, restarted pm2 `my-job-agent` (online, listening,
+  2 nest assets intact). The build also includes the parallel JA session's committed `b185d85`
+  (which fixed the earlier crash-loop); it boots and serves.
+- **Verification (live, both routes):** origin HTTP 200 `cache-control: no-store`; public
+  `cache-control: no-store` + `cf-cache-status: DYNAMIC`. Active-button verifier vs DB on BOTH
+  surfaces: rows 21/27/38/39/159 `done`, 22 `in_progress`, 877 `in_progress` — all VERIFIED.
+  Negative controls: row 38 asked as `pending` → refused with the exact reason; a non-existent row →
+  refused; marker scoping confirmed (row 22 does not carry row 38's marker). Suites: `test:gate-verify`
+  40/40, `test:gate-exemptions` 23/23, `gate:check` IN SYNC, writer dry-run OK (nothing written).
+  Pushed: `dev` = `9338a52`, unpushed 0.
+- **DOCUMENTED RECOMMENDATION — NOT IMPLEMENTED (no DDL):** `project_checklist_items` has no unique
+  key on `(grp_order, item_order)` although the seeder's comment claims `uq_grp_item`; overlapping
+  boots can duplicate rows and a duplicate `pending` twin beside a `done` row is exactly the
+  stale-looking symptom this audit chased. Zero duplicates exist today. The ALTER TABLE is written up
+  in `docs/GATE_CLOSE_STATUS_SYNC.md` for a separate, approved change with a backup first.
+- Untouched: all roadmap statuses, rows 877/878, trading/risk/execution/feed code, `.env`, capital,
+  Job Agent files.
+
 ## Progress (2026-09-12 11:35) — row 39 DONE (GAP-FILL + GAP-AND-GO as separate hypotheses, GATE 4 #2)
 
 - **Row 39 → done, commit `5984e64`** (control plane synced + render-verified; pushed, later head
