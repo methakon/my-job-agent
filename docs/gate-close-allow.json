@@ -83,14 +83,14 @@
       "evidence": "git show --name-only e0fcb92 lists docs/TODO.md, src/job-application-roadmap/job-application-roadmap.service.ts, src/job-application/qualification.service.ts — no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once e0fcb92 leaves the guard commit window (default: last 15 code commits)."
     },
-    "9be0936f77771621e562e2a72aa52716c25f3ef2": {
+    "9be09367ab7162579d66dfbd73349c5b3ab95606": {
       "short": "9be0936",
       "reason": "Same separate Job Application workstream (JA-012): a deterministic, replayable JD intent extraction service in src/job-application/jd-intent.service.ts + jd-intent-model.ts, with a 27-test qualification suite (scripts/ja-012-jd-intent.test.js + ja-012-evidence-tagging.test.js). Extracts role title, seniority, must-have/preferred skills, responsibilities, experience (with range parsing), location/remote rules, employment type, compensation (with currency), work authorization, notice/start requirements, tech domain, channel, employer and freshness — each tagged explicit (matched in source text) vs inferred (labelled inference), with the original JD text preserved verbatim and a sha256 fingerprint guaranteeing same-JD stability. Authored by the PARALLEL job-application session in this shared working tree; tracked in that workstream's own control plane (job_application_roadmap_items row 6), which project_checklist_items deliberately does not mirror. Touches no trading, market-data, feed, risk, execution or schema code.",
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
       "recorded": "2026-09-13T00:50+05:30 (session implementing JA-012 deterministic JD intent extraction; commit authored by the parallel JA session)",
-      "evidence": "git show --name-only 9be0936 lists src/job-application/jd-intent-model.ts, src/job-application/jd-intent.service.ts, scripts/ja-012-jd-intent.test.js, scripts/ja-012-evidence-tagging.test.js — no trading/market-data/risk/execution file, no .env change, no schema change.",
-      "expires_hint": "Delete once 9be0936 leaves the guard commit window (default: last 15 code commits)."
+      "evidence": "git show --name-only 9be09367ab7162579d66dfbd73349c5b3ab95606 lists src/job-application/jd-intent-model.ts, src/job-application/jd-intent.service.ts, scripts/ja-012-jd-intent.test.js, scripts/ja-012-evidence-tagging.test.js — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "expires_hint": "Delete once 9be09367ab7162579d66dfbd73349c5b3ab95606 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
