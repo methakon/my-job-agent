@@ -95,6 +95,50 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 00:44) — row 60 DONE (prior-day value profile: POC/VAH/VAL/HVN/LVN, GATE 6 #1)
+
+- **Row 60 → done, commit `720a2ac`** (control plane synced + render-verified; pushed). doneWhen: "The
+  same inputs produce the same result in replay, and edge cases return a safe explicit state rather
+  than a fabricated value."
+- **Why this row first:** GATE 4 #5 (row 42, "opening position relative to prior Value Area") is
+  dependency-blocked — **no value-area source existed anywhere in `src/`**. Row 60 IS that source, so
+  it is a prerequisite for row 42, not a gate jump. Row 42 is now unblocked.
+- **Feature** (`src/trading/value-profile/value-profile.ts`, `valprof-v1`, pure: no clock, no I/O, no
+  randomness, no AI): builds a price profile from one session's intraday observations and derives POC,
+  the 70% value area (VAL/VAH) and HVN/LVN. 10-point buckets; POC = greatest activity with ties to the
+  LOWEST price; the area expands ONE level at a time from the POC taking the side with the greater
+  next-level activity (ties → lower price) until ≥70% of total activity; HVN = in-area level at/above
+  the in-area MEAN, LVN = outside-area level at/below the overall MEAN (data-derived separators, no
+  fitted multiplier anywhere).
+- **The BASIS is explicit and never silently substituted** — the honest core of this row:
+  - `VOLUME` uses volume per observation; `TPO` uses observation counts.
+  - `AUTO` (default) picks VOLUME only when ≥90% of in-window observations carry usable volume,
+    otherwise TPO — and every profile carries `basis` + `basisReason` saying which and why.
+  - Demanding `basis: 'VOLUME'` with insufficient coverage is **REFUSED** (`VOLUME_UNAVAILABLE`),
+    never downgraded to TPO.
+- **Measured input finding:** volume is only ever non-zero on `source='fyers-history'` rows (1,602 of
+  1,623); **every live `fyers` row (68,088) and every `yahoo` row (4,569) stores `0.00`** — so AUTO
+  chooses TPO for most sessions, and that is reported rather than hidden.
+- **Evidence**: `test:value-profile` **74/74** (POC/area/nodes from the pinned rules, basis resolution
+  in both directions, every refusal reachable, disabled path, determinism with reversed input ⇒
+  identical digest AND profile order, purity/research-only guards). Regressions rows 38/39/40/41/43/44
+  green (80/78/63/94/85/49). `verify:value-profile` over the archive: **1,242 sessions → 28 OK
+  (20 VOLUME, 8 TPO), 1,214 INSUFFICIENT_LEVELS**, digest `234f770976be2da4`.
+- **Verified cause of the 1,214 refusals (not a bug):** the archive's intraday density is recent-only —
+  the **median in-window observation count per session is 1** (2021–2025 sessions carry a single
+  in-window row, i.e. the daily bar), while only ~28 recent sessions carry thousands. Fewer than 3
+  occupied price levels cannot form a value area, so the component refuses. It never invents an area
+  from one observation.
+- **Additive loader**: `scripts/lib/gap-archive.js` gained `loadArchivedProfilePaths` (price+volume);
+  existing loaders untouched, so earlier replays are behaviour-neutral.
+- **Three test failures were wrong EXPECTATIONS + one real module gap** (recorded per the discipline):
+  the fixture vocabulary check forgot `NO_LEVELS`; the sort-count assertion expected 2 canonical
+  comparators when the module legitimately has **3** (session order, point instant order, level price
+  order); and the MODULE genuinely omitted `enabled=` from its reviewer summary, which was fixed in
+  the module because a reviewer must be able to see the switch state.
+- **Untouched**: rows 877/878, 20, 22, 23–26, 42, 427, 438, 876; the Job Agent workstream and its
+  control plane were not read or written.
+
 ## Progress (2026-09-13 00:32) — row 44 DONE (independent FadeScore / FollowScore, GATE 4 #7)
 
 - **Row 44 → done, commit `60897c2`** (control plane synced + render-verified; pushed). doneWhen: "The
