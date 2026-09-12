@@ -29,6 +29,8 @@
     "verify:gap-taxonomy": "node scripts/gap-taxonomy-replay.js",
     "test:gap-hypotheses": "npm run build && node scripts/gap-hypotheses.test.js",
     "verify:gap-hypotheses": "node scripts/gap-hypotheses-replay.js",
+    "test:gap-candidates": "npm run build && node scripts/gap-candidates.test.js",
+    "verify:gap-candidates": "node scripts/gap-candidates-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",
     "verify:failover": "node scripts/feed-failover-verify.js",
     "market-data:canonical": "node scripts/market-data-canonical-status.js",

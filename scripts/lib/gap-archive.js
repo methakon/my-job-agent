@@ -46,4 +46,31 @@ async function loadArchivedSeries(db, instrument) {
   return { rawBars, series: SERIES.buildSessionSeries(instrument, rawBars) };
 }
 
-module.exports = { loadArchivedBars, loadArchivedSeries, SERIES };
+/**
+ * Intraday paths for the FAILED-ORB candidate: every market-hours row per session, in order.
+ *
+ * The traded price is the `price` column — that is the one that moves tick to tick (~15 s cadence);
+ * the row's open/high/low/close are degenerate copies of it, and `close` is the broker's PREVIOUS
+ * close (proven in the row-38 work), never the session's own.
+ *
+ * `ts` is DECLARED IST (see TIME_BASIS in scripts/lib/market-session.js), so each instant is built
+ * with an explicit +05:30 offset — never by handing a bare wall clock to `new Date()`.
+ */
+async function loadArchivedIntradayPaths(db, instrument, opts = {}) {
+	const since = opts.since || '2026-09-01';
+	const [rows] = await db.query(
+		"SELECT DATE_FORMAT(`ts`,'%Y-%m-%d') AS d, DATE_FORMAT(`ts`,'%Y-%m-%d %H:%i:%s') AS wall_ist, `price` AS price " +
+		'FROM fnf_market_snapshots_history ' +
+		"WHERE instrument = ? AND DATE(`ts`) >= ? AND TIME(`ts`) BETWEEN '09:15:00' AND '15:30:00' " +
+		'ORDER BY `ts` ASC',
+		[instrument, since],
+	);
+	const byDay = new Map();
+	for (const r of rows) {
+		if (!byDay.has(r.d)) byDay.set(r.d, []);
+		byDay.get(r.d).push({ instantMs: Date.parse(String(r.wall_ist).replace(' ', 'T') + '+05:30'), price: Number(r.price) });
+	}
+	return [...byDay.entries()].map(([sessionDate, points]) => ({ sessionDate, instrument, points }));
+}
+
+module.exports = { loadArchivedBars, loadArchivedSeries, loadArchivedIntradayPaths };
