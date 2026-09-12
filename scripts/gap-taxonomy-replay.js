@@ -23,7 +23,7 @@ const crypto = require('crypto');
 const mysql = require('mysql2/promise');
 
 const ROOT = path.join(__dirname, '..');
-const SERIES = require(path.join(ROOT, 'dist', 'trading', 'gap-engine', 'gap-session-series'));
+const { loadArchivedSeries } = require('./lib/gap-archive.js');
 const TAX = require(path.join(ROOT, 'dist', 'trading', 'gap-engine', 'gap-taxonomy'));
 
 const env = {};
@@ -45,25 +45,9 @@ const hasFlag = (name) => process.argv.includes(`--${name}`);
     user: env.MYSQL_USER, password: env.MYSQL_PASSWORD, database: 'myjob_agent', connectTimeout: 12000,
   });
 
-  // one bar per session: widest span wins, earliest timestamp breaks the tie
-  const [rows] = await db.query(
-    `WITH bars AS (
-       SELECT DATE_FORMAT(\`ts\`,'%Y-%m-%d') AS d,
-              \`open\` AS o, high AS h, low AS l, \`close\` AS c,
-              DATE_FORMAT(\`ts\`,'%Y-%m-%d %H:%i:%s') AS src,
-              ROW_NUMBER() OVER (PARTITION BY DATE(\`ts\`) ORDER BY (high - low) DESC, \`ts\` ASC) AS rn
-       FROM fnf_market_snapshots_history
-       WHERE instrument = ? AND TIME(\`ts\`) BETWEEN '09:15:00' AND '15:30:00'
-     ) SELECT d, o, h, l, c, src FROM bars WHERE rn = 1 ORDER BY d ASC`, [instrument]);
-
-  const rawBars = rows.map((r) => ({
-    instrument,
-    sessionDate: String(r.d),
-    open: Number(r.o), high: Number(r.h), low: Number(r.l), quotedClose: Number(r.c),
-    sourceId: String(r.src),
-  }));
-
-  const series = SERIES.buildSessionSeries(instrument, rawBars);
+  // Session bars come from the SHARED loader (scripts/lib/gap-archive.js): one bar per session,
+  // session labelled by the broker ts (IST) inside the market window, widest span wins.
+  const { rawBars, series } = await loadArchivedSeries(db, instrument);
   const disabled = hasFlag('disabled');
   const result = TAX.assessGapSeries(series.sessions, disabled ? { enabled: false } : {});
 
