@@ -95,6 +95,36 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 00:58) — row 42 DONE (opening position vs prior value area, GATE 4 #5)
+
+- **Row 42 → done, commit `470e91f`** (control plane synced + render-verified; pushed) — the row that was
+  dependency-blocked until row 60 landed. doneWhen: "The same inputs produce the same result in replay,
+  and edge cases return a safe explicit state rather than a fabricated value."
+- **Feature** (`src/trading/gap-engine/opening-position.ts`, `oppos-v1`, pure): `pos = (open −
+  prior.VAL) / (prior.VAH − prior.VAL)`, labelled `ABOVE_VALUE` / `INSIDE_VALUE` / `BELOW_VALUE` with
+  the area edges INSIDE. The prior session is the immediately preceding one that produced a profile.
+  It reads only the open and the prior value area — the session's own high/low/close are never touched
+  (asserted by mutation).
+- **It consumes the row-60 value-profile REPORT, not a re-derived area**, and carries the upstream
+  provenance: the report exposes `upstreamProfileVersion` (verified `valprof-v1`) and every OK row
+  records the prior profile's `basis` (VOLUME/TPO). POC/VAH/VAL geometry is never recomputed here.
+- **Refusals are a closed vocabulary** — `NO_SESSION_OPEN`, `NO_PRIOR_SESSION`, `PROFILE_UNAVAILABLE`,
+  `ZERO_VALUE_AREA` — each with a null position, and `PROFILE_UNAVAILABLE` propagates the profile's own
+  reason verbatim. A value area is never substituted or fabricated.
+- **Evidence**: `test:opening-position` **52/52**; **all GATE 4/6 suites green run in parallel** (opening-position
+  52, value-profile 74, gap-range-pos 94, gap-acceptance 85, gap-scores 49, gap-candidates 63,
+  gap-taxonomy 80, gap-hypotheses 78). `verify:opening-position`: **1,242 sessions → 27 OK (8 ABOVE /
+  10 INSIDE / 9 BELOW), 1,214 PROFILE_UNAVAILABLE, 1 NO_PRIOR_SESSION**, digest `3092a94859b6e6b1`.
+- **Coverage finding (reported):** the 1,214 refusals are the row-60 coverage limitation propagating
+  honestly — the prior session simply had no profile (the archive's in-window density is recent-only),
+  so the position is refused rather than approximated from a session with no value area.
+- **Related test correction (recorded):** row 42's new module tripped row 60's "no production importer"
+  scan, which counted a **research sibling** (`gap-engine/opening-position`) as a *production* importer
+  of `value-profile`. That scan now excludes research component directories; the invariant it guards
+  (no production wiring) is unchanged.
+- **Untouched**: rows 877/878, 20, 22, 23–26, 45–49, 427, 438, 876; the Job Agent workstream and its
+  control plane were not read or written.
+
 ## Progress (2026-09-13 00:44) — row 60 DONE (prior-day value profile: POC/VAH/VAL/HVN/LVN, GATE 6 #1)
 
 - **Row 60 → done, commit `720a2ac`** (control plane synced + render-verified; pushed). doneWhen: "The
