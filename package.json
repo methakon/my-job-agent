@@ -39,6 +39,8 @@
     "verify:gap-acceptance": "node scripts/gap-acceptance-replay.js",
     "test:gap-scores": "npm run build && node scripts/gap-scores.test.js",
     "verify:gap-scores": "node scripts/gap-scores-replay.js",
+    "test:value-profile": "npm run build && node scripts/value-profile.test.js",
+    "verify:value-profile": "node scripts/value-profile-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",
     "verify:failover": "node scripts/feed-failover-verify.js",
     "market-data:canonical": "node scripts/market-data-canonical-status.js",

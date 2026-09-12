@@ -73,4 +73,34 @@ async function loadArchivedIntradayPaths(db, instrument, opts = {}) {
 	return [...byDay.entries()].map(([sessionDate, points]) => ({ sessionDate, instrument, points }));
 }
 
-module.exports = { loadArchivedBars, loadArchivedSeries, loadArchivedIntradayPaths };
+/**
+ * Intraday paths carrying PRICE AND VOLUME, for the value-profile component (GATE 6 #1).
+ *
+ * `volume` here is per-observation volume as stored. MEASURED CAVEAT (2026-09-12): only rows with
+ * source='fyers-history' carry a non-zero volume, and theirs look CUMULATIVE across the session
+ * (3.06M → 3.91M → 4.26M on 2026-09-03) — every live `fyers` and every `yahoo` row stores 0.00.
+ * This loader therefore reports volume as found; the component decides the basis and REFUSES a
+ * demanded VOLUME basis when coverage is too thin, rather than treating 0 as "no trading".
+ */
+async function loadArchivedProfilePaths(db, instrument, opts = {}) {
+	const since = opts.since || '2021-01-01';
+	const [rows] = await db.query(
+		"SELECT DATE_FORMAT(`ts`,'%Y-%m-%d') AS d, DATE_FORMAT(`ts`,'%Y-%m-%d %H:%i:%s') AS wall_ist, `price` AS price, `volume` AS volume " +
+		'FROM fnf_market_snapshots_history ' +
+		"WHERE instrument = ? AND DATE(`ts`) >= ? AND TIME(`ts`) BETWEEN '09:15:00' AND '15:30:00' " +
+		'ORDER BY `ts` ASC',
+		[instrument, since],
+	);
+	const byDay = new Map();
+	for (const r of rows) {
+		if (!byDay.has(r.d)) byDay.set(r.d, []);
+		byDay.get(r.d).push({
+			instantMs: Date.parse(String(r.wall_ist).replace(' ', 'T') + '+05:30'),
+			price: Number(r.price),
+			volume: Number(r.volume),
+		});
+	}
+	return [...byDay.entries()].map(([sessionDate, points]) => ({ sessionDate, instrument, points }));
+}
+
+module.exports = { loadArchivedBars, loadArchivedSeries, loadArchivedIntradayPaths, loadArchivedProfilePaths };
