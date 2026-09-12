@@ -30,6 +30,7 @@ import { LinkedInProfileService } from './linkedin-profile.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 import { Application } from './application.entity';
+import { QualificationService, QualificationResult } from '../job-application/qualification.service';
 
 /**
  * ApplyEngine — registry of PortalAdapters + submission loop.
@@ -60,6 +61,7 @@ export class ApplyEngineService implements OnModuleInit {
 		public readonly learning: LearningWeightsService,
 		private readonly linkedin: LinkedInProfileService,
 		private readonly inbox: InboxReaderService,
+		private readonly qualification: QualificationService,
 	) {}
 
 	onModuleInit(): void {
@@ -155,8 +157,29 @@ export class ApplyEngineService implements OnModuleInit {
 
 		const profileData = await this.profileService.flatten();
 		const profileResp = await this.profileService.getResponse();
-		if (profileResp && profileResp.missingFields.length > 0) {
+		if (!profileResp) {
+			return { ok: false, status: 'needs_info', missingInfo: ['profile not available'] };
+		}
+		if (profileResp.missingFields.length > 0) {
 			return { ok: false, status: 'needs_info', missingInfo: profileResp.missingFields.map((f) => `profile.${f}`) };
+		}
+
+		// JA-010: central qualification gate — deterministic, no AI.
+		// REJECT/INSUFFICIENT_DATA block the application; NEAR_MISS/CONDITIONAL
+		// log a warning but still allow the pipeline to run (user may want to
+		// see the lead). CV is built later in the pipeline, so we report it as
+		// buildable here rather than failing channel-ready on a not-yet-built CV.
+		const qual = await this.qualification.evaluate({
+			leadId: lead.id,
+			profileId: profileResp.id,
+			channelInfo: { hasAnswerBank: true, hasCv: true, source: lead.source },
+		});
+		if (qual.decision === 'REJECT' || qual.decision === 'INSUFFICIENT_DATA') {
+			this.logger.warn(`JA-010 qualification ${qual.decision} for lead ${lead.id} (${lead.title}, ${lead.company}) — not applying: ${qual.reasons.join('; ')}`);
+			return { ok: false, status: 'needs_info', missingInfo: [`qualification: ${qual.decision}`], applicationId: undefined };
+		}
+		if (qual.decision === 'NEAR_MISS' || qual.decision === 'CONDITIONAL') {
+			this.logger.warn(`JA-010 qualification ${qual.decision} for lead ${lead.id} (${lead.title}, ${lead.company}) — composite ${qual.compositeScore}/100; proceeding: ${qual.reasons.join('; ')}`);
 		}
 
 		// REUSE the failed row on retry — never spawn duplicate application rows
@@ -401,8 +424,21 @@ export class ApplyEngineService implements OnModuleInit {
 
 		const profileData = await this.profileService.flatten();
 		const profileResp = await this.profileService.getResponse();
-		if (profileResp && profileResp.missingFields.length > 0) {
+		if (!profileResp) {
+			return { ok: false, status: 'failed', errorDetail: 'profile not available' };
+		}
+		if (profileResp.missingFields.length > 0) {
 			return { ok: false, status: 'needs_info', errorDetail: `profile incomplete: ${profileResp.missingFields.join(', ')}` };
+		}
+
+		// JA-010: central qualification — gate prepare on REJECT/INSUFFICIENT_DATA.
+		const qual = await this.qualification.evaluate({
+			leadId: lead.id,
+			profileId: profileResp.id,
+			channelInfo: { hasAnswerBank: true, hasCv: true, source: lead.source },
+		});
+		if (qual.decision === 'REJECT' || qual.decision === 'INSUFFICIENT_DATA') {
+			return { ok: false, status: 'failed', errorDetail: `JA-010 qualification ${qual.decision}: ${qual.reasons.join('; ')}` };
 		}
 
 		try {
@@ -493,6 +529,22 @@ export class ApplyEngineService implements OnModuleInit {
 		if (existingByLead && ['submitted', 'sent', 'sandboxed'].includes(existingByLead.status)) {
 			return { ok: false, status: 'needs_info', missingInfo: [`already applied (${existingByLead.status})`], applicationId: existingByLead.id };
 		}
+
+		// JA-010: re-qualify on submit — the lead may have aged out of qualification
+		// since prepare (job filled, requirements changed, etc.). Deterministic;
+		// REJECT/INSUFFICIENT_DATA block the send even if the user approved the prepare.
+		const profileResp = await this.profileService.getResponse();
+		if (profileResp) {
+			const qual = await this.qualification.evaluate({
+				leadId: lead.id,
+				profileId: profileResp.id,
+				channelInfo: { hasAnswerBank: true, hasCv: true, source: item.source },
+			});
+			if (qual.decision === 'REJECT' || qual.decision === 'INSUFFICIENT_DATA') {
+				return { ok: false, status: 'needs_info', missingInfo: [`JA-010 re-qualification ${qual.decision}: ${qual.reasons.join('; ')}`] };
+			}
+		}
+
 		const setting = await this.settingsRepo.findBySource(item.source);
 		if (this.killSwitchOn()) return { ok: false, status: 'failed', errorDetail: 'kill switch active' };
 		if (setting && !setting.autoApplyEnabled) return { ok: false, status: 'needs_info', missingInfo: [`auto-apply disabled for ${item.source}`] };

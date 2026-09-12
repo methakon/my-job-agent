@@ -27,8 +27,9 @@ import { AstroMuhurtaService } from './astro/astro-muhurta.service';
 import { AstroLeadScoringService } from './astro/astro-lead-scoring.service';
 import { PreApplyItem } from './astro/pre-apply-item.entity';
 import { PreApplyItemRepository } from './astro/pre-apply-item.repository';
-import { PreApplyService } from './astro/pre-apply.service';
 import { MuhurtaSendService } from './astro/muhurta-send.service';
+import { PreApplyService } from './astro/pre-apply.service';
+import { QualificationService } from './job-application/qualification.service';
 import { AstroController } from './astro/astro.controller';
 import { MuhurtaWindow } from './astro/muhurta-window.entity';
 import { FnfPortfolio } from './trading/fnf-portfolio.entity';
@@ -199,7 +200,7 @@ import {
     ProcessLearningService, InboxReaderService, ApplicationRepository, ApplySettingRepository, PortalCredentialService,
     HrEmailInvestigator, AutoApplyLoopService, RetryBackoffService, BrowserFormService, LearningWeightsService,
     DailyDigestService, LinkedInProfileService, EmailTrackerService, InterviewPrepService, AstroMuhurtaService,
-    AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService,
+    AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService, QualificationService,
     FnfTradingService, FnoMarketDataService, FnfOptionChainService, MarketDataInspectionService, FeatureEngineService,
     UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, FyersTokenService,
     ProjectClarificationService,
