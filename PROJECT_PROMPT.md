@@ -95,6 +95,48 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 00:32) — row 44 DONE (independent FadeScore / FollowScore, GATE 4 #7)
+
+- **Row 44 → done, commit `60897c2`** (control plane synced + render-verified; pushed). doneWhen: "The
+  component can be enabled/disabled independently and its output can be inspected in a historical
+  replay." The row's `instr` (a separate versioned module, not one large score; inputs, output schema,
+  timestamps and failure behaviour defined first) is satisfied.
+- **Two separate, equally-weighted counts** (`src/trading/gap-engine/gap-scores.ts`, `gapscore-v1`,
+  pure: no clock, no I/O, no randomness, no AI), consuming the row-38 taxonomy and row-41 GapRangePos —
+  never re-deriving gap geometry:
+  - **FadeScore** (max 4): `f_materialGap`, `f_insideRange` (GapRangePos ∈ [0,1]), `f_counterTrend`
+    (prior session moved against the gap), `f_withinSize` (|gap| ≤ prior range).
+  - **FollowScore** (max 4): `g_materialGap`, `g_outsideRange`, `g_withTrend`, `g_sizeBreak`.
+- **No weight or fitted threshold exists**: every component weighs 1 (`EQUAL_UNWEIGHTED`, asserted);
+  a score is a count of stated facts about ONE session — no session is ranked against another.
+- **INDEPENDENCE proven, not asserted**: disabling FADE leaves the FOLLOW block byte-identical and
+  vice-versa; both-off computes nothing. Each side reports DISABLED per input.
+- **Refusals**: `NO_GAP` (NOT_APPLICABLE — open == prevClose), `TAXONOMY_UNAVAILABLE` and
+  `RANGE_POS_UNAVAILABLE` (the parent's reason propagated verbatim behind the token) — score is
+  **null**, never fabricated. No look-ahead: materiality is read only as `class === 'NONE'`, and
+  mutating the session close/high/low, fill state and the class VALUE cannot move a score.
+- **Evidence**: `test:gap-scores` **49/49**; regressions rows 38/39/40/41/43 green (80/78/63/94/85);
+  `verify:gap-scores` over the real archive **1,242 sessions, 978 scored, 262 NOT_APPLICABLE,
+  2 UNAVAILABLE**, digest `59135fcbecbdc6d1`.
+- **DESCRIPTIVE FINDING — the two sides are exact complements, and that is a design weakness worth
+  flagging:** because each FADE component is the logical complement of its FOLLOW counterpart
+  (`f_insideRange` = not `g_outsideRange`, `f_counterTrend` = not `g_withTrend`, `f_withinSize` = not
+  `g_sizeBreak`, and `f_materialGap` = `g_materialGap`), `FadeScore = 4 − FollowScore` identically.
+  The replay distributions confirm it: FADE `[0,15,238,394,331]` vs FOLLOW `[0,331,394,238,15]` for
+  scores 0..4. So the two blocks are independently *switchable* (the row's doneWhen) but they carry
+  the **same** information — they are not two orthogonal signals. Making them genuinely independent
+  needs distinct components per side (e.g. FADE weighting fill-probability/decay evidence, FOLLOW
+  weighting extension/continuation evidence), which is new work, not a threshold change. Reported as
+  found; no threshold was moved to disguise it.
+- **Six test failures were wrong EXPECTATIONS / fixtures, not module defects** (recorded per the
+  discipline): the fixture's last session had no derivable close so the taxonomy legitimately refused
+  it (the taxonomy takes a session's close from the NEXT session's quote); the no-gap fixture set the
+  wrong field (`prevClose` comes from the row's OWN `quotedClose`); and two static scans were too
+  blunt (`/rank/` matched the module's own honest prose "nothing here ranks sessions", and a bare
+  `/coefficient/` matched the spec string). Each fixed in the TEST with the reason recorded.
+- **Untouched**: rows 877/878, 20, 22, 23–26, 42, 427, 438, 876; the Job Agent workstream and its
+  control plane were not read or written.
+
 ## Progress (2026-09-13 00:26) — row 43 DONE (early gap acceptance/rejection state, GATE 4 #6)
 
 - **Row 43 → done, commit `0fe88e2`** (control plane synced + render-verified; pushed). doneWhen: "The
