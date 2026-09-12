@@ -5,6 +5,14 @@ import { ConfigService } from '@nestjs/config';
 import { ImapFlow } from 'imapflow';
 import * as crypto from 'crypto';
 import { MailAccount } from './mail-account.entity';
+import {
+	IMAP_AUTO_DISABLE_AFTER,
+	ImapErrorTrap,
+	createGuardedImapClient,
+	imapBackoffHours,
+	imapSkipReason,
+	recordImapOutcome,
+} from './imap-safety';
 
 export interface OtpEmail {
 	from: string;
@@ -43,58 +51,36 @@ export class InboxReaderService {
 	}
 
 	/**
-	 * Connect to IMAP server with exponential backoff for failed accounts.
+	 * Connect to IMAP using the shared backoff rule and the mandatory error trap.
+	 * The trap MUST be attached before connect(): imapflow reports socket timeouts
+	 * asynchronously through 'error', and an unhandled one exits the whole process.
 	 */
-	private async connect(account: MailAccount): Promise<ImapFlow> {
-		// Skip if IMAP disabled for this account
-		if (account.useImap !== undefined && account.useImap === false) {
-			throw new Error(`IMAP disabled for ${account.email}`);
+	private async connect(account: MailAccount): Promise<{ client: ImapFlow; trap: ImapErrorTrap }> {
+		const skip = imapSkipReason(account);
+		if (skip) {
+			throw new Error(`${skip} (${account.email})`);
 		}
 
-		// Skip if too many recent failures (exponential backoff)
-		if (account.imapFailureCount && account.imapFailureCount > 0) {
-			const hoursSinceLastFailure = account.lastImapSuccess
-				? (Date.now() - account.lastImapSuccess.getTime()) / (60 * 60 * 1000)
-				: Infinity;
-			
-			// Exponential backoff: wait 2^(n-1) hours for n failures
-			const backoffHours = Math.pow(2, account.imapFailureCount - 1);
-			if (hoursSinceLastFailure < backoffHours) {
-				throw new Error(`IMAP backoff for ${account.email}: ${account.imapFailureCount} failures, wait ${backoffHours} hours`);
-			}
-		}
-
-		const client = new ImapFlow({
+		const { client, trap } = createGuardedImapClient({
 			host: account.imapHost || (account.provider === 'gmail' ? 'imap.gmail.com' : 'outlook.office365.com'),
 			port: account.imapPort || 993,
 			secure: true,
 			auth: { user: account.email, pass: this.decrypt(account.passwordEnc) },
 			logger: false,
-		} as any); // timeout option not in Typescript types but works at runtime
+		} as any, (err) => this.logger.warn(`imap socket error on ${account.email}: ${err.message}`));
 
 		await client.connect();
-		return client;
+		return { client, trap };
 	}
 
 	private async updateImapStatus(account: MailAccount, success: boolean): Promise<void> {
 		try {
-			if (success) {
-				await this.repo.update(account.id, {
-					lastImapSuccess: new Date(),
-					imapFailureCount: 0,
-				});
-			} else {
-				await this.repo.update(account.id, {
-					imapFailureCount: (account.imapFailureCount || 0) + 1,
-				});
-
-				// Auto-disable if 5+ consecutive failures
-				if ((account.imapFailureCount || 0) + 1 >= 5) {
-					await this.repo.update(account.id, {
-						useImap: false,
-					});
-					this.logger.warn(`Auto-disabled IMAP for ${account.email}: 5+ consecutive failures`);
-				}
+			const outcome = await recordImapOutcome(this.repo, account, success, {
+				onAutoDisable: (email) =>
+					this.logger.warn(`Auto-disabled IMAP for ${email}: ${IMAP_AUTO_DISABLE_AFTER}+ consecutive failures`),
+			});
+			if (!success) {
+				this.logger.warn(`IMAP failure ${outcome.failureCount} recorded for ${account.email}`);
 			}
 		} catch (err) {
 			this.logger.error(`Failed to update IMAP status for ${account.email}: ${err.message}`);
@@ -119,8 +105,9 @@ export class InboxReaderService {
 
 		for (const account of accounts) {
 			let client: ImapFlow | null = null;
+			let trap: ImapErrorTrap | null = null;
 			try {
-				client = await this.connect(account);
+				({ client, trap } = await this.connect(account));
 				const lock = await client.getMailboxLock('INBOX');
 				try {
 					const since = new Date(Date.now() - withinMinutes * 60_000);
@@ -148,7 +135,7 @@ export class InboxReaderService {
 				await client.logout();
 				await this.updateImapStatus(account, true);
 			} catch (err) {
-				this.logger.warn(`inbox read failed on ${account.email}: ${String(err).slice(0, 150)}`);
+				this.logger.warn(`inbox read failed on ${account.email}: ${String(err).slice(0, 150)}${trap?.lastError() ? ` [socket: ${trap.lastError()!.message}]` : ''}`);
 				await this.updateImapStatus(account, false);
 				if (client) await client.logout().catch(() => undefined);
 			}
@@ -174,8 +161,9 @@ export class InboxReaderService {
 
 		for (const account of accounts) {
 			let client: ImapFlow | null = null;
+			let trap: ImapErrorTrap | null = null;
 			try {
-				client = await this.connect(account);
+				({ client, trap } = await this.connect(account));
 				const lock = await client.getMailboxLock('INBOX');
 				try {
 					for await (const msg of client.fetch({ since: new Date(Date.now() - 7 * 864e5), seen: false }, { envelope: true })) {
@@ -190,7 +178,7 @@ export class InboxReaderService {
 				await client.logout();
 				await this.updateImapStatus(account, true);
 			} catch (err) {
-				this.logger.warn(`reply poll failed on ${account.email}: ${String(err).slice(0, 120)}`);
+				this.logger.warn(`reply poll failed on ${account.email}: ${String(err).slice(0, 120)}${trap?.lastError() ? ` [socket: ${trap.lastError()!.message}]` : ''}`);
 				await this.updateImapStatus(account, false);
 				if (client) await client.logout().catch(() => undefined);
 			}
@@ -212,6 +200,8 @@ export class InboxReaderService {
 		lastImapSuccess: Date | null;
 		lastFailureAgeHours: number | null;
 		backoffHours: number;
+		/** Why this account is currently skipped, or null when it may be polled. */
+		skipReason: string | null;
 	}>> {
 		const accounts = await this.repo.find({
 			where: { active: true },
@@ -224,7 +214,7 @@ export class InboxReaderService {
 				: null;
 			
 			const backoffHours = (acc.imapFailureCount && acc.imapFailureCount > 0)
-				? Math.pow(2, acc.imapFailureCount - 1)
+				? imapBackoffHours(acc.imapFailureCount)
 				: 0;
 
 			return {
@@ -238,6 +228,7 @@ export class InboxReaderService {
 				lastImapSuccess: acc.lastImapSuccess,
 				lastFailureAgeHours,
 				backoffHours,
+				skipReason: imapSkipReason(acc),
 			};
 		});
 	}

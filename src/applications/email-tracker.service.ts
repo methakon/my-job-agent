@@ -3,12 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
-import { ImapFlow } from 'imapflow';
 import { simpleParser, ParsedMail } from 'mailparser';
 import * as crypto from 'crypto';
 import { StatusUpdate } from './status-update.entity';
 import { ApplicationRepository } from './application.repository';
 import { MailAccount } from './mail-account.entity';
+import {
+	createGuardedImapClient,
+	imapSkipReason,
+	recordImapOutcome,
+} from './imap-safety';
 
 const STATUS_KEYWORDS: Array<[string, RegExp]> = [
 	['rejected', /(unfortunately|not moving forward|regret to inform|decided not to|no longer under consideration|position has been filled)/i],
@@ -78,13 +82,21 @@ export class EmailTrackerService {
 				return 0;
 			}
 			for (const account of accounts) {
-				const client = new ImapFlow({
-					host: account.provider === 'gmail' ? 'imap.gmail.com' : 'outlook.office365.com',
-					port: 993,
+				// Shared backoff rule: an account in backoff (or hard-disabled) is not
+				// re-polled. Without this the 30-minute interval hammered failing
+				// mailboxes and re-triggered the socket-timeout crash every cycle.
+				const skip = imapSkipReason(account);
+				if (skip) {
+					this.logger.warn(`email poll skipped for ${account.email}: ${skip}`);
+					continue;
+				}
+				const { client, trap } = createGuardedImapClient({
+					host: account.imapHost || (account.provider === 'gmail' ? 'imap.gmail.com' : 'outlook.office365.com'),
+					port: account.imapPort || 993,
 					secure: true,
 					auth: { user: account.email, pass: this.decrypt(account.passwordEnc) },
 					logger: false,
-				});
+				} as any, (err) => this.logger.warn(`imap socket error on ${account.email}: ${err.message}`));
 				try {
 					await client.connect();
 					const lock = await client.getMailboxLock('INBOX');
@@ -98,8 +110,12 @@ export class EmailTrackerService {
 						lock.release();
 					}
 					await client.logout();
+					await recordImapOutcome(this.mailRepo, account, true);
 				} catch (err) {
-					this.logger.warn(`email poll failed on ${account.email}: ${String(err).slice(0, 200)}`);
+					this.logger.warn(`email poll failed on ${account.email}: ${String(err).slice(0, 200)}${trap.lastError() ? ` [socket: ${trap.lastError()!.message}]` : ''}`);
+					// Counting only: the OTP reader owns the auto-disable decision, so a
+					// tracker failure can never silently stop OTP reading on its own.
+					await recordImapOutcome(this.mailRepo, account, false, { allowAutoDisable: false });
 					await client.logout().catch(() => undefined);
 				}
 			}
