@@ -23,6 +23,13 @@ const ALLOW_FILE = path.join(ROOT, 'docs', 'gate-close-allow.json');
 const LEGACY_FILE = path.join(ROOT, 'docs', 'gate-close-legacy-baseline.json');
 const JA_SHA = 'd80e0bad00747b54a7c85574be78b1af1b98d57c';
 const JA2_SHA = '4d65f3a511a2e5f0b5116e50e54c95f3bcb58844';
+// Appended 2026-09-12: the separate job-application workstream kept shipping while this
+// tripwire still listed the first two SHAs, so the suite was red before the third entry
+// was added. Growing this list is the deliberate act the tripwire exists to force.
+const JA3_SHA = '6b2431ae134f14bcd81fd5937eba92f2f279e4e6'; // JA-002 submission sandbox safety
+const JA4_SHA = 'bfaa1776345a0986f6a45ea2ec1d6af3068c2f5c'; // JA-003 regression baseline
+const JA5_SHA = '4ce0ab84717faa3b9849f93e632881cafb6d1966'; // IMAP crash safety (agent queue item 76)
+const AUDITED = [JA_SHA, JA2_SHA, JA3_SHA, JA4_SHA, JA5_SHA];
 
 const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit } = require(LIB);
 
@@ -56,7 +63,7 @@ t('the committed allow-list loads with no problems', () => {
 });
 
 t('it exempts exactly the audited JA SHAs — the file cannot silently grow', () => {
-	const expected = [JA_SHA, JA2_SHA].sort();
+	const expected = [...AUDITED].sort();
 	assert.deepEqual([...live.entries.keys()].sort(), expected, `expected exactly ${expected.length} exemptions`);
 });
 
@@ -71,7 +78,7 @@ t('EVERY entry is auditable: reason + workstream + authority + recorded', () => 
 
 t('the exemption does NOT route through the forbidden legacy baseline', () => {
 	const legacy = JSON.parse(fs.readFileSync(LEGACY_FILE, 'utf8')).commits || {};
-	for (const sha of [JA_SHA, JA2_SHA]) {
+	for (const sha of AUDITED) {
 		assert.ok(!legacy[sha] && !legacy[sha.slice(0, 7)], `${sha.slice(0, 7)} must never be silenced as "legacy baseline"`);
 	}
 });
