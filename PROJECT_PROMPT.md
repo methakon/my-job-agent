@@ -95,6 +95,26 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 05:20) — row 85 DONE (gap database, GATE 8 #1) + COMMIT-SAFETY INCIDENT fixed
+
+- **Row 85 (GATE 8 #1) → done, commit `699ed2a`** — `gapdb-v1`: the current NIFTY/BANKNIFTY gap **feature
+  dataset**, one frozen vector per (session, instrument) knowable at the **09:15 OPEN** (the declared cutoff).
+  Columns are pinned: gapClass/gapDirection/gapPct/gapRatio/gapAbs/open/prevClose/priorRange (row 38) +
+  gapRangePos (41) + fadeScore/followScore (44) + decisionSide/tradeDirection/decisionReason (48). It CONSUMES
+  those reports, records per-column provenance, and leaves a column null with `absent: <source>` when a
+  dependency is missing — never a guess. **Leakage safety by construction:** no label is attached, the session
+  high/low/close are never read, and every row echoes the cutoff; enable/disable is independent.
+  Evidence: `test:gap-dataset` **34/34**; archive replay 1,242 sessions → **1,242 rows** (978 with scores, 1,241
+  with range-pos, 1 with a full decision), digest `e76786f79313b662`.
+- **COMMIT-SAFETY INCIDENT (fixed).** A `git commit` with no pathspec swept in four files that the PARALLEL
+  job-application session had left STAGED in the index (`public/dashboard.html`, `src/app.module.ts`,
+  `scripts/ja-013-candidate-evidence.test.js`, `src/job-application/candidate-evidence.service.ts`), producing
+  bad commit `8c8581f`. It was **unpushed**, so it was unmade (`git reset --mixed HEAD~1`), my four paths were
+  re-committed with a **pathspec guard** (`git commit -F … -- <paths>`) as `699ed2a`, the JA files were left
+  untouched on disk (restored to their prior working-tree/untracked state), and **row 85's note was re-synced**
+  to the new SHA (the stale `8c8581f` reference is marked superseded). LESSON: **always commit with an explicit
+  pathspec** in this shared tree, never a bare `git commit` — another session stages files concurrently.
+
 ## Progress (2026-09-13 05:00) — row 81 DONE; GATE 7 complete except data-blocked row 79
 
 - **Row 81 (GATE 7 #9) → done, `0d5397f`** — `ivrule-v1`: the prohibition is encoded in **code**, not a prompt or
