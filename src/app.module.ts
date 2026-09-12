@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { mysqlConfig } from './shared/db.config';
 import { CandidateProfile } from './profile/candidate-profile.entity';
+import { CandidateEvidenceService } from './job-application/candidate-evidence.service';
 import { JobLead } from './leads/job-lead.entity';
 import { Application } from './applications/application.entity';
 import { LearningWeight } from './applications/learning-weight.entity';
@@ -205,6 +206,7 @@ import {
     UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, FyersTokenService,
     ProjectClarificationService,
     PatternEngineService, PatternSignalDispatchService,
+    CandidateEvidenceService,
   ],
 })
 export class AppModule {}
