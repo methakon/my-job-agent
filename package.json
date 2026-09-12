@@ -24,6 +24,8 @@
     "test:imap": "npm run build && node scripts/imap-safety.test.js",
     "test:alignment": "npm run build && node scripts/pre-open-alignment.test.js",
     "verify:alignment": "node scripts/pre-open-alignment-replay.js",
+    "test:gap-taxonomy": "npm run build && node scripts/gap-taxonomy.test.js",
+    "verify:gap-taxonomy": "node scripts/gap-taxonomy-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",
     "verify:failover": "node scripts/feed-failover-verify.js",
     "market-data:canonical": "node scripts/market-data-canonical-status.js",
