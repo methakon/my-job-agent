@@ -95,6 +95,34 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 03:00) — GATE 5 scoped; rows 53 + 54 DONE; 8 rows data/dependency-blocked
+
+- **GATE 5 scoping (read-only) → `docs/GATE5_MICROSTRUCTURE_SCOPE.md`.** All 10 rows classified:
+  - **OFFLINE-ACTIONABLE (implemented): 53** microprice + queue imbalance, **54** spread + spread shock.
+  - **DATA-BLOCKED:** 50 (OBI — no order-book levels are persisted; `depth.providerDepth` is null),
+    51 (OFI — no size-carrying event stream: FYERS persists NULL sizes, Upstox is a ~10–20 s REST snapshot
+    series), 52 (MLOFI — no multi-level depth), 55 (cancellation rate needs order-level events), 56
+    (replenishment needs trade prints **and** depth), 57 (trade intensity — no trade tape), 58 (CVD/aggressive
+    imbalance — no prints/aggressor side).
+  - **DEPENDENCY-BLOCKED:** 59 (absorption / stacked imbalance depends on 50–58).
+  - Measured availability: canonical `unified_option_quotes` source `UPSTOX` carries L1 sizes at **100%
+    coverage — 80,907 rows on 2026-09-11 + 37,686 on 2026-09-10**; `FYERS_LIVE` (1.67 M rows) has bid/ask but
+    **NULL sizes and NULL depth**. There is no trade-print store anywhere.
+- **Row 53 (GATE 5 #4) → done, commit `7752b5b`.** `microimb-v1`:
+  `microprice = (bid×askQty + ask×bidQty)/(bidQty+askQty)` and
+  `queueImbalance = (bidQty−askQty)/(bidQty+askQty)`, from ONE quote (no lookback ⇒ **no look-ahead**).
+  Refusals: NO_QUOTES / INVALID_QUOTE / CROSSED_BOOK / **NO_SIZES** (the FYERS case) / NEGATIVE_SIZE /
+  ZERO_SIZE / NOT_A_NUMBER, always null values. Evidence: test **58/58**; replay values **20,000** real
+  Upstox L1 quotes, refusing 50 FYERS contrasts as NO_SIZES (digest `75a0bdb632d18983`).
+- **Row 54 (GATE 5 #5) → done, commit `1ecfbf4`.** `spreadshock-v1`: spread = ask−bid (+ relative) and the
+  shock vs the **median** spread of the PRIOR window (same instrument+session, prior-only ⇒ no look-ahead; no
+  tuned threshold; a too-thin baseline keeps the spread and reports a null shock). Evidence: test **51/51**;
+  replay **20,000 spreads / 78 instruments, 19,610 baselined shocks** (digest `d76e4b8d65020b3e`).
+- **All 16 research suites + the market-data/canonical suites green.** Both rows render-verified.
+- **Not implemented, and why (no synthetic evidence):** the 8 blocked rows need inputs that do not exist —
+  persist `providerDepth` (rows 50/52/56/59), fix the FYERS depth/size mapping and prove it live (row 51), or
+  add a trade-print stream (rows 56/57/58/59). All four are LIVE-DATA-BLOCKED to *prove* even once coded.
+
 ## Progress (2026-09-13 02:45) — row 49 DONE (U.S. statistics = benchmark metadata only, GATE 4 #12); GATE 4 COMPLETE except data-blocked 45/46
 
 - **Row 49 (GATE 4 #12) → done, commit `1ed5710`.** The "old U.S. statistics" are the E-mini S&P /
