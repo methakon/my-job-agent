@@ -95,6 +95,39 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 00:20) — row 41 DONE (GapRangePos over the prior-day range, GATE 4 #4)
+
+- **Row 41 → done, commit `81a8bea`** (control plane synced + render-verified; pushed, `dev` =
+  `81a8bea`, unpushed 0). doneWhen: "The same inputs produce the same result in replay, and edge
+  cases return a safe explicit state rather than a fabricated value."
+- **Feature** (`src/trading/gap-engine/gap-range-pos.ts`, `gaprangepos-v1`, pure: no clock, no I/O,
+  no randomness, no AI), reusing the existing `gap-session-series` adapter — no new adapter. Pinned
+  definition, stated in the module header and a spec object: `GapRangePos = (open − prior.low) /
+  (prior.high − prior.low)`, a dimensionless ratio in prior-range widths (0 = prior low, 1 = prior
+  high, >1 opened ABOVE the prior range, <0 opened below it). Window = the immediately preceding
+  session; no lookback, no averaging, no smoothing. It reads only the session open and the prior
+  session's high/low, so nothing after the open can move it — proven by mutating every post-open
+  field (session close/high/low, next quoted close, prior close).
+- **No threshold exists at all**: the single config object is just `{ enabled }`, so the item cannot
+  be tuned. Nothing classifies, ranks or optimises (asserted by a code-not-prose scan).
+- **Edge cases are safe explicit states, never fabricated values**: closed vocabulary
+  `NO_PRIOR_SESSION` / `NO_PRIOR_RANGE` / `ZERO_PRIOR_RANGE` / `IMPOSSIBLE_PRIOR_RANGE` /
+  `NO_SESSION_OPEN`, each `status: UNAVAILABLE` with a **null** value, a human detail and a counted
+  token. The disabled path computes nothing and reports `DISABLED` per input.
+- **Evidence**: `test:gap-range-pos` **94/94** — reversed input ⇒ identical digest AND identical
+  observation order; shuffled input ⇒ identical counts/refusals; repeated runs byte-identical; a
+  changed open moves the digest; every refusal reachable and counted; no non-OK row ever carries a
+  number or NaN. Regressions rows 38/39/40 green (`gap-taxonomy` 80/80, `gap-hypotheses` 78/78,
+  `gap-candidates` 63/63). `verify:gap-range-pos` over the real archive: **1,242 sessions,
+  OK=1241 / UNAVAILABLE=1** (the first session — `NO_PRIOR_SESSION` by construction), digest
+  `f9c234411d770925`.
+- **Descriptive finding (reported, NOT tuned):** min −3.353 / median 0.625 / max 4.627; the open sat
+  below the prior range in 193 sessions, inside [0..1] in 706, and above it in 342.
+- **Build isolation**: build + tests ran in a detached worktree at HEAD with only the new files
+  overlaid, so the shared `dist/` and the running PM2 app were untouched.
+- **Untouched**: rows 877/878, 20, 22, 23–26, 427, 438, 876; the Job Agent workstream and its
+  control plane were not read or written.
+
 ## Progress (2026-09-12 12:05) — Redis offload: design corrected + isolation PROVEN + deterministic row id implemented
 
 - **Operator clarification applied (design was wrong)**: `docs/REDIS_HOT_PATH_OFFLOAD.md` §3 previously
