@@ -95,6 +95,25 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 01:10) — row 61 DONE (value-area construction method versioned, GATE 6 #2)
+
+- **Row 61 → done, commit `6d05755`** (control plane synced + render-verified; pushed). doneWhen: "A
+  reviewer can determine exactly what the item does and a replay/test demonstrates the behavior."
+- **The gap it closed:** `valprof-v1` versioned the FEATURE, but a historical profile could not say
+  WHICH construction produced its area — so two differently-built areas would be indistinguishable in
+  the archive. Construction is now versioned in its own right.
+- **`VALUE_AREA_METHOD_VERSION = 'va-70pct-expand1-v1'`** plus a `VALUE_AREA_METHOD` descriptor pinning
+  all seven steps (bucket rule `floor(price / levelSizePoints)`, the VOLUME/TPO activity basis, the POC
+  tie-break to the lowest price, the ONE-level expansion rule, VAL/VAH, and the data-derived HVN/LVN
+  mean separators) and its parameters (`levelSizePoints`, `valueAreaPct`). Changing any pinned step
+  requires a new id.
+- **Readable straight off the output:** every `ValueProfile` (OK *and* refused) carries `method`, the
+  report carries `methodVersion`, and `VALUE_PROFILE_SPEC.method` exposes it.
+- **Purely additive — proven, not asserted:** `test:value-profile` now **90/90** (+16 method checks), all
+  GATE 4/6 suites green (90/52/94/85/49/63/80/78), and the archive replay digest is **byte-identical**
+  to row 60's recorded `234f770976be2da4`, i.e. no geometry changed.
+- **Untouched**: rows 877/878, 20, 22, 23–26, 45–49, 427, 438, 876; Job Agent workstream untouched.
+
 ## Progress (2026-09-13 00:58) — row 42 DONE (opening position vs prior value area, GATE 4 #5)
 
 - **Row 42 → done, commit `470e91f`** (control plane synced + render-verified; pushed) — the row that was
