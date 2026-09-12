@@ -95,6 +95,23 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 02:30) — row 48 DONE (return FADE / FOLLOW / NO TRADE, GATE 4 #11)
+
+- **Row 48 (GATE 4 #11) → done, commit `ab86940`.** New pure module
+  `src/trading/gap-engine/gap-decision.ts` (`gapdec-v1`) combines the gate-4 evidence into ONE decision per
+  session with a pinned, fail-closed precedence: scores unavailable/NO_GAP → tie → the strictly greater count
+  wins → the acceptance state must agree EXACTLY (FOLLOW=ACCEPTED, FADE=REJECTED) → a supplied EV row must be
+  OK with `netEvPoints > 0`. Every failure path is NO_TRADE with a closed-vocabulary token; `requireEv`
+  (default false) makes an absent EV row a refusal, otherwise it is recorded as NOT_SUPPLIED so no probability
+  is invented. The output carries the winner, its score, and the trade direction the side implies (a fade
+  trades against the gap, a follow with it).
+- Evidence: `test:gap-decision` **49/49**; all **thirteen** GATE 4/6 suites green
+  (80/78/63/94/52/85/49/77/49/90/52/57/61); archive replay over **1,242 sessions** decides **FOLLOW for 1**
+  session (2026-09-09, gap DOWN → SHORT) and **NO_TRADE for 1,241**, with the reason breakdown
+  (`NO_CONFIRMATION` 975 — the acceptance state is available for only 7 archived sessions; `NO_GAP` 262;
+  `CONFIRMATION_CONFLICT` 2; `SCORES_UNAVAILABLE` 2), digest `3e69f41d61f33586`.
+- Control plane row 48 `pending → in_progress → done`, render-verified.
+
 ## Progress (2026-09-13 02:05) — Redis architecture audit: Redis NOT required (determination B); no code changed
 
 - **Audit requested after the takeover finding "tick-fanout.ts exists but is not wired while the unified store
