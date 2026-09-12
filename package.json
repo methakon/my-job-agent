@@ -43,6 +43,8 @@
     "verify:value-profile": "node scripts/value-profile-replay.js",
     "test:opening-position": "npm run build && node scripts/opening-position.test.js",
     "verify:opening-position": "node scripts/opening-position-replay.js",
+    "test:failed-auction": "npm run build && node scripts/failed-auction.test.js",
+    "verify:failed-auction": "node scripts/failed-auction-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",
     "verify:failover": "node scripts/feed-failover-verify.js",
     "market-data:canonical": "node scripts/market-data-canonical-status.js",
