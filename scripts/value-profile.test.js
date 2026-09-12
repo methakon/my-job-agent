@@ -185,10 +185,14 @@ console.log('\n[H] purity + research-only + no fitted constant');
   ok('research/shadow only: no production importer yet', prodImporters().length === 0, prodImporters().join(','));
   function prodImporters() {
     const hits = [];
+    // Research/shadow component directories are excluded: the invariant is "no PRODUCTION code imports
+    // this", and a sibling research component that consumes it (e.g. gap-engine's opening-position)
+    // is not a production importer.
+    const RESEARCH_DIRS = ['value-profile', 'gap-engine'];
     const walk = (dir) => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const p = path.join(dir, e.name);
-        if (e.isDirectory()) { if (e.name !== 'value-profile') walk(p); }
+        if (e.isDirectory()) { if (!RESEARCH_DIRS.includes(e.name)) walk(p); }
         else if (e.name.endsWith('.ts') && !/\.test\.ts$/.test(e.name) && !p.includes(path.join('trading', 'value-profile'))) {
           if (/value-profile|buildValueProfiles/.test(fs.readFileSync(p, 'utf8'))) hits.push(path.relative(REPO, p));
         }
