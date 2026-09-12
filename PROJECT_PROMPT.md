@@ -95,6 +95,48 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 00:26) — row 43 DONE (early gap acceptance/rejection state, GATE 4 #6)
+
+- **Row 43 → done, commit `0fe88e2`** (control plane synced + render-verified; pushed). doneWhen: "The
+  capability can run in research/shadow mode without changing production behavior." The row's `instr`
+  (define input availability, timestamp boundary, output schema and failure behaviour before it can
+  affect a decision) is satisfied by the pinned definition below.
+- **Row 42 was skipped as DEPENDENCY-BLOCKED, not by preference**: "Compute opening position relative
+  to prior Value Area" needs a prior-day Value Area, and **no value-area/POC/VAH/VAL module exists
+  anywhere in `src/`** (verified). That is GATE 6 #1 (row 60, "Compute prior-day POC, VAH, VAL, HVN
+  and LVN"), still pending. So GATE 4 #5 cannot be done before GATE 6 #1 without inventing a value
+  area — flagging the cross-gate dependency rather than faking the input.
+- **Feature** (`src/trading/gap-engine/gap-acceptance.ts`, `gapacc-v1`, pure: no clock, no I/O, no
+  randomness, no AI), reusing the session-series adapter and the candidate path shape. Pinned:
+  within the first `earlyWindowMinutes` (default 30) after the 09:15 open, using the gap origin =
+  **prevClose** (the same origin the taxonomy calls "filled"):
+  - **REJECTED** — an observation inside the window reached the origin (UP: price ≤ prevClose;
+    DOWN: price ≥ prevClose). Decisive even on partial coverage: the rejection already happened.
+  - **ACCEPTED** — the origin was never reached AND the path covers the window through its end.
+    Acceptance is **never assumed** from a partial window.
+  - Precedence: `NO_GAP` (NOT_APPLICABLE) → UNAVAILABLE tokens → REJECTED → ACCEPTED.
+- **No look-ahead**: only observations inside `[open, open + window)` decide; a later observation may
+  only assert that the window was covered. Proven by mutating post-window prices (a collapse to 90, a
+  rally to 200) and showing the verdict cannot move.
+- **Edge cases are safe explicit states**: closed vocabulary `NO_SESSION_OPEN` / `NO_PREV_CLOSE` /
+  `NO_GAP` / `NO_PATH` / `LATE_START` / `WINDOW_INCOMPLETE`, each with a **null** state, a human
+  detail and a counted token. The disabled path computes nothing and reports `DISABLED` per input.
+- **Evidence**: `test:gap-acceptance` **85/85** (state precedence, window boundary half-open
+  `[09:15,09:45)`, every refusal reachable, determinism with reversed/shuffled input ⇒ identical
+  digest AND observation order, disabled path, static purity/research-only guards, adapter
+  end-to-end). Regressions rows 38/39/40/41 green (80/78/63/94). `verify:gap-acceptance` over the real
+  archive: **1,242 sessions, 7 decided (4 ACCEPTED / 3 REJECTED)**, digest `65679d2f48ac9a81`.
+- **Honest coverage finding (NOT hidden):** 1,235 sessions are UNAVAILABLE — **1,233 `NO_PATH`**
+  because archived intraday coverage only starts 2026-09-01, plus 2 `LATE_START`. The component
+  refuses rather than proxying a late tape; a populated replay needs deeper intraday history.
+- **Three test failures were wrong EXPECTATIONS, not module defects** (recorded per the discipline):
+  a blanket "one sort" assertion (the module legitimately sorts session identity *and* instant order),
+  an over-broad `/outcome/` scan that matched the spec's own prose, and an `[H]` fixture that put two
+  paths on the same session date (paths are keyed by sessionDate|instrument, so they collided). Each
+  fixed in the TEST with the reason recorded.
+- **Untouched**: rows 877/878, 20, 22, 23–26, 42, 427, 438, 876; the Job Agent workstream and its
+  control plane were not read or written.
+
 ## Progress (2026-09-13 00:20) — row 41 DONE (GapRangePos over the prior-day range, GATE 4 #4)
 
 - **Row 41 → done, commit `81a8bea`** (control plane synced + render-verified; pushed, `dev` =
