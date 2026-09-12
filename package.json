@@ -49,6 +49,8 @@
     "verify:value-migration": "node scripts/value-migration-replay.js",
     "test:gap-expected-value": "npm run build && node scripts/gap-expected-value.test.js",
     "verify:gap-expected-value": "node scripts/gap-expected-value-replay.js",
+    "test:gap-decision": "npm run build && node scripts/gap-decision.test.js",
+    "verify:gap-decision": "node scripts/gap-decision-replay.js",
     "test:gap-open-value": "npm run build && node scripts/gap-open-value.test.js",
     "verify:gap-open-value": "node scripts/gap-open-value-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",
