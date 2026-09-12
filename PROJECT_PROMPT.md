@@ -95,6 +95,33 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 03:30) — GATE 5 capture scope + rows 66/67/69 DONE (GATE 7 opened)
+
+- **GATE 5 input-capture scope (read/design-first) → `docs/GATE5_CAPTURE_SCOPE.md`.** No production behaviour
+  changed. Findings: FYERS `subscribe(symbols, isDepth=false, …)` never requests depth; the mapper reads scalar
+  `bid_size`/`ask_size` keys a depth payload does not carry; `zeroIsAbsent` nulls a 0 size — so sizes are NULL
+  for capture reasons, not provider absence. A canonical `depth-v1` shape is designed (levels never padded;
+  provenance + payload hash preserved). Trade prints are absent from both providers' current subscriptions/APIs
+  ⇒ rows 56–59 are provider-capability DATA-BLOCKED; Upstox REST is snapshots, so it must never be labelled
+  OFI-grade. The doc carries the five-way classification, the precise missing input/provider per change, and a
+  Monday capture plan (subscribe depth behind `FNO_DEPTH_CAPTURE`, map via the prototype, persist to
+  `unified_option_quotes.depth`, validation rules, rows each field unblocks). Prototype
+  `fyers-depth-mapping.ts` (`fyersdepth-v1` → `depth-v1`) added, tested **37/37**, **not wired** (asserted).
+- **Row 66 (GATE 7 #1) → done, `7589225`** — `ivrv-v1`: median-of-usable-chain IV reference (no ATM invention)
+  vs annualised RV from actual timestamps; refusals NO_IV / NO_PRICES / INSUFFICIENT_PRICES / ZERO_ELAPSED.
+  Test **42/42**; replay NIFTY50 IV 11.02 vs RV 22.47, SENSEX 12.66 vs 18.99 (digest `88e8465e06b7d370`).
+- **Row 67 (GATE 7 #2) → done, `3f83798`** — `ivsurface-v1`: a surface per underlying+session, one slice per
+  expiry (strike-ordered, min/max/median IV, CE/PE counts, coverage flag). Test **41/41**; replay NIFTY50 24
+  strikes, SENSEX 27 strikes (digest `b51a960aac578846`). **Coverage finding:** only the nearest expiry is polled
+  in-session ⇒ `termAvailable=false`; the term dimension needs a ≥2-expiry capture (addendum in the scope doc).
+- **Row 69 (GATE 7 #3) → done, `b67b121`** — `ivskewterm-v1`: per-slice OLS skew (IV on strike) plus term
+  slope/curvature from the slice medians; consumes the row-67 surface. Test **34/34**; replay skew NIFTY50
+  −0.2657 %/100 pts, SENSEX −0.0443 %/100 pts; term refuses INSUFFICIENT_EXPIRIES (digest `e57de4775a990ab5`).
+- **Memory check (operator request):** host 7.6 GiB total, **4.2 GiB available**, 1.5 GiB swap used, low PSI;
+  pm2 my-job-agent 270 MB / trading-agent 71 MB, no restarts from this work. Compile/test runs are short-lived;
+  nothing here grows memory.
+- All research + market-data suites green; the three rows are render-verified on `/project-status`.
+
 ## Progress (2026-09-13 03:00) — GATE 5 scoped; rows 53 + 54 DONE; 8 rows data/dependency-blocked
 
 - **GATE 5 scoping (read-only) → `docs/GATE5_MICROSTRUCTURE_SCOPE.md`.** All 10 rows classified:

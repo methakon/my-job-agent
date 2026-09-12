@@ -149,3 +149,18 @@ it, and produce the evidence rows 50–52/55–59 need.
 No production adapter wiring, no subscription change committed to run by default, no schema/retention change,
 no Redis, no risk/execution/capital/REAL-trading change, no GATE 5 row marked done, and no synthetic trades or
 levels. The prototype is research-only and unwired.
+
+## 10. Addendum — GATE 7 term-structure capture note (found while scoping rows 67/69)
+
+GATE 7's surface/skew rows were built offline (rows 66/67/69), but the **term dimension is empty in-session**:
+the Upstox chain poll requests only the NEAREST expiry, so on a sampled session each underlying yields exactly
+one expiry (`termAvailable=false`; a second expiry appears only in after-hours/stale rows and is not usable as
+session evidence). Row 67's strike dimension is real (24–27 strikes), and row 69's skew is real, but the term
+slope/curvature correctly refuses `INSUFFICIENT_EXPIRIES`.
+
+**Small Monday change that would unblock the term dimension:** request the chain for the **next expiry as well**
+(the desk's existing `/v2/option/contract` call already returns the contract master, which lists the available
+expiries — use the nearest TWO), and persist them with the expiry field as today. That needs no schema change and
+no new endpoint; it is one additional key per poll. Until then, rows 67's term dimension and 69's term
+slope/curvature remain data-limited and are reported honestly rather than interpolated.
+
