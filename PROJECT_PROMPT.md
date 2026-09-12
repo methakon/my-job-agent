@@ -95,6 +95,46 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 12:05) — Redis offload: design corrected + isolation PROVEN + deterministic row id implemented
+
+- **Operator clarification applied (design was wrong)**: `docs/REDIS_HOT_PATH_OFFLOAD.md` §3 previously
+  let the desks read prices from a Redis-backed cache — withdrawn. The hot path is now documented as
+  purely in-process: `provider → canonical interpreter → validation → engine → signal → risk →
+  execution`, with persistence strictly a *side channel* reached by a non-blocking enqueue. Redis read
+  models are allowed for observability only, never as an input to signal/risk/execution.
+- **Isolation boundary implemented** (research/shadow; nothing in production imports it):
+  `src/trading/unified-market-data/tick-fanout.ts` — `ingest(tick, decide)` decides first,
+  synchronously, then appends to a bounded in-process ring. No await/promise/timer/clock/IO/AI;
+  decisions are never dropped; overflow drops the newest tick for persistence with a counted reason;
+  the sink is called only from `drain()` (single-flight) and a batch leaves the queue only after the
+  sink resolves, so a failed write stays retryable in order; `drainBounded` reports the remainder.
+- **Failure simulation proving separation** (`scripts/tick-fanout.test.js`, 44/44): hung-forever
+  writer (10,000 ticks: 10,000 decisions, p99 < 1 ms, ingest < 100 ms, queue pinned at capacity, sink
+  never called on the hot path); writer slow at the **measured** MySQL p50 287 ms; writer throwing
+  every time (300/300 decisions, no unhandled rejection, batch retained); **EXIT/stop-loss with a hung
+  writer AND a full queue fired in < 1 ms** and closed the position on the breaching tick.
+  **Separated latency accounting (one run): decision→execution p50 0.0006 ms / p99 0.0048 ms vs
+  persistence p50 287.7 ms per 100-row batch ≈ 517,000× separation.**
+- **Approved prerequisite #1 — deterministic canonical row id (NO DDL)**:
+  `src/trading/unified-market-data/canonical-row-id.ts` (`rowid-v1`) = uuidv5 over
+  `source | instrumentKey | sourceTimestamp(ISO) | providerPayloadHash | economic-content hash`,
+  written into the EXISTING uuid PK and wired into `ingestQuote` + `ingestSnapshot`. The per-process
+  `sequenceNumber` is deliberately excluded (it resets on restart and would defeat replay safety).
+  A weak identity returns null → the writer falls back to the generator instead of minting a
+  guessable key. Motivation measured: hot tables have a random-uuid PK and non-unique natural keys
+  (65% duplicate `(contractSymbol, ts)` in a peak FNF window, 35% unified), so replay would duplicate
+  rows today. Tests 37/37 (`npm run test:canonical-row-id`).
+- **Regressions**: feed-arbitration + pattern-engine suites pass with the canonical writer change.
+  Nothing was rebuilt/redeployed: the running app is unchanged; the id change lands at the next deploy.
+- **Control plane**: commit `33a1d07` recorded as evidence on row **878** (canonical interpreter) —
+  **in_progress only**; 878's live doneWhen (both desks consuming canonical rows on live payloads)
+  remains open. `gate:check` IN SYNC, pushed (`dev` = `33a1d07`).
+- **Remaining order (approved)**: Redis implementation → Monday shadow calibration → evidence → only
+  then a controlled read-path migration. Redis is NOT installed yet. Staleness contract stays the
+  existing `staleQuoteMaxAgeMs`; no execution/risk/capital/threshold/safety-gate change.
+- **Roadmap coverage missing (flagged, awaiting operator)**: the Redis market-data-persistence
+  workstream has no dedicated row (rows 109/356/388 are latency *modelling*). Rows are operator-created.
+
 ## Progress (2026-09-12 11:27) — row 40 DONE (GAP-FADE + FAILED-ORB candidates, GATE 4 #3)
 
 - **Row 40 → done, commit `aebf6e8`** (control plane synced + render-verified; pushed, `dev` =
