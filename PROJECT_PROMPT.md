@@ -95,6 +95,45 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 11:35) — row 39 DONE (GAP-FILL + GAP-AND-GO as separate hypotheses, GATE 4 #2)
+
+- **Row 39 → done, commit `5984e64`** (control plane synced + render-verified; pushed, later head
+  `602f032`). `src/trading/gap-engine/gap-hypotheses.ts` — pure (no clock, no I/O, no randomness,
+  no AI, and NO threshold constant at all, asserted):
+  * **GAP_FILL** asserts "a material gap is filled during the session it opened"; realized iff the
+    session range reaches the gap ORIGIN (up: low <= prevClose, down: high >= prevClose).
+  * **GAP_AND_GO** asserts "a material gap holds and the session continues in the gap direction";
+    realized iff the gap is UNFILLED AND the session closes beyond its open in the gap direction.
+    It also reports a fixed-geometry excursion measure (entry = session open, risk = the gap,
+    reward = the session extreme) labelled DESCRIPTIVE ONLY.
+  * The two have INDEPENDENT switches (disabling one leaves the other's outcomes identical —
+    asserted); immaterial sessions are NOT_APPLICABLE; anything the taxonomy could not determine is
+    UNAVAILABLE with the taxonomy's own reason propagated verbatim. No outcome is ever fabricated.
+  * REUSE, NOT DUPLICATION: it consumes the taxonomy's `SessionGapAssessment` rows (direction,
+    zone, fillState, measures) and never re-derives gap geometry or touches session bars.
+  * `npm run test:gap-hypotheses` **78/78**; row 38's suite still **80/80** (regression).
+    `npm run verify:gap-hypotheses` replay over **1,242 archived sessions**: GAP_FILL 975/978
+    (99.7%; UP 496/497, DOWN 479/481), GAP_AND_GO 2/978 (0.2%; UP 0/497, DOWN 2/481), overlap
+    both 0 / only-FILL 975 / only-GO 2 / neither 1. The disabled path evaluates nothing.
+  * Writing the test caught a REAL defect: the report digest depended on the input order of the
+    supplied assessments; observations are now emitted date-ordered so the digest is a function of
+    the data only.
+  * `scripts/lib/gap-archive.js` — the archived-session loader extracted so both replays load
+    sessions ONE way (no duplicated SQL). After the extraction, row 38's replay reproduces a
+    **byte-identical digest (`aa90d4e2e42217f8`)**, proving the refactor changed nothing.
+  * Descriptive finding (reported, NOT acted on): on index daily bars the session range almost
+    always revisits the previous close (fill rate 99.7%), which is what starves the unfilled-gap
+    classes (BREAKAWAY 1, RUNAWAY 0 in row 38). No threshold was tuned to change that; a
+    fade/continue study may later need a deliberate, documented threshold decision.
+  * Research/shadow only: no production module imports the gap engine (asserted), no schema,
+    service, risk, execution or decision-path change.
+- **Parallel JA session:** their commit `b185d85` (JA-010 qualification engine wired into
+  `app.module.ts` + apply-engine entry points) resolved the unresolved `QualificationService`
+  dependency that had been crash-looping the shared `dist` earlier in the day. It was allow-listed
+  as the separate workstream (exemption count tripwire grown to 7 in
+  `scripts/gate-exemptions.test.js`, still 22/22). Their code was NOT rebuilt or deployed from this
+  session; the running app keeps the earlier clean HEAD build plus the IMAP guard.
+
 ## Progress (2026-09-12 11:05) — row 38 DONE (gap taxonomy over a real 1,242-session series, GATE 4 #1)
 
 - **Selection (roadmap re-read first):** GATE 2 has 4 pending rows (23–26) and GATE 3 is complete,
