@@ -95,6 +95,25 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 04:15) — WhatsApp connected to the Hermes gateway; row 73 DONE (GEX, GATE 7)
+
+- **WhatsApp connected (operator request; target = Hermes agent gateway).** Enabled the existing WhatsApp bridge for
+  **+919007291400**: added `WHATSAPP_ENABLED=true`, `WHATSAPP_ALLOWED_USERS=919007291400`, `WHATSAPP_MODE=self-chat`,
+  `WHATSAPP_HOME_CHANNEL=16282372042987@lid` to `~/.hermes/.env` (timestamped backup kept) and restarted
+  `hermes-gateway.service`. Verified: `bridge.js --port 3000 --mode self-chat` running, gateway log
+  `[Whatsapp] Bridge ready (status: connected)`, `hermes send --list` shows `whatsapp:Swarna Sekhar Dhar`, the channel
+  directory lists it, and a self-chat message was sent successfully (`hermes send`, exit 0).
+  **Caveats:** this is the **personal-account bridge** (Baileys-style, not the Meta Cloud API), and it connects WhatsApp
+  to the **Hermes agent**, not to the Command Code CLI. Inbound = message your own self-chat; outbound from scripts via
+  `hermes send --to whatsapp`. No repo file changed (all config lives under `~/.hermes`).
+- **Row 73 (GATE 7 #5) → done, `78c7bac`** — `gex-v1`: per-strike gamma exposure from **LOCAL** gamma (row-71 BSM
+  module, reused) × OI as stored × spot² × 0.01, under ONE **REQUIRED participant-position assumption** that is echoed
+  on every row (a model input, never a claim about real positioning). The gamma flip is the **adjacent strikes
+  bracketing a zero-crossing**, never interpolated (`NO_FLIP` otherwise); refusals NO_ASSUMPTIONS / NO_SPOT / NO_EXPIRY /
+  NO_QUOTES / NO_GAMMA. Test **38/38**; archive replay (2026-09-11) — NIFTY50 total GEX −210.3e9 over 24 strikes,
+  SENSEX −34.5e9 over 27, both `NO_FLIP` under `CALLS_LONG_PUTS_SHORT` (digest `72b03c57053362ef`).
+- Research + market-data suites green; row render-verified.
+
 ## Progress (2026-09-13 03:30) — GATE 5 capture scope + rows 66/67/69 DONE (GATE 7 opened)
 
 - **GATE 5 input-capture scope (read/design-first) → `docs/GATE5_CAPTURE_SCOPE.md`.** No production behaviour
