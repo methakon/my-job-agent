@@ -95,6 +95,21 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 02:45) — row 49 DONE (U.S. statistics = benchmark metadata only, GATE 4 #12); GATE 4 COMPLETE except data-blocked 45/46
+
+- **Row 49 (GATE 4 #12) → done, commit `1ed5710`.** The "old U.S. statistics" are the E-mini S&P /
+  mini-Dow gap benchmarks in `docs/FNO_MARKET_REFERENCE.md`. New authoritative control
+  `src/trading/gap-engine/benchmark-metadata.ts` (`gapbench-v1`): the four documented statistics are
+  transcribed as FROZEN `METADATA_ONLY` entries with `decisionInput: false`, plus `detectBenchmarkMisuse()`
+  which flags any source that imports the module or hard-codes a benchmark fingerprint.
+- Evidence (the row's exact doneWhen — regression + negative test): `test:gap-benchmark` **31/31**; the
+  regression scan over the real `src/trading` tree is **clean** (no gate-4/production consumer), and the
+  negative tests flag a synthetic import AND a hard-coded fingerprint while not false-positiving on clean
+  code. All **fourteen** GATE 4/6 suites green (80/78/63/94/52/85/49/77/49/31/90/52/57/61).
+- **GATE 4 status:** rows 38–44 and 47–49 DONE; **45 (#8 event/catalyst gate) and 46 (#9 microstructure
+  confirmation) remain data-blocked** — no event feed exists in the repo and GATE 5 microstructure is
+  pending (same class as the excluded row 65). GATE 4 cannot close as a block until those inputs exist.
+
 ## Progress (2026-09-13 02:30) — row 48 DONE (return FADE / FOLLOW / NO TRADE, GATE 4 #11)
 
 - **Row 48 (GATE 4 #11) → done, commit `ab86940`.** New pure module
