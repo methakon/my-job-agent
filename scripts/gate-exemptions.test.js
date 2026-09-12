@@ -29,7 +29,8 @@ const JA2_SHA = '4d65f3a511a2e5f0b5116e50e54c95f3bcb58844';
 const JA3_SHA = '6b2431ae134f14bcd81fd5937eba92f2f279e4e6'; // JA-002 submission sandbox safety
 const JA4_SHA = 'bfaa1776345a0986f6a45ea2ec1d6af3068c2f5c'; // JA-003 regression baseline
 const JA5_SHA = '4ce0ab84717faa3b9849f93e632881cafb6d1966'; // IMAP crash safety (agent queue item 76)
-const AUDITED = [JA_SHA, JA2_SHA, JA3_SHA, JA4_SHA, JA5_SHA];
+const JA6_SHA = 'a80422dbcda591fd8e625cef5a62bc1f1dba816d'; // JA-010 qualification engine test (parallel session)
+const AUDITED = [JA_SHA, JA2_SHA, JA3_SHA, JA4_SHA, JA5_SHA, JA6_SHA];
 
 const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit } = require(LIB);
 

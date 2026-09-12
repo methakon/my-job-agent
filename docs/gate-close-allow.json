@@ -55,6 +55,15 @@
       "recorded": "2026-09-12T10:2x+05:30 (session resuming after the 09:31 desk crash-loop; commit authored in this session, not by the parallel JA session)",
       "evidence": "npm run test:imap 57/57, including the crash reproduced on a real ImapFlow instance (unguarded emit('error') throws, guarded does not); git show --name-only 4ce0ab8 lists only src/applications/imap-safety.ts, src/applications/inbox-reader.service.ts, src/applications/email-tracker.service.ts, scripts/imap-safety.test.js, package.json.",
       "expires_hint": "Delete once 4ce0ab8 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "a80422dbcda591fd8e625cef5a62bc1f1dba816d": {
+      "short": "a80422d",
+      "reason": "Same separate Job Application workstream: JA-010 qualification-engine test aligned to the real service behaviour (scripts/ja-010-qualification-engine.test.js only, 809 lines added, no src/ changes). Authored by the PARALLEL job-application session in this shared working tree; that workstream is tracked in its own job_application_roadmap_items control plane and project_checklist_items holds no row for it (none should be invented).",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row); applied to the same module. Delete this entry to revoke.",
+      "recorded": "2026-09-12T10:3x+05:30 (session completing trading roadmap row 27; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only a80422d lists only scripts/ja-010-qualification-engine.test.js; no src/ changes, no .env changes, no market-data/trading code.",
+      "expires_hint": "Delete once a80422d leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
