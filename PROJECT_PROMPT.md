@@ -95,6 +95,35 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 01:40) — row 64 DONE (gap opens above/below value + acceptance/rejection, GATE 6 #5)
+
+- **Row 64 (GATE 6 #5) → done, commit `3e274fb`.** New pure module
+  `src/trading/value-profile/gap-open-value.ts` (`gapval-v1`): classifies where each session OPENED
+  relative to the PRIOR profiled session's value area (ABOVE_VALUE / BELOW_VALUE / INSIDE_VALUE) and,
+  for a gap open, whether that location was ACCEPTED (price never returned inside through the close),
+  REJECTED (returned inside and never left), or REVISITED (returned inside but left again). Reference =
+  the PRIOR session's VAL/VAH from the row-60 profile (never the session's own, unknown at the open);
+  an open exactly on an edge counts as INSIDE (no tolerance band); INSIDE_VALUE opens are
+  NOT_APPLICABLE with `NO_GAP_OPEN`. The two structural coverage bounds are the same as row 62 (late
+  start / no close coverage ⇒ refused, never judged on a partial tape).
+- **The metric is reproducible with its sample size (the row's doneWhen):**
+  `npm run verify:gap-open-value` replays the archive — **SAMPLE SIZE 21 judged gap opens** over
+  `sessionsIn=1242 profilesIn=1242 referenceAreas=28`, digest `a602d868eb9687d4`; the report prints the
+  location/outcome counts behind it (ABOVE 2 ACCEPTED / 6 REVISITED; BELOW 8 ACCEPTED / 5 REVISITED).
+  Evidence: `test:gap-open-value` **61/61**; all eleven GATE 4/6 suites green (80/78/63/94/52/85/49/90/52/57/61).
+- **Finding reported, not acted on:** the archived sample shows **0 REJECTED** — gap opens either held
+  (10 ACCEPTED) or returned-and-left-again (11 REVISITED), ABOVE opens skewing to REVISITED (6/8) and
+  BELOW opens to ACCEPTED (8/13). The ~28-session profile sample and the recent-only intraday density
+  bound this; no rule was tuned.
+- **Control plane:** row 64 `pending → in_progress → done`, render-verified on
+  `http://127.0.0.1:3010/project-status`.
+- **Build note:** the shared tree's untracked JA `src/job-application/candidate-evidence.service.ts`
+  currently has a syntax error, so `nest build` was NOT run here (the documented dist-poisoning hazard).
+  The new module was compiled with `tsc` (its dependency graph only) and its JS copied into `dist`; no
+  other dist file was touched.
+- **Next in GATE 6:** row 65 (#6, combine profile structure with OFI/CVD) needs the microstructure P0
+  inputs (GATE 5, pending) — data-gated; row 60–64 are the value/profile chain.
+
 ## Progress (2026-09-13 01:35) — SESSION CLOSE: rows 41, 42, 43, 44, 60, 61, 62, 63 DONE
 
 - **Session summary (trading workstream only).** Eight roadmap rows closed, each independently verified,
