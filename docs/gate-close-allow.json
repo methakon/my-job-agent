@@ -64,6 +64,15 @@
       "recorded": "2026-09-12T10:3x+05:30 (session completing trading roadmap row 27; commit authored by the parallel JA session)",
       "evidence": "git show --name-only a80422d lists only scripts/ja-010-qualification-engine.test.js; no src/ changes, no .env changes, no market-data/trading code.",
       "expires_hint": "Delete once a80422d leaves the guard commit window (default: last 15 code commits)."
+    },
+    "b185d858885d4eb4bd71122a600cae806f80655d": {
+      "short": "b185d85",
+      "reason": "Same separate Job Application workstream: JA-010 qualification engine wired into the app module and its apply-engine entry points (src/job-application/qualification.service.ts + registration in src/app.module.ts + src/applications/apply-engine.service.ts). Authored by the PARALLEL job-application session in this shared working tree; that workstream keeps its own job_application_roadmap_items control plane and project_checklist_items holds no row for it (none should be invented). Incidentally this commit resolved the unresolved QualificationService dependency that had been crash-looping the shared dist earlier the same day.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row), reaffirmed 2026-09-12 when the operator directed that the IMAP/mail reliability item stay in its own agent_todo_log workstream and that the trading roadmap contain only trading items. Delete this entry to revoke.",
+      "recorded": "2026-09-12T10:4x+05:30 (session completing trading roadmap row 39; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only b185d85 lists src/job-application/qualification.service.ts, src/app.module.ts, src/applications/apply-engine.service.ts; no market-data/gap-engine/trading code, no .env change.",
+      "expires_hint": "Delete once b185d85 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
