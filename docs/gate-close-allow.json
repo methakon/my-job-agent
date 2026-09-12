@@ -46,6 +46,15 @@
       "recorded": "2026-09-12T01:2x+05:30 (session completing JA-003 regression baseline; commit authored by the parallel JA session)",
       "evidence": "git show --name-only bfaa177 lists only scripts/ja-003-regression-baseline.test.js; no src/ changes, no .env changes, no market-data/trading code.",
       "expires_hint": "Delete once bfaa177 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "4ce0ab84717faa3b9849f93e632881cafb6d1966": {
+      "short": "4ce0ab8",
+      "reason": "Job Application / mail-pipeline workstream (agent-side queue item 76 'IMAP Credential Storage Fix & Exponential Backoff', tracked in agent_todo_log, NOT in project_checklist_items): guards every ImapFlow client against the unhandled 'error' event that killed the whole process 62 times between 2026-09-07 and 2026-09-12 (each death took the trading desks' HTTP routes and the /project-status control plane down with it), and makes the backoff/auto-disable rule one shared implementation (src/applications/imap-safety.ts). Touches only src/applications/*, scripts/imap-safety.test.js and the package.json test:imap script.",
+      "workstream": "job-application / mail pipeline (own queue: agent_todo_log id 76; project_checklist_items verified to hold 0 rows matching IMAP|mail|inbox|reply|credential)",
+      "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate ... do not invent a roadmap row'). NOTE: roadmap coverage for this IMAP workstream is MISSING and has been reported to the operator for a decision; this entry is a holding exemption pending that decision and can be revoked by deleting it.",
+      "recorded": "2026-09-12T10:2x+05:30 (session resuming after the 09:31 desk crash-loop; commit authored in this session, not by the parallel JA session)",
+      "evidence": "npm run test:imap 57/57, including the crash reproduced on a real ImapFlow instance (unguarded emit('error') throws, guarded does not); git show --name-only 4ce0ab8 lists only src/applications/imap-safety.ts, src/applications/inbox-reader.service.ts, src/applications/email-tracker.service.ts, scripts/imap-safety.test.js, package.json.",
+      "expires_hint": "Delete once 4ce0ab8 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
