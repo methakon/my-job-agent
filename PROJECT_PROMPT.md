@@ -95,6 +95,48 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 02:05) — Redis architecture audit: Redis NOT required (determination B); no code changed
+
+- **Audit requested after the takeover finding "tick-fanout.ts exists but is not wired while the unified store
+  does one awaited `.save()` per tick".** Full read-only audit recorded in
+  `docs/REDIS_ARCHITECTURE_AUDIT_2026-09-13.md`; nothing installed/configured, no trading code, no schema, no
+  roadmap status changed.
+- **Authoritative requirement: none.** `project_checklist_items` and `agent_todo_log` both hold **0** rows
+  matching `redis|fanout|hot.?path|offload`, and the seed has none. The only source is the READ-ONLY analysis
+  `docs/REDIS_HOT_PATH_OFFLOAD.md` (+ PROJECT_PROMPT notes), whose own §8.1 flags "roadmap coverage missing —
+  awaiting a decision". Redis is operator-approved-in-principle, not a gate requirement.
+- **Implementation state:** no redis/ioredis/bull dependency, no import, no `REDIS_*` env key, no
+  redis-server/redis-cli binary, no process. `tick-fanout.ts` is imported by **nothing** in production (only
+  its own test). The delivered pieces are the deterministic `canonical-row-id.ts` (wired, 37/37) and the
+  isolation boundary (44/44).
+- **Measured bottleneck (independently re-measured):** warm pooled RTT **p50 331.8 ms / p95 396.4 ms**, and a
+  50-row read costs the same as `SELECT 1` ⇒ the cost is the WAN round trip; `Max_used_connections=66` pins the
+  peak; `Aborted_clients` 22,071 (up from 19,306). The fix is **fewer round trips (batch + non-blocking
+  hand-off)**, which needs **no Redis**.
+- **Determination B — do not implement Redis now.** Blockers: no roadmap row (operator-created only), the batch
+  parameters require the **Monday live shadow calibration** (§4/§6), and this audit was explicitly
+  do-not-install / do-not-change-trading. Recommendation: create a row, then do the **Redis-free batched
+  persistence** first (wire `tick-fanout`'s injected sink to a batched INSERT using the delivered `rowid-v1`).
+- **Baseline suites green:** tick-fanout 44/44, canonical-row-id 37/37, canonical-tick-interpreter 11/11,
+  feed-arbitration, feed-health-gate, unified-market-data, market-feed-guard. `upstox-isolation` and
+  `gate0-regression` are live-API integration suites and did not complete (`fetch failed` / timeout) — reported,
+  not caused here.
+
+## Progress (2026-09-13 01:55) — row 47 DONE (expected value after spread/slippage/fees, GATE 4 #10)
+
+- **Row 47 (GATE 4 #10) → done, commit `c83ef41`.** New pure module
+  `src/trading/gap-engine/gap-expected-value.ts` (`gapev-v1`): net EV of a priced plan after round-trip
+  spread + slippage + the pinned FYERS fee schedule (`fyers-2026-09-04`). pWin and the friction inputs are
+  REQUIRED caller inputs — the module estimates no probability and never treats absent friction as zero; a
+  refusal still reports the geometry it could validate. Includes `planFromFailedOrb` so the replay prices real
+  archived FAILED-ORB geometry (entry = re-entry, target = opposite range edge, stop = excursion extreme).
+- **Resume-order note:** rows 45 (#8 event/catalyst gate) and 46 (#9 microstructure confirmation) are
+  **data-blocked** — no event feed exists and GATE 5 microstructure is pending (same class as the excluded row
+  65) — so row 47 was the next offline-unblocked item in gate order.
+- Evidence: `test:gap-expected-value` **77/77**; all twelve GATE 4/6 suites green
+  (80/78/63/94/52/85/49/77/90/52/57/61); replay derives **7 real plans** (digest `a0a691880ad12a79`, EV refused
+  pending caller inputs); labelled assumption run digest `12a68c972ec63c00`. Control plane row 47 render-verified.
+
 ## Progress (2026-09-13 01:40) — row 64 DONE (gap opens above/below value + acceptance/rejection, GATE 6 #5)
 
 - **Row 64 (GATE 6 #5) → done, commit `3e274fb`.** New pure module
