@@ -95,6 +95,68 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-12 10:20) — row 27 DONE (time-align before inference) + desk app crash-loop repaired + DB backups working again
+
+- **Row 27 (GATE 2 #6, "Time-align all pre-open and cross-market information before
+  inference") → done, commit `5949caa`.** New pure module
+  `src/trading/pre-open/pre-open-alignment.ts` (`align-v1`): every row declares the basis of
+  its OWN time column (IST market wall vs UTC server wall), an undeclared basis is refused
+  (BASIS_UNKNOWN) and never assumed, the declared wall becomes ONE absolute instant, session
+  window + exchange-calendar gates apply (REFERENCE rows must precede the window AND come from
+  a real trading window), nothing at/after the `asOf` cutoff can enter the frame (LOOK_AHEAD
+  counted), a row carrying two differently-based columns is cross-checked (gap > 30 min =
+  BASIS_MISMATCH — catches an IST value stored in a UTC column), each symbol resolves
+  newest-known-at-asOf else UNAVAILABLE with a reason (no interpolation), and count maps are
+  canonical so the frame digest depends on the DATA only. `npm run test:alignment` **75/75**
+  (basis, refusals, window/calendar, look-ahead, determinism, per-symbol, cross-validation vs
+  `scripts/lib/market-session.js`, full replay). `npm run verify:alignment` replays ARCHIVED
+  rows: on 2026-09-11 it aligns **412 real rows / 4 index symbols** (400 cross-market + 12
+  previous-session references) and refuses the 3 off-hours pre-open rows as CALENDAR_CLOSED.
+  The determinism section caught a REAL defect (insertion-ordered count maps made the digest
+  order-dependent) — fixed, not worked around. Control plane: row 27 done, render-verified.
+- **Honest coverage finding (belongs to rows 20/23-26, not to row 27):** the cross-market tape
+  holds **ZERO rows in the 09:00–09:15 IST window on every archived day** — 2026-09-11 market
+  window 35,246 rows but pre-open 0 (the VM was off 04:23–10:40 IST), 2026-09-10 market 37,361
+  / pre-open 0, and the only `pre_open_observations` rows (3) are the 00:45 IST off-hours
+  capture with NULL symbol. The pre-open side of the frame is therefore EMPTY and says so; no
+  frame is manufactured. GATE 2's measurement items cannot close without Monday's window.
+- **INCIDENT on resume — desk app crash-looping (271→320 restarts, port 3010 dead).** Cause:
+  the parallel job-application session's still-unbuilt WIP had been partially built into `dist`
+  (its `apply-engine.service.js` emitted at 03:52 while `app.module.js` stayed from my clean
+  03:30 build), so the 09:31 restart hit
+  `Nest can't resolve dependencies of the ApplyEngineService (... QualificationService at index [18])`
+  and looped. **Repair:** clean HEAD build in a detached worktree → swap `dist` → restart;
+  app is up, listening, `/project-status` 401 (alive), running HEAD. The JA session's source
+  files were NOT touched. (The ImapFlow lines in the old log were pre-existing noise, not this
+  cause.)
+- **DB backup pipeline diagnosed and repaired (no backup existed since 2026-09-05).** Root
+  cause was NOT size: the cron had failed on every run since **2026-09-07** with
+  `Permission denied (publickey)` because `myjob_db_backup.sh` used `~/.ssh/id_ed25519`, which
+  is NOT in the VM's `authorized_keys` (only `oci-vm-id_ed25519` is); interactive runs worked
+  purely because the desktop ssh-agent held the right key, and cron had no agent. Fixed:
+  correct key + `IdentitiesOnly=yes`, slot-stable remote names, resumable
+  `rsync --partial --append-verify` so a cron timeout resumes instead of re-dumping, verify
+  (`gzip -t` + size match) before promoting and deleting the remote copy, single-flight lock.
+  A real dump was pulled and verified: **395,238,417 B, gzip OK, 57 tables** (DB is 3.7 GB —
+  `fnf_option_quotes_history` 2.2 GB, `unified_option_quotes` 1.05 GB).
+- **IMAP crash class fixed (agent queue item 76, separate workstream):** an `ImapFlow` client
+  with no `'error'` listener turned the async socket timeout into an unhandled event that
+  exited the whole process **62 times between 2026-09-07 and 2026-09-12** (each death took the
+  desk routes and the control plane down); `mail_accounts.imapFailureCount` was still 0 because
+  the process died before any handler ran. `src/applications/imap-safety.ts` now guards every
+  client before `connect()` and holds the ONE backoff/auto-disable rule both services use;
+  `npm run test:imap` **57/57** incl. the crash reproduced on a real ImapFlow instance. Commit
+  `4ce0ab8` (allow-listed as the separate job-application workstream); the exemption tripwire
+  test now lists all five audited SHAs (it had been red since the parallel session grew the
+  list without growing the assertion).
+- **Desk state:** both feeds STANDBY (market closed) — FYERS_WS note "socket down — awaiting
+  credentials/reconnect", UPSTOX_REST `credentialsOk=0`; FYERS token expired 06:00 IST and
+  Upstox 03:30 IST, so both need re-issue before Monday. `trading-agent` untouched (holds the
+  FYERS socket, 0 restarts). No new ticks since 2026-09-11T14:23Z.
+- **Roadmap coverage missing (asking, not inventing):** the IMAP/mail reliability workstream has
+  no `project_checklist_items` row (0 matches for IMAP|mail|inbox|reply|credential); it is
+  tracked in the agent-side `agent_todo_log` (item 76). Operator decision needed.
+
 ## Progress (2026-09-12 03:50) — rows 21 + 22 (GATE 2 OAI) implemented; desk app crash-loop repaired; clean stop
 
 - **Row 21 (GATE 2 #2 — OAI formula) → done, commit `0c33c4d`.** `oai` = (BuyQty − SellQty) /
@@ -390,6 +452,8 @@ the headless `trading-agent`, with the app making zero connect attempts.
 > The list below is historical context; on "continue" start from the DB log
 > (first `in_progress`/`pending` by id), NOT from this numbered list.
 
+0. **MONDAY 2026-09-14 09:00–09:15 IST — the pre-open window is the unblocking event for all of GATE 2.** Row 27 (time-alignment) is DONE (`5949caa`), but the archive proves the tape has **ZERO rows in the 09:00–09:15 IST window on every recorded day** and `pre_open_observations` holds only 3 off-hours rows with NULL symbol. So rows 20 and 23–26 (capture, survival at 1/5/15 min, IEP-vs-open, depth/spread shock, relative pre-open volume) cannot close until that window is captured live: refresh BOTH tokens first (Upstox dies 03:30 IST, FYERS 06:00 IST), confirm the 08:57 capture cron fires, then re-run `npm run verify:alignment` to see a NON-empty pre-open side of the frame.
+0. **Two DB backup crons were repaired 2026-09-12** (`myjob_db_backup.sh`: wrong SSH key = `Permission denied (publickey)` since 2026-09-07; now the authorised `oci-vm-id_ed25519` + `IdentitiesOnly=yes`, slot-stable remote dump, resumable `rsync --partial`, verify-then-promote). Verify the next scheduled runs (08:55 / 15:45 IST) actually finish: the dump is ~395 MB (DB 3.7 GB) and downloads at ~1.4 MB/s, so a resumed run is normal; the script exits 0 with `BACKUP_PENDING` when it made progress and non-zero only on hard failure.
 0. **GATE 2 rows 21/22 — row 22 still needs its first REAL stored OAI series block.** Row 21 is done (`0c33c4d`); row 22 (`9cb178d`) is complete in code — `pre-open-oai-series.ts` + the `derived` json column + the capture-time write in both paths + 60/60 tests — but its doneWhen requires a historical record CONTAINING the value, which only the next **09:00–09:15 IST capture window** can produce. At that window: confirm `derived.oaiSeries` lands on the session's rows with version `oais-v1`, cutoff and sample counts, then move row 22 to `done`. Rows 20, 23, 24, 25, 26, 27 all need the same live/archived tape, so GATE 2 closes as a block once that data exists.
 0. **BUILD HAZARD (learned 2026-09-12): never run `npm run build` in the shared tree while the job-application session has uncommitted WIP.** A failed build can still emit `dist/app.module.js` from broken source AND skip nest's asset copy, silently poisoning `dist` for the next restart (this crashed the desk app with 104 restarts: `ReferenceError: PreApplyService is not defined` then `MODULE_NOT_FOUND './checklist-v4.seed.json'`). Deploy by building HEAD in a detached worktree and swapping `dist/` (recipe in the `nestjs-boot-blocker-checklist` skill). Also note pm2 runs node with `--enable-source-maps`, so crash frames show `src/*.ts` even though `dist/*.js` is what runs.
 0. **Common-feed workstream (row 877 = GATE 0 #10) — restore single-owner and demonstrate controlled failback.** The authorised lease-isolation fix (`c2d369a`) is DONE and LIVE: the arbiter's lease read/write runs on its own dedicated MySQL connection, and the agent's `FYERS_WS` heartbeat now renews every 15 s (it had been frozen 647 s) — `test:lease-connection` 6/6, pool size untouched, 8 s bound kept, TTL rules unchanged. Baseline element "fresh FYERS heartbeat/lease" is PROVEN; "FYERS owns NIFTY / is publishing NIFTY / Upstox standby" needs market hours, so at the NEXT SESSION: (1) prove the clean baseline, (2) run the bounded 100 s FYERS outage → UPSTOX_REST NIFTY failover → FYERS recovery → controlled failback demo with lease+publication+common-store evidence at each stage, (3) finish verifying the CANONICAL pipeline for row 878 (GATE 0 #11) — the Upstox side is ALREADY proven live (`42df4cc`: accepted 590 / persisted 546 / rejected 0 on real chains, converged keys `BSE:SENSEX17SEP74900CE`); still open: the FYERS side under live ticks (watch the STALE reject rate) and BOTH desks consuming canonical rows. Row 878's `doneWhen` has no mode flip (the interpreter is permanently ON and mandatory; `TICK_INTERPRETER_MODE` and the dual-write switches are deleted). Raw-payload archival is DEFERRED by the operator (no new column, no extra write volume). Do not mark row 877 or row 878 done until its own doneWhen fully holds.
