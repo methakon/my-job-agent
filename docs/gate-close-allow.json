@@ -73,6 +73,15 @@
       "recorded": "2026-09-12T10:4x+05:30 (session completing trading roadmap row 39; commit authored by the parallel JA session)",
       "evidence": "git show --name-only b185d85 lists src/job-application/qualification.service.ts, src/app.module.ts, src/applications/apply-engine.service.ts; no market-data/gap-engine/trading code, no .env change.",
       "expires_hint": "Delete once b185d85 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "3afe11c1e699960cf01d490e6353c055f64bddb3": {
+      "short": "3afe11c",
+      "reason": "CONTROL-PLANE hardening, not a trading feature: /project-status now sends Cache-Control: no-store so a browser cannot display a superseded roadmap status from cache or bfcache (the stale-display class the 2026-09-12 audit chased). The guard's deliberately narrow cp-plan pattern covers scripts/gate-*.js, scripts/lib/gate-*.js, docs/, AGENTS.md and package.json but NOT src/project-status/*.ts, so the page's one-line header change cannot be classified as control-plane tooling and cannot belong to any trading roadmap row. Splitting it out of the tooling commit (d63a6f5, cp-plan) would still leave this file unclassified.",
+      "workstream": "control plane (/project-status page) — deliberately NOT a trading-roadmap row and NOT an invented one",
+      "authority": "operator instruction 2026-09-12: 'Implement the following three small control-plane hardening fixes: 1. /project-status no-cache — Add Cache-Control: no-store to the roadmap status GET response. This is specifically to prevent client-side stale status displays.' Delete this entry to revoke. NOTE: rather than widening CONTROL_PLANE_PATTERN to cover src/project-status/*.ts (widening that list is how a guard gets quietly neutered — see the comment above the pattern), this one exact SHA is exempted.",
+      "recorded": "2026-09-12T10:55+05:30 (audit accepted by the operator in the same session; no roadmap status was changed)",
+      "evidence": "git show --name-only 3afe11c lists only src/project-status/project-status-page.controller.ts (2 added lines: the res.set('Cache-Control','no-store') call and its comment). Verified live: origin HTTP 200 with cache-control: no-store, and the public route through cloudflared returns cache-control: no-store with cf-cache-status: DYNAMIC. No trading/risk/execution/feed/JA file touched.",
+      "expires_hint": "Delete once 3afe11c leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }

@@ -96,3 +96,55 @@ reading `doneWhen`, not by the number.
 - `.hermes/project.json` carries a `current_checkpoint` (sha `ebdaa96`,
   UNFINALISED) that is a second, stale, model-facing state surface. Refreshed in
   this change and included as a gate-close step.
+
+## 2026-09-12 — "/project-status disagrees with the work" audit + control-plane hardening
+
+**Outcome of the audit:** no discrepancy existed. Rows 21, 27, 38, 39 and 159 were `done` in
+`project_checklist_items`, and both the origin page (127.0.0.1:3010) and the public route
+(cloudflared `berhampore.in` → localhost:3010) rendered the `done` button as the row's ACTIVE
+status with the newest `gate-sync` markers. The one app, one database, one page route
+(`ProjectStatusPageController` → `ProjectStatusService.grouped()`, no cache, no snapshot, no seed
+rendering) all agreed. The false reading came from the *audit* itself using a substring test.
+
+**Three hardenings applied (operator-directed):**
+
+1. `ProjectStatusPageController` now sends `Cache-Control: no-store`. Previously the page had only
+   a weak ETag and no cache directive, so a browser could reuse a pre-write copy (bfcache /
+   heuristic freshness) and display statuses the database had already superseded.
+2. The gate writer's render check asserts the row's **active status button**
+   (`scripts/lib/gate-render-verify.js`, `scripts/gate-verify.test.js`, 40 checks). The old check
+   was satisfiable without the row being in that status at all: every row renders a button labelled
+   `done`, and the writer's own evidence text contains "done by agent", so
+   `chunk.includes('>done<')`/`rendered.includes('done')` were true for EVERY row. The verification
+   could not fail; now it fails on a pending row whose note says "done", on markup drift, on two
+   active buttons, and on an active-but-not-disabled button.
+3. `scripts/lib/gate-auth.js` refuses to run when `MYSQL_HOST`/`MYSQL_PORT` are unset instead of
+   letting mysql2 default to `localhost:3306`. A MySQL listener DOES exist on this host's
+   `127.0.0.1:3306` (it is never a store for this project), so the old fallback could silently
+   point a tool at a phantom database — and did, masking itself as `connect ETIMEDOUT` during the
+   audit.
+
+**DOCUMENTED RECOMMENDATION — NOT IMPLEMENTED (needs operator approval; no DDL was run):**
+`project_checklist_items` has **no unique key on `(grp_order, item_order)`** — only
+`PRIMARY(id)` — although `ProjectStatusService.ensureSeeded()`'s own comment claims
+`uq_grp_item`. Today the seeder's `exist()` check is the only guard, and the app has been
+restart-looped (320+ restarts on 2026-09-12), so two overlapping boots can pass `exist()`
+simultaneously and insert duplicate rows for the same `(grp_order, item_order)`. A duplicate
+`pending` twin of a `done` row would then render alongside it and make the page look stale — the
+exact symptom this audit chased. Verified today: **zero duplicate `(grp_order, item_order)` pairs**
+and zero duplicate item texts, so the index can be added without a data repair. Recommended
+change (to be scheduled separately, with a backup first):
+
+```sql
+-- prerequisite check (read-only)
+SELECT grp_order, item_order, COUNT(*) FROM project_checklist_items
+ GROUP BY grp_order, item_order HAVING COUNT(*) > 1;
+-- then, after operator approval and a verified backup
+ALTER TABLE project_checklist_items
+  ADD UNIQUE KEY uq_grp_item (grp_order, item_order);
+```
+
+Also left as-is deliberately: the `:3306` listener itself, `src/project-status/checklist-v4.seed.json`
+still carrying `pending` for every item (it is a seeding template, not a status source), and the
+`database-sync` service. None of them were touched by this change.
+
