@@ -202,7 +202,7 @@ export class JobApplicationRoadmapService implements OnModuleInit {
       item.note = block;
     }
 
-    if (commitSha.trim().length > 0) {
+    if (commitSha && commitSha.trim().length > 0) {
       item.lastCommitSha = commitSha.trim();
     }
 
