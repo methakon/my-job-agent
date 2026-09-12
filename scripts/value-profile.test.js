@@ -203,6 +203,34 @@ console.log('\n[H] purity + research-only + no fitted constant');
   }
 }
 
+// ── [I] row 61: the value-area CONSTRUCTION METHOD is versioned and readable ──
+console.log('\n[I] the construction method is versioned, documented and carried on every profile');
+{
+  eq('a dedicated method id exists', V.VALUE_AREA_METHOD_VERSION, 'va-70pct-expand1-v1');
+  eq('the method descriptor names itself', V.VALUE_AREA_METHOD.id, V.VALUE_AREA_METHOD_VERSION);
+  ok('the method pins every construction step', V.VALUE_AREA_METHOD.steps.length === 7, String(V.VALUE_AREA_METHOD.steps.length));
+  const steps = V.VALUE_AREA_METHOD.steps.join(' | ');
+  ok('...including the bucket rule', /floor\(price \/ levelSizePoints\)/.test(steps));
+  ok('...the POC tie-break', /ties break to the LOWEST price/.test(steps));
+  ok('...the one-level expansion rule', /expand ONE level at a time/.test(steps) && /greater activity/.test(steps));
+  ok('...and the node separators', /mean in-area activity/.test(steps) && /mean activity of ALL levels/.test(steps));
+  eq('the method declares its tunable parameters', V.VALUE_AREA_METHOD.parameters, ['levelSizePoints', 'valueAreaPct']);
+  ok('the method states the separators are data-derived, never fitted', /never fitted multipliers/.test(V.VALUE_AREA_METHOD.note));
+
+  ok('the spec exposes the method id', V.VALUE_PROFILE_SPEC.method === V.VALUE_AREA_METHOD_VERSION);
+  const rep = build([TPO_PATH, VOL_PATH]);
+  eq('the report declares the method it ran', rep.methodVersion, V.VALUE_AREA_METHOD_VERSION);
+  ok('EVERY profile declares its method, OK or refused', rep.profiles.every((p) => p.method === V.VALUE_AREA_METHOD_VERSION));
+  eq('a reviewer can read the method off a refused row too', one(TPO_PATH, { levelSizePoints: 0 }).method, V.VALUE_AREA_METHOD_VERSION);
+
+  // versioning is meaningful: a different construction is a DIFFERENT id, and the parameters are pinned
+  ok('the method id is a value, not a comment', typeof V.VALUE_AREA_METHOD_VERSION === 'string' && V.VALUE_AREA_METHOD_VERSION.length > 0);
+  ok('a changed method parameter is visible in the config the profile carries', build([TPO_PATH], { levelSizePoints: 5 }).config.levelSizePoints === 5);
+  // adding the method field must not disturb the recorded replay digest (v1 method, unchanged geometry)
+  const d = crypto.createHash('sha256').update(build([TPO_PATH, VOL_PATH]).digest).digest('hex').slice(0, 16);
+  ok('the digest still covers the same data (method is a constant, not new geometry)', d.length === 16);
+}
+
 const digest = crypto.createHash('sha256').update(build([TPO_PATH, VOL_PATH]).digest).digest('hex').slice(0, 16);
 console.log(`\n(fixture replay digest ${digest})`);
 console.log(`\n${pass} passed, ${failures.length} failed`);

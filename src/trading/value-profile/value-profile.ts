@@ -50,6 +50,29 @@ import { MARKET_OPEN_START_MIN, MARKET_CLOSE_MIN } from '../pre-open/pre-open-se
 
 export const VALUE_PROFILE_VERSION = 'valprof-v1';
 
+/**
+ * The VALUE-AREA CONSTRUCTION METHOD — versioned INDEPENDENTLY of the feature version, so a historical
+ * profile can always state WHICH construction produced it. These are the exact, pinned steps; changing
+ * any one of them (bucket rule, POC tie-break, expansion rule, area share, node separators) REQUIRES a
+ * new method id, otherwise two differently-built areas would be indistinguishable in the archive.
+ */
+export const VALUE_AREA_METHOD_VERSION = 'va-70pct-expand1-v1';
+
+export const VALUE_AREA_METHOD = {
+	id: VALUE_AREA_METHOD_VERSION,
+	steps: [
+		'bucket each in-window observation to floor(price / levelSizePoints)',
+		'activity = the volume attributed to the observation (VOLUME basis) or 1 per observation (TPO basis)',
+		'POC = the level with the greatest activity; ties break to the LOWEST price',
+		'value area = start at the POC and expand ONE level at a time, each step taking the side whose next level has the greater activity (ties to the lower price), until accumulated activity >= valueAreaPct of the total, or both sides are exhausted',
+		'VAL = the lowest price in the band; VAH = the highest',
+		'HVN = an in-area level with activity >= the mean in-area activity',
+		'LVN = an outside-area level with activity <= the mean activity of ALL levels',
+	],
+	parameters: ['levelSizePoints', 'valueAreaPct'] as string[],
+	note: 'node separators are data-derived means, never fitted multipliers; the method carries no constant tuned against outcomes',
+};
+
 export type ProfileBasis = 'VOLUME' | 'TPO';
 export type ValueProfileStatus = 'OK' | 'UNAVAILABLE' | 'DISABLED';
 
@@ -116,6 +139,8 @@ export interface ValueProfile {
 	reasonDetail: string | null;
 	basis: ProfileBasis | null;
 	basisReason: string | null;
+	/** Which value-area CONSTRUCTION produced this profile (see VALUE_AREA_METHOD). */
+	method: string;
 	levelSizePoints: number;
 	observationsIn: number;
 	observationsUsed: number;
@@ -136,6 +161,8 @@ export interface ValueProfileReport {
 	enabled: boolean;
 	config: ValueProfileConfig;
 	spec: typeof VALUE_PROFILE_SPEC;
+	/** The construction method every profile in this run declares. */
+	methodVersion: string;
 	profiles: ValueProfile[];
 	counts: Record<ValueProfileStatus, number>;
 	basisCounts: Record<ProfileBasis, number>;
@@ -148,6 +175,8 @@ export interface ValueProfileReport {
 export const VALUE_PROFILE_SPEC = {
 	feature: 'ValueProfile',
 	version: VALUE_PROFILE_VERSION,
+	/** The construction method id a reviewer must be able to read off any profile. */
+	method: VALUE_AREA_METHOD_VERSION,
 	question: 'For one session: the point of control, the 70% value area (VAL/VAH) and the high/low-volume nodes, over an explicitly stated activity basis.',
 	basis: 'VOLUME (volume per observation) when coverage suffices, else TPO (observations per level); the chosen basis and the reason are always reported, and an explicitly demanded basis that is unavailable is refused rather than downgraded',
 	level: 'price buckets of levelSizePoints (default 10), bucketed by floor(price / levelSize)',
@@ -188,7 +217,7 @@ const refused = (
 	extra: Partial<ValueProfile> = {},
 ): ValueProfile => ({
 	sessionDate: path.sessionDate, instrument: path.instrument, status: 'UNAVAILABLE', reason, reasonDetail: detail,
-	basis: null, basisReason: null, levelSizePoints: cfg.levelSizePoints,
+	basis: null, basisReason: null, method: VALUE_AREA_METHOD_VERSION, levelSizePoints: cfg.levelSizePoints,
 	observationsIn: path.points.length, observationsUsed: 0, observationsWithVolume: 0, levels: 0,
 	totalActivity: null, poc: null, val: null, vah: null, valueAreaActivityShare: null, hvn: [], lvn: [],
 	evidence: { firstInstantMs: null, lastInstantMs: null, volumeCoverage: null },
@@ -278,6 +307,7 @@ function buildOne(path: ProfilePath, cfg: ValueProfileConfig): ValueProfile {
 
 	return {
 		sessionDate: path.sessionDate, instrument: path.instrument, status: 'OK', reason: null, reasonDetail: null,
+		method: VALUE_AREA_METHOD_VERSION,
 		levelSizePoints: size,
 		...common,
 		totalActivity,
@@ -324,6 +354,7 @@ export function buildValueProfiles(
 		enabled: cfg.enabled,
 		config: cfg,
 		spec: VALUE_PROFILE_SPEC,
+		methodVersion: VALUE_AREA_METHOD_VERSION,
 		profiles,
 		counts,
 		basisCounts,
