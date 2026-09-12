@@ -22,6 +22,8 @@
     "test:canonical-ticks": "npm run build && node scripts/canonical-tick-interpreter.test.js",
     "test:labels": "npm run build && node scripts/label-integrity.test.js",
     "test:imap": "npm run build && node scripts/imap-safety.test.js",
+    "test:alignment": "npm run build && node scripts/pre-open-alignment.test.js",
+    "verify:alignment": "node scripts/pre-open-alignment-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",
     "verify:failover": "node scripts/feed-failover-verify.js",
     "market-data:canonical": "node scripts/market-data-canonical-status.js",

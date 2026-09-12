@@ -135,6 +135,12 @@ const TIME_BASIS = {
 	createdAt: 'utc', updatedAt: 'utc',
 	receivedTimestamp: 'ist', ts: 'ist', heartbeatAt: 'ist', orderedAt: 'ist',
 	signalTs: 'ist', evaluatedAt: 'ist', fillQuoteTs: 'ist', closedAt: 'ist',
+	// pre_open_observations (verified 2026-09-12 from stored rows, not assumed): all three
+	// rows written by the 00:45 IST capture carry eventTime '2026-09-11 00:45:41' with
+	// createdAt '2026-09-10 19:15:41' — the SAME instant exactly 330 min apart — and
+	// pre-open-capture.service.ts derives sessionDate via istDateString(eventTime), so the
+	// event/receive columns are market-wall (IST) and only createdAt/updatedAt are UTC.
+	eventTime: 'ist', receivedAt: 'ist',
 };
 
 /**
@@ -159,6 +165,8 @@ const windowFor = (table, minutes, { column = 'createdAt', now = new Date(), ali
 const PROBE_COLUMNS = [
 	['unified_option_quotes', 'createdAt'], ['unified_option_quotes', 'receivedTimestamp'], ['unified_option_quotes', 'ts'],
 	['unified_market_snapshots', 'createdAt'], ['unified_market_snapshots', 'receivedTimestamp'],
+	['unified_market_snapshots', 'ts'],
+	['pre_open_observations', 'eventTime'], ['pre_open_observations', 'createdAt'],
 	['fnf_option_quotes', 'createdAt'], ['fnf_option_quotes', 'ts'],
 	['fnf_market_snapshots', 'createdAt'], ['pattern_signals', 'createdAt'],
 	['fnf_trades', 'orderedAt'], ['upstox_live_paper_candidates', 'evaluatedAt'],
