@@ -95,6 +95,17 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 04:45) — row 77 DONE (direction/movement/IV-regime/holding kept separate, GATE 7 #7)
+
+- **Row 77 (GATE 7 #7) → done, `cca5a71`** — `selbrief-v1`: the four selection dimensions are four SEPARATE,
+  independently-sourced fields in one brief, and a brief is emitted only when ALL four are present. It computes
+  **no combined score and makes no option pick** (the failure mode the row exists to prevent), asserted
+  structurally: no cross-dimension combination function, no arithmetic joining two dimensions, and the emitted
+  brief carries exactly the four dimension keys. `ivRegime` is derived by **SIGN ONLY** (IV_RICH / IV_CHEAP /
+  BALANCED — no margin band; a one-unit difference flips it, tested). Refusals: NO_SESSION_DATE / NO_DIRECTION /
+  NO_MOVEMENT (a 0/negative move is refused, never clamped) / NO_IV_REGIME / NO_HOLDING, with `missing` listing
+  every absent dimension and a null brief. Test **43/43**. Control plane row 77 render-verified.
+
 ## Progress (2026-09-13 04:30) — row 75 DONE (vanna/charm, GATE 7 #6)
 
 - **Row 75 (GATE 7 #6) → done, `18245af`** — `vannacharm-v1`: vanna (∂delta/∂σ) and charm (∂delta/∂t) per
