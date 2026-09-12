@@ -33,7 +33,7 @@ const JA6_SHA = 'a80422dbcda591fd8e625cef5a62bc1f1dba816d'; // JA-010 qualificat
 const JA7_SHA = 'b185d858885d4eb4bd71122a600cae806f80655d'; // JA-010 qualification engine wiring (parallel session)
 const AUDITED = [JA_SHA, JA2_SHA, JA3_SHA, JA4_SHA, JA5_SHA, JA6_SHA, JA7_SHA];
 
-const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit } = require(LIB);
+const { loadExemptions, findExemption, classifyCommit, isControlPlaneCommit, CONTROL_PLANE_PATTERN } = require(LIB);
 
 let pass = 0;
 let fail = 0;
@@ -195,8 +195,10 @@ t('control-plane scope covers exactly the /project-status page controller — no
 	assert.equal(isControlPlaneCommit(['src/project-status/checklist-v4.seed.json']), false, 'the status-bearing seed is NOT tracking layer');
 	// and mixing the page with anything else is not control-plane-only
 	assert.equal(isControlPlaneCommit(['src/project-status/project-status-page.controller.ts', 'src/trading/x.ts']), false);
-	// the scope must stay name-scoped: no wildcard over the module or over src/
-	assert.ok(!/src\\\/(project-status\\\/\.\*|\.\*)/.test(CONTROL_PLANE_PATTERN.source), 'the pattern must not gain a wildcard over src/');
+	// the scope must stay name-scoped: the exact file is present, and the module is not wildcarded
+	assert.ok(/src\\\/project-status\\\/project-status-page\\\.controller\\\.ts/.test(CONTROL_PLANE_PATTERN.source), 'the exact page-controller path must be in the scope');
+	assert.ok(!/src\\\/project-status\\\/\.\+/.test(CONTROL_PLANE_PATTERN.source), 'no +/wildcard may be added after src/project-status/');
+	assert.ok(!/\.\*/.test(CONTROL_PLANE_PATTERN.source), 'the scope must not contain a dot-star wildcard');
 });
 
 // ── the guard actually uses it, and the drift branch is intact ───────────────
