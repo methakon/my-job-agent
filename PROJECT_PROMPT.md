@@ -95,6 +95,23 @@ push `origin/dev` — never skip even on interrupt.
 - Gmail app-password (bapay.9@gmail.com) — primary sender + OTP reader
 - Naukri password (portal:naukri:bapay.9@gmail.com)
 
+## Progress (2026-09-13 05:45) — row 87 DONE (gap labels + proven leakage boundary, GATE 8 #2)
+
+- **Row 87 (GATE 8 #2) → done, `828d049`** — `gaplabel-v1`: the six gap labels (**fade, follow, midpointReach,
+  fullFill, maximumExtensionPoints, timeToTargetMs**) computed from the **frozen row-85 pre-open features**
+  (open, prevClose, priorRange, gapDirection) and **only** observations inside that session's outcome window.
+  `fade`/`fullFill` = price reached the gap origin; `follow` = favourable excursion ≥ priorRange (the row-40
+  structural yardstick, not a tuned threshold).
+- **The leakage boundary (the row's doneWhen).** Features are frozen at the **09:15 OPEN** and are the only
+  feature input; the outcome window is `openMs..closeMs` of the SAME `sessionDate`, and anything outside it is
+  **ignored and counted**. `detectLabelLeakage()` independently re-checks the window, the frozen-feature subset
+  and the observation count, with a closed vocabulary (`BAD_WINDOW`, `OUT_OF_WINDOW_OBSERVATION`,
+  `FEATURE_NOT_FROZEN`, `WINDOW_AFTER_CLOSE`). Refusals are null-valued: NO_SESSION_DATE / NO_FEATURES /
+  NO_PATH / NO_POINTS.
+- Evidence: `test:gap-labels` **51/51** — including the **timestamp/leakage test** (a boundary exactly at the
+  close, out-of-window ticks ignored and counted, and every violation class detected); archive replay —
+  **8 labelled sessions, LEAKAGE AUDIT CLEAN** (digest `a8b6313bb5254c2e`). Control plane row 87 render-verified.
+
 ## Progress (2026-09-13 05:20) — row 85 DONE (gap database, GATE 8 #1) + COMMIT-SAFETY INCIDENT fixed
 
 - **Row 85 (GATE 8 #1) → done, commit `699ed2a`** — `gapdb-v1`: the current NIFTY/BANKNIFTY gap **feature
