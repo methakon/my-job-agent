@@ -244,7 +244,7 @@ function experienceEvidence(
       const total = ranges.reduce((a, b) => a + b, 0);
       return {
         claim, category: 'experience_years', status: 'matched', sources,
-        note: 'profile states ' + exp + 'yr experience; work history spans ~' + total + 'yr across ' + ranges.length + ' stint(s)',
+        note: 'profile stated ' + exp + 'yr experience; work history spans ~' + total + 'yr across ' + ranges.length + ' stint(s)',
         fieldsUsed,
       };
     }
