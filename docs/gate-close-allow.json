@@ -115,6 +115,12 @@
       "reason": "Same separate Job Application workstream (JA-014): the canonical semantic skill matching implementation — synonym/alias/relationship table + matcher + 13-section test suite — is a self-contained Job Agent module with no trading/algo-trading/Upstox/FYERS/FNF involvement. Covered by the same JA-roadmap control-plane instance; no separate tracking needed.",
       "workstream": "Job Application roadmap — JA-014 Semantic skill matching",
       "authority": "seed job-application-roadmap.seed.json JA-014 row + gate-close-check.js same_separate_workstream category"
+    },
+    "d0f875b": {
+      "short": "d0f875b",
+      "reason": "Separate separately-tracked workstream: Upstox Sandbox ingestion — set-based batched persistence (perf(sandbox)). NOT Job Agent work. Tracked under the trading/algo-trading workstream, not the JA roadmap control plane.",
+      "workstream": "Trading/algo-trading — Upstox Sandbox ingestion (separate workstream)",
+      "authority": "gate-close-check.js same_separate_workstream category"
     }
   }
 }
