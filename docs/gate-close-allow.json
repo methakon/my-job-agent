@@ -121,6 +121,15 @@
       "reason": "Separate separately-tracked workstream: Upstox Sandbox ingestion — set-based batched persistence (perf(sandbox)). NOT Job Agent work. Tracked under the trading/algo-trading workstream, not the JA roadmap control plane.",
       "workstream": "Trading/algo-trading — Upstox Sandbox ingestion (separate workstream)",
       "authority": "gate-close-check.js same_separate_workstream category"
+    },
+    "8c5ede643114c4195b0219eee42b377c27b88da3": {
+      "short": "8c5ede6",
+      "reason": "Separate separately-tracked workstream: Upstox Sandbox order-API plumbing — corrects the sandbox order API semantics only (validity DAY on place, order_id as a query param on cancel, order_id in the body on modify, trades() via /v2/order/retrieve-all, positions() fails loudly instead of guessing). Isolated Sandbox exercise: no live/canonical/FYERS/FNF data, no REAL execution gate, no risk control, no weekly-report or accounting code, no schema change. NOT Job Agent work. The Sandbox workstream deliberately has no project_checklist_items row; its sibling commit d0f875b carries the same exemption.",
+      "workstream": "Trading/algo-trading — Upstox Sandbox order-API plumbing (separate workstream)",
+      "authority": "operator approval 2026-09-14 ('Allow-list the SHA'), following the d0f875b precedent (commit 4740fe7 'chore(gate-close): allow-list d0f875b — separate trading workstream (Upstox Sandbox ingestion)'). Delete this entry to revoke.",
+      "recorded": "2026-09-14T00:56+05:30 (session correcting the PAPER option cost model; this commit was already on origin/dev and fell inside the guard's commit window)",
+      "evidence": "git show --name-only 8c5ede6 lists only src/trading/upstox-sandbox.provider.ts (+36/-13) — no FNF, no Job Agent, no risk/REAL-execution gate, no weekly-report, no .env, no schema, no roadmap/control-plane file.",
+      "expires_hint": "Delete once 8c5ede643114c4195b0219eee42b377c27b88da3 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
