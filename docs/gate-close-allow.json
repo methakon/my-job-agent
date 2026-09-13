@@ -91,6 +91,15 @@
       "recorded": "2026-09-13T00:50+05:30 (session implementing JA-012 deterministic JD intent extraction; commit authored by the parallel JA session)",
       "evidence": "git show --name-only 9be09367ab7162579d66dfbd73349c5b3ab95606 lists src/job-application/jd-intent-model.ts, src/job-application/jd-intent.service.ts, scripts/ja-012-jd-intent.test.js, scripts/ja-012-evidence-tagging.test.js — no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once 9be09367ab7162579d66dfbd73349c5b3ab95606 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "e5349ffc025364736ee19ea1256fe2f7ff55ea80": {
+      "short": "e5349ff",
+      "reason": "Same separate Job Application workstream (JA-013): the candidate evidence-matching / explainable-evidence layer (src/job-application/candidate-evidence.service.ts, its 594-line suite scripts/ja-013-candidate-evidence.test.js, its registration in src/app.module.ts and a dashboard link in public/dashboard.html). Authored by the PARALLEL job-application session in this shared working tree; tracked in that workstream's own control plane (job_application_roadmap_items), which project_checklist_items deliberately does not mirror. Touches no trading, market-data, feed, risk, execution or schema code.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
+      "recorded": "2026-09-13T03:00+05:30 (session completing trading-roadmap GATE 7/8 rows; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only e5349ff lists public/dashboard.html, scripts/ja-013-candidate-evidence.test.js, src/app.module.ts, src/job-application/candidate-evidence.service.ts — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "expires_hint": "Delete once e5349ffc025364736ee19ea1256fe2f7ff55ea80 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
