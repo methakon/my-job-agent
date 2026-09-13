@@ -217,7 +217,7 @@ const quote = (ltp) => ({ contractSymbol: CERT, ts: new Date(), ltp, bid: ltp - 
 
     // Other components.
     assert.equal(buy.brokerage, 20, 'brokerage is the configured flat ₹20');
-    assert.ok(near(buy.exchangeTxn, notional * 0.0003553), 'exchange txn uses the configured rate');
+    assert.ok(near(buy.exchangeTxn, notional * 0.0003552), 'exchange txn is ₹3,552/cr = 0.03552%, each side');
     assert.ok(near(buy.sebi, notional * 0.000001), 'SEBI charge is ₹10 per crore');
     assert.ok(near(buy.stamp, notional * 0.00003), 'stamp duty is 0.003%, buy side');
     assert.equal(sell.stamp, 0, 'stamp duty is buy-side only');

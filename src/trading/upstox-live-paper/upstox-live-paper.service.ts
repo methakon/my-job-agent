@@ -61,7 +61,7 @@ const OPTION_COST_RATES = {
   // STT on the SALE of an option: 0.15% of premium (Finance Act 2026, effective
   // 1-Apr-2026; raised from 0.10%). Sell side only.
   sttSellPct: 0.0015,
-  exchangeTxnPct: 0.0003553,// NSE 0.03553% of premium
+  exchangeTxnPct: 0.0003552,// NSE 0.03552% of premium (₹3,552/cr each side, eff 1-Mar-2026)
   stampBuyPct: 0.00003,     // 0.003% of premium, buy side
   gstPct: 0.18,             // 18% on brokerage + exchange txn + SEBI only
   sebiPct: 0.000001,        // ₹10 per crore
