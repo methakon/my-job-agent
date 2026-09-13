@@ -73,6 +73,7 @@
     "verify:gap-dataset": "node scripts/gap-dataset-replay.js",
     "test:gap-labels": "npm run build && node scripts/gap-labels.test.js",
     "verify:gap-labels": "node scripts/gap-labels-replay.js",
+    "test:sandbox-ingestion": "npm run build && node scripts/upstox-sandbox-ingestion.test.js",
     "test:gap-open-value": "npm run build && node scripts/gap-open-value.test.js",
     "verify:gap-open-value": "node scripts/gap-open-value-replay.js",
     "verify:canonical-live": "node scripts/canonical-live-verify.js",

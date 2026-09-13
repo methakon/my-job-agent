@@ -1,8 +1,16 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SandboxTick } from './sandbox-tick.entity';
+
+/** Flush cadence: the background writer runs on this interval. */
+const FLUSH_INTERVAL_MS = 2000;
+/** Rows per set-based INSERT statement (one statement per chunk, never one per row). */
+const FLUSH_BATCH_ROWS = 500;
+/** Hard bound on the in-memory queue (overflow drops the OLDEST tick). */
+const MAX_QUEUE_ROWS = 5000;
 
 /** What the Upstox Sandbox feed can deliver per tick (map only what exists). */
 export interface SandboxTickInput {
@@ -30,11 +38,30 @@ export interface SandboxTickInput {
  *  - ingest() validates the environment and FAILS CLOSED on anything that looks
  *    real (on_real_data=true / REAL environment) or misconfigured.
  *  - Async queue: ingest() enqueues (O(1), no DB await) and returns instantly;
- *    a background flush writes batches. A sandbox write failure can never block
- *    or slow the FYERS real path (spec §3/§14). Failed batches are logged and
- *    dropped with retry on the next flush cycle — no coupling to real services.
+ *    a background flush writes SET-BASED batches — ONE multi-row INSERT per chunk,
+ *    never one INSERT per row — so the flush does not pay a WAN round trip per tick.
+ *    A sandbox write failure can never block or slow the FYERS real path (spec §3/§14).
+ *    A failed batch is EXPLICIT and COUNTED (flushFailures/droppedOnFailure) and the
+ *    batch is dropped rather than requeued, so memory stays bounded — an enqueue is
+ *    never reported as a successful persist.
  *  - Disabled until UPSTOX_SANDBOX_ENABLED=true (constructor never throws).
  */
+
+/** Observable counters so a flush failure or a queue overflow is never silent. */
+export interface SandboxIngestionCounters {
+	enqueued: number;
+	persisted: number;
+	droppedQueueFull: number;
+	flushFailures: number;
+	droppedOnFailure: number;
+	flushes: number;
+	lastBatchRows: number;
+	lastFlushMs: number;
+	totalFlushMs: number;
+	queueHighWater: number;
+	lastFlushError: string | null;
+}
+
 @Injectable()
 export class UpstoxSandboxIngestionService implements OnModuleInit, OnModuleDestroy {
 	private readonly logger = new Logger('UpstoxSandboxIngestionService');
@@ -42,7 +69,11 @@ export class UpstoxSandboxIngestionService implements OnModuleInit, OnModuleDest
 	private queue: SandboxTick[] = [];
 	private flushTimer: NodeJS.Timeout | null = null;
 	private flushing = false;
-	private readonly maxQueue = 5000;
+	private readonly maxQueue = MAX_QUEUE_ROWS;
+	private readonly counters: SandboxIngestionCounters = {
+		enqueued: 0, persisted: 0, droppedQueueFull: 0, flushFailures: 0, droppedOnFailure: 0,
+		flushes: 0, lastBatchRows: 0, lastFlushMs: 0, totalFlushMs: 0, queueHighWater: 0, lastFlushError: null,
+	};
 
 	constructor(
 		config: ConfigService,
@@ -56,7 +87,7 @@ export class UpstoxSandboxIngestionService implements OnModuleInit, OnModuleDest
 			this.logger.log('[SANDBOX][UPSTOX] ingestion disabled — UPSTOX_SANDBOX_ENABLED != true');
 			return;
 		}
-		this.flushTimer = setInterval(() => void this.flush().catch(() => undefined), 2000);
+		this.flushTimer = setInterval(() => void this.flush().catch(() => undefined), FLUSH_INTERVAL_MS);
 		this.flushTimer.unref?.();
 		this.logger.log('[SANDBOX][UPSTOX] ingestion armed (background flush every 2s)');
 	}
@@ -84,6 +115,7 @@ export class UpstoxSandboxIngestionService implements OnModuleInit, OnModuleDest
 		if (this.queue.length >= this.maxQueue) {
 			this.logger.warn('[SANDBOX][UPSTOX] queue full — dropping oldest sandbox tick');
 			this.queue.shift();
+			this.counters.droppedQueueFull += 1;
 		}
 		this.queue.push({
 			instrument: input.instrument,
@@ -104,30 +136,46 @@ export class UpstoxSandboxIngestionService implements OnModuleInit, OnModuleDest
 			onRealData: false,
 			upstoxRef: input.upstoxRef ?? null,
 		} as SandboxTick);
+		this.counters.enqueued += 1;
+		if (this.queue.length > this.counters.queueHighWater) this.counters.queueHighWater = this.queue.length;
 		return { ok: true };
 	}
 
-	/** Background flush: batch-insert queued ticks into sandbox_ticks only. */
+	/** Set-based persistence: ONE multi-row INSERT per chunk, never one INSERT per row. */
 	private async flush(): Promise<void> {
 		if (this.flushing || this.queue.length === 0) return;
 		this.flushing = true;
-		const batch = this.queue.splice(0, Math.min(this.queue.length, 500));
+		const batch = this.queue.splice(0, Math.min(this.queue.length, FLUSH_BATCH_ROWS));
+		const startedAt = Date.now();
 		try {
 			if (batch.length) {
-				await this.ticks.save(batch.map((t) => this.ticks.create(t)), { chunk: 100 });
-				this.logger.debug(`[SANDBOX][UPSTOX] flushed ${batch.length} sandbox tick(s) → sandbox_ticks`);
+				// Explicit columns, including the uuid PK and ingestedAt, so the write is a single
+				// `INSERT ... VALUES (...), (...), …` per chunk — the fix for the measured ~3 rows/s
+				// per-row-save path. No payload is fabricated, repaired or rerouted.
+				const rows = batch.map((t) => ({ ...t, id: t.id ?? randomUUID(), ingestedAt: t.ingestedAt ?? new Date() }));
+				await this.ticks.insert(rows as never);
+				this.counters.persisted += batch.length;
+				this.counters.flushes += 1;
+				this.counters.lastBatchRows = batch.length;
+				this.counters.lastFlushMs = Date.now() - startedAt;
+				this.counters.totalFlushMs += this.counters.lastFlushMs;
+				this.counters.lastFlushError = null;
+				this.logger.debug(`[SANDBOX][UPSTOX] flushed ${batch.length} sandbox tick(s) → sandbox_ticks (${this.counters.lastFlushMs}ms)`);
 			}
 		} catch (err) {
-			// sandbox write failure — log + requeue is skipped (drop) so sandbox
-			// problems can never back-pressure the real path. Spec §14.
-			this.logger.warn(`[SANDBOX][UPSTOX] flush failed (${(err as Error).message}) — ${batch.length} tick(s) dropped`);
+			// EXPLICIT, COUNTED drop: the batch is not requeued (bounded memory) and the failure is
+			// never reported as a successful persist. Spec §14 — sandbox problems never back-pressure.
+			this.counters.flushFailures += 1;
+			this.counters.droppedOnFailure += batch.length;
+			this.counters.lastFlushError = (err as Error).message;
+			this.logger.warn(`[SANDBOX][UPSTOX] flush FAILED (${this.counters.lastFlushError}) — ${batch.length} tick(s) dropped (flushFailures=${this.counters.flushFailures})`);
 		} finally {
 			this.flushing = false;
 		}
 	}
 
-	/** For tests/observability: pending queue depth + enabled state. */
-	status(): { enabled: boolean; queueDepth: number } {
-		return { enabled: this.enabled, queueDepth: this.queue.length };
+	/** For tests/observability: pending queue depth, enabled state and the explicit counters. */
+	status(): { enabled: boolean; queueDepth: number; counters: SandboxIngestionCounters } {
+		return { enabled: this.enabled, queueDepth: this.queue.length, counters: { ...this.counters } };
 	}
 }
