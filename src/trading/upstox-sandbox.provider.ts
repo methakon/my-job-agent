@@ -83,6 +83,10 @@ export class UpstoxSandboxProvider implements ExecutionProvider {
 			quantity: input.quantity,
 			order_type: input.orderType === 'LIMIT' ? 'LIMIT' : 'MARKET',
 			product: 'D', // delivery for sandbox options testing
+			// The sandbox host requires `validity` on every order (UDAPI1007), and requires BOTH
+			// price and trigger_price for a LIMIT order (UDAPI1008 / UDAPI1036). Sending them always
+			// keeps MARKET orders (which the host also prices) acceptable.
+			validity: 'DAY',
 			...(input.limitPrice !== undefined ? { price: String(input.limitPrice), trigger_price: String(input.limitPrice) } : {}),
 		})) as { data?: { order_id?: string } };
 		return { providerOrderId: String(data?.data?.order_id ?? ''), status: 'PENDING' };
@@ -90,13 +94,24 @@ export class UpstoxSandboxProvider implements ExecutionProvider {
 
 	async modifyOrder(providerOrderId: string, patch: { quantity?: number; limitPrice?: number }): Promise<OrderState> {
 		this.logger.log(`[UPSTOX][SANDBOX][PAPER] modify ${providerOrderId}`);
-		await this.call('/v2/order/modify', 'PUT', { order_id: providerOrderId, quantity: patch.quantity, price: patch.limitPrice });
+		// NOTE the host's asymmetry, verified live: MODIFY takes `order_id` in the BODY (a query param
+		// yields UDAPI1003 "Order id is required"), while CANCEL takes it as a query param. Modify also
+		// requires order_type + validity, and price/trigger_price for a LIMIT order.
+		await this.call('/v2/order/modify', 'PUT', {
+			order_id: providerOrderId,
+			order_type: patch.limitPrice !== undefined ? 'LIMIT' : 'MARKET',
+			validity: 'DAY',
+			...(patch.quantity !== undefined ? { quantity: patch.quantity } : {}),
+			...(patch.limitPrice !== undefined ? { price: String(patch.limitPrice), trigger_price: String(patch.limitPrice) } : {}),
+		});
 		return { providerOrderId, status: 'MODIFIED' };
 	}
 
 	async cancelOrder(providerOrderId: string): Promise<{ ok: boolean }> {
 		this.logger.log(`[UPSTOX][SANDBOX][PAPER] cancel ${providerOrderId}`);
-		await this.call('/v2/order/cancel', 'DELETE', { order_id: providerOrderId });
+		// order_id is a REQUEST PARAMETER on this host — a JSON body returns
+		// "Required request parameter 'order_id' for method parameter type String".
+		await this.call(`/v2/order/cancel?order_id=${encodeURIComponent(providerOrderId)}`, 'DELETE');
 		return { ok: true };
 	}
 
@@ -115,20 +130,28 @@ export class UpstoxSandboxProvider implements ExecutionProvider {
 	}
 
 	async positions(): Promise<PositionState[]> {
-		const data = (await this.call('/v2/portfolio/short-term-positions')) as {
-			data?: Array<{ trading_symbol?: string; net_qty?: number; net_avg_price?: string; realized_pnl?: string; unrealised_pnl?: string }>;
-		};
-		return (data?.data ?? []).map((p) => ({
-			instrument: p.trading_symbol ?? '',
-			quantity: Number(p.net_qty ?? 0),
-			averagePrice: Number(p.net_avg_price ?? 0),
-			realizedPnl: p.realized_pnl !== undefined ? Number(p.realized_pnl) : undefined,
-			unrealizedPnl: p.unrealised_pnl !== undefined ? Number(p.unrealised_pnl) : undefined,
-		}));
+		// The sandbox host exposes NO portfolio endpoint (/v2/portfolio/* → 404 on api-sandbox).
+		// Fail loudly instead of returning an empty list that would masquerade as "flat".
+		try {
+			const data = (await this.call('/v2/portfolio/short-term-positions')) as {
+				data?: Array<{ trading_symbol?: string; net_qty?: number; net_avg_price?: string; realized_pnl?: string; unrealised_pnl?: string }>;
+			};
+			return (data?.data ?? []).map((p) => ({
+				instrument: p.trading_symbol ?? '',
+				quantity: Number(p.net_qty ?? 0),
+				averagePrice: Number(p.net_avg_price ?? 0),
+				realizedPnl: p.realized_pnl !== undefined ? Number(p.realized_pnl) : undefined,
+				unrealizedPnl: p.unrealised_pnl !== undefined ? Number(p.unrealised_pnl) : undefined,
+			}));
+		} catch (error) {
+			throw new Error(`[UPSTOX][SANDBOX] positions() unavailable — the sandbox host serves no portfolio endpoint (read the order book instead: GET /v2/order/retrieve-all). Cause: ${(error as Error).message}`);
+		}
 	}
 
 	async trades(): Promise<unknown[]> {
-		const data = (await this.call('/v2/order/trades')) as { data?: unknown[] };
+		// The sandbox host has no /v2/order/trades (it requires a single order_id); the order BOOK is
+		// /v2/order/retrieve-all. Returning the book keeps "list my sandbox orders" honest.
+		const data = (await this.call('/v2/order/retrieve-all')) as { data?: unknown[] };
 		return data?.data ?? [];
 	}
 }
