@@ -606,6 +606,24 @@ export class UpstoxLivePaperAutoEntryService {
     return out;
   }
 
+  /**
+   * Evaluate every OPEN position of one portfolio with the SAME management rules
+   * the session loop uses, and close the ones the policy exits.
+   *
+   * Used by the week-start carry-forward pass so a position held over a week
+   * boundary is judged exactly as it would have been mid-week — one exit policy,
+   * not a second one written for the week start. It does NOT consider
+   * `autoTradeEnabled`: a position carried over the weekend must still be
+   * evaluated (and may be HELD) even if the account stopped auto-entering, and it
+   * is never closed merely because the week changed — only a real rule closes it.
+   */
+  async manageCarriedPositions(portfolioId: string, now = Date.now()): Promise<Array<Record<string, unknown>>> {
+    const portfolio = await this.portfolios.findOne({ where: { id: portfolioId } });
+    if (!portfolio) throw new Error(`Upstox paper portfolio ${portfolioId} not found`);
+    const { snapshot } = await this.risk.snapshotFor(portfolioId);
+    return this.manageOpenTrades(portfolio, snapshot, now);
+  }
+
   private async findCandidateFor(tradeId: string) {
     return this.learning.findByTradeId(tradeId);
   }

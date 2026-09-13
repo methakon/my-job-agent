@@ -27,6 +27,7 @@ import { UpstoxLivePaperWeeklyReportService } from './upstox-live-paper-weekly-r
 import { UpstoxLivePaperRiskService } from './upstox-live-paper-risk.service';
 import { UpstoxLivePaperLearningService } from './upstox-live-paper-learning.service';
 import { UpstoxLivePaperAutoEntryService } from './upstox-live-paper-autoentry.service';
+import { UpstoxLivePaperCapitalContinuityService } from './upstox-live-paper-capital-continuity.service';
 import { UpstoxLivePaperController } from './upstox-live-paper.controller';
 import { EncryptionService } from '../../auth/encryption.service';
 import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-data.module';
@@ -63,6 +64,7 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperRiskService,
     UpstoxLivePaperLearningService,
     UpstoxLivePaperAutoEntryService,
+    UpstoxLivePaperCapitalContinuityService,
     EncryptionService, // token/credential AES (same convention as FYERS/fnF)
   ],
   exports: [
@@ -74,6 +76,7 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperRiskService,
     UpstoxLivePaperLearningService,
     UpstoxLivePaperAutoEntryService,
+    UpstoxLivePaperCapitalContinuityService,
   ],
 })
 export class UpstoxLivePaperModule implements OnModuleInit {

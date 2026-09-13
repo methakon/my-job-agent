@@ -29,6 +29,7 @@ import { UpstoxLivePaperMarketService } from './upstox-live-paper-market.service
 import { UpstoxLivePaperRiskService } from './upstox-live-paper-risk.service';
 import { UpstoxLivePaperLearningService } from './upstox-live-paper-learning.service';
 import { UpstoxLivePaperAutoEntryService } from './upstox-live-paper-autoentry.service';
+import { UpstoxLivePaperCapitalContinuityService, tradingWeekFromLabel } from './upstox-live-paper-capital-continuity.service';
 import { describeEntryPolicy } from './upstox-live-paper-entry-policy';
 
 @Controller('upstox-live-paper')
@@ -45,6 +46,7 @@ export class UpstoxLivePaperController {
     private readonly risk: UpstoxLivePaperRiskService,
     private readonly learning: UpstoxLivePaperLearningService,
     private readonly autoEntry: UpstoxLivePaperAutoEntryService,
+    private readonly capital: UpstoxLivePaperCapitalContinuityService,
   ) {}
 
   // ── safety / auth status ────────────────────────────────────────────────────
@@ -302,5 +304,55 @@ export class UpstoxLivePaperController {
     const row = await this.learning.labelOutcomeFor(candidateId);
     if (!row) throw new BadRequestException('no quote tape for this candidate yet — nothing was extrapolated');
     return { candidateId, classification: row.classification, outcomeStatus: row.outcomeStatus };
+  }
+
+  // ── PAPER capital continuity + week-start carry-forward ─────────────────────
+
+  /**
+   * Previous week's closing PAPER equity — read-only preview of what the next
+   * week's available capital would become. No writes, no state change.
+   */
+  @Get('capital-continuity')
+  async capitalContinuity(@Query('week') week?: string) {
+    return this.capital.previewWeekRoll(week ? tradingWeekFromLabel(week) : undefined);
+  }
+
+  /** Apply the week roll (previous close equity → available capital). Idempotent per week. */
+  @Post('capital-continuity/roll')
+  async rollCapital(@Query('week') week?: string, @Query('actor') actor?: string) {
+    return this.capital.applyWeekRoll({ week: week ? tradingWeekFromLabel(week) : undefined, actor });
+  }
+
+  /** POSITIONS still open at the previous close, with their identity re-verified. */
+  @Get('capital-continuity/carried-positions')
+  async carriedPositions(@Query('week') week?: string) {
+    return this.capital.discoverCarriedPositions(week ? tradingWeekFromLabel(week) : undefined);
+  }
+
+  /**
+   * Re-evaluate the carried positions with the desk's own exit policy. Without
+   * `apply=true` this is a preview and changes nothing; with it, HOLDs are kept
+   * and EXITs use the normal paper fill, each recorded with its reason.
+   */
+  @Post('capital-continuity/carry-forward')
+  async carryForward(
+    @Query('week') week?: string,
+    @Query('apply') apply?: string,
+    @Query('actor') actor?: string,
+  ) {
+    return this.capital.carryForwardPositions({
+      week: week ? tradingWeekFromLabel(week) : undefined,
+      apply: apply === 'true',
+      actor,
+    });
+  }
+
+  /**
+   * LIVE account/wallet balance — read-only, reported SEPARATELY from paper
+   * equity. It never authorizes a real order and is never used for sizing.
+   */
+  @Get('live-wallet')
+  async liveWallet() {
+    return this.capital.liveWallet();
   }
 }

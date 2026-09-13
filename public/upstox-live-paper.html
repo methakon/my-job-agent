@@ -97,7 +97,9 @@ th{background:var(--card);color:var(--dim);font-weight:600;text-transform:upperc
     document.getElementById('safety-real').textContent = 'DISABLED';
     document.getElementById('safety-real').className = 'value bad';
     document.getElementById('safety-lock').textContent = 'UPSTOX_SANDBOX_ENABLED=' + (s.feed?.safetyLockActive !== false);
-    document.getElementById('safety-capital').textContent = '₹' + fmt(s?.portfolio?.capital ? s.portfolio.capital : 5000, 0);
+    // Capital is reported from the account row only — an unknown capital shows as
+    // "—" rather than a plausible-looking default.
+    document.getElementById('safety-capital').textContent = s?.portfolio?.capital != null ? '₹' + fmt(s.portfolio.capital, 0) : '—';
 
     const auth = s.auth || {};
     const authEl = document.getElementById('safety-auth');
@@ -288,6 +290,55 @@ th{background:var(--card);color:var(--dim);font-weight:600;text-transform:upperc
 
   } catch (err) {
     document.getElementById('status').innerHTML = `<div class="bad">Failed to load status: ${err instanceof Error ? err.message : err}</div>`;
+  }
+})();
+</script>
+
+<div id="capital-continuity" class="card">
+  <div class="card-title">🔁 PAPER capital continuity (week roll)</div>
+  <div id="cc-body" class="small">Loading…</div>
+</div>
+
+<div id="live-wallet" class="card">
+  <div class="card-title">🏦 LIVE ACCOUNT/WALLET BALANCE — separate from PAPER equity</div>
+  <div id="lw-body" class="small">Loading…</div>
+</div>
+
+<script>
+(async () => {
+  const fmt = (n, d = 2) => { const v = Number(n ?? NaN); return Number.isFinite(v) ? v.toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'; };
+  const esc = (x) => String(x == null ? '' : x).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+
+  // PAPER capital continuity: the previous week's closing equity becomes this
+  // week's available PAPER capital. The initial amount is a starting point only.
+  try {
+    const cc = await (await fetch('/upstox-live-paper/capital-continuity')).json();
+    const b = cc.breakdown || {};
+    document.getElementById('cc-body').innerHTML = cc.breakdown?.ok
+      ? `
+        <div>Week <b>${esc(cc.week?.label)}</b> (${new Date(cc.week?.start).toLocaleString('en-IN')} → ${new Date(cc.week?.end).toLocaleString('en-IN')})</div>
+        <div>Starting capital <b>₹${fmt(b.capitalAtWeekStart)}</b> + realised <b>₹${fmt(b.realizedNetPnl)}</b> + mark-to-market <b>₹${fmt(b.unrealizedPnl)}</b> (simulated costs ₹${fmt(b.costs)} already inside realised)</div>
+        <div>Closing PAPER equity <b class="ok">₹${fmt(b.equity)}</b> → next week's available PAPER capital</div>
+        <div>Carried positions at the close: <b>${cc.openPositionsAtClose}</b> · already applied this week: <b>${cc.alreadyApplied ? 'yes' : 'no'}</b></div>
+        <div class="dim">${esc(cc.note)}</div>`
+      : `<div class="bad">BLOCKED — ${esc((b.blockers || []).join(' | '))}</div>
+         <div class="dim">Nothing is reconstructed by guesswork; the roll is refused until the records are consistent.</div>`;
+  } catch (err) {
+    document.getElementById('cc-body').innerHTML = `<div class="bad">unavailable: ${esc(err instanceof Error ? err.message : err)}</div>`;
+  }
+
+  // LIVE wallet: read-only, separate from paper equity, and it never authorizes a
+  // real order. Shown only when the broker actually answers.
+  try {
+    const lw = await (await fetch('/upstox-live-paper/live-wallet')).json();
+    document.getElementById('lw-body').innerHTML = lw.available
+      ? `
+        <div>Net <b>₹${fmt(lw.equity?.net)}</b> · available margin <b>₹${fmt(lw.equity?.availableMargin)}</b> · used margin <b>₹${fmt(lw.equity?.usedMargin)}</b></div>
+        <div class="dim">Read-only awareness. Not added to PAPER equity, not used for sizing, and it does not authorize real execution (REAL orders remain behind the existing gates).</div>`
+      : `<div class="warn">Not available — ${esc(lw.reason || 'no LIVE credentials')}</div>
+         <div class="dim">${esc(lw.note)}</div>`;
+  } catch (err) {
+    document.getElementById('lw-body').innerHTML = `<div class="warn">unavailable: ${esc(err instanceof Error ? err.message : err)}</div>`;
   }
 })();
 </script>
