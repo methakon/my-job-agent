@@ -411,10 +411,16 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     this.standbyReason = active ? null
       : `feed arbitration awarded ${contested.join(', ') || universes.join(', ') || 'this universe'} to ${this.activeFeedByUniverse[contested[0]] ?? 'another producer'}`;
     if (!active) {
+      // Measure credential readiness even while standing by (see
+      // measureCredentials): the arbiter only awards a universe to a feed it
+      // considers credentialed, so a standby that never measures them can never
+      // be elected — not even for an uncontested universe — and can never serve
+      // as a failover target.
+      await this.measureCredentials();
       const nowMs = Date.now();
       if (nowMs - this.lastStandbyLogMs > 300_000) {
         this.lastStandbyLogMs = nowMs;
-        this.logger.log(`[UPSTOX-LIVE] STANDBY — ${this.standbyReason}; consuming shared live ticks, not polling`);
+        this.logger.log(`[UPSTOX-LIVE] STANDBY — ${this.standbyReason}; consuming shared live ticks, not polling (credentialsOk=${this.lastAuthOk})`);
       }
       await this.arbitration.beat(UPSTOX_REST_FEED, { state: 'STANDBY', note: this.standbyReason });
       return { fetched: 0, errors: [] };
@@ -757,6 +763,35 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     const inputs: BsmInputs = { spot, strike, years };
     if (ivOverride && ivOverride>0) { const g = bsmGreeks(inputs, optionType, ivOverride); if (!g) return null; return { ...g, premium: ltp, iv: ivOverride }; }
     return localGreeks(ltp, inputs, optionType);
+  }
+
+  /**
+   * Measure credential readiness WITHOUT polling the broker.
+   *
+   * WHY THIS MUST ALSO RUN WHILE STANDBY (measured 2026-09-13): the arbiter
+   * requires credentialsOk before it awards ANY universe, but this desk only ever
+   * set lastAuthOk inside its ACTIVE path. A feed that is standing by therefore
+   * never authenticated, was never credited as credentialed, was never awarded
+   * even its uncontested universe, and so never became active — a deadlock
+   * observed live as 42 standby cycles with zero auth attempts and lease
+   * credentialsOk=0. It also left the contested universe with no eligible
+   * failover target. liveAuthHeaders() only reads the single active token row
+   * (cached ≤60 s): no broker call, no OAuth refresh.
+   */
+  private async measureCredentials(): Promise<boolean> {
+    const headers = await this.liveAuthHeaders();
+    this.lastAuthOk = Boolean(headers);
+    if (!headers) {
+      this.restLastError = `${this.restLastError ?? 'Upstox access token missing/expired'}; complete the login at /api/upstox/token/init`;
+      const nowMs = Date.now();
+      if (nowMs - this.lastAuthWarnMs > 300_000) {
+        this.lastAuthWarnMs = nowMs;
+        this.logger.warn(`[UPSTOX-LIVE] ${this.restLastError}`);
+      }
+    } else if (this.restLastError?.includes('AUTH_REQUIRED')) {
+      this.restLastError = null;
+    }
+    return this.lastAuthOk;
   }
 
   /**
