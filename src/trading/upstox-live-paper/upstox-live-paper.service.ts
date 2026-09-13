@@ -58,10 +58,12 @@ export class IngestUpstoxLivePaperQuoteDto {
 
 const OPTION_COST_RATES = {
   brokerageFlat: 20,        // ₹20 per executed order
-  sttSellPct: 0.0005,       // 0.05% of premium, sell side
+  // STT on the SALE of an option: 0.15% of premium (Finance Act 2026, effective
+  // 1-Apr-2026; raised from 0.10%). Sell side only.
+  sttSellPct: 0.0015,
   exchangeTxnPct: 0.0003553,// NSE 0.03553% of premium
   stampBuyPct: 0.00003,     // 0.003% of premium, buy side
-  gstPct: 0.18,             // 18% on brokerage + txn + SEBI
+  gstPct: 0.18,             // 18% on brokerage + exchange txn + SEBI only
   sebiPct: 0.000001,        // ₹10 per crore
 };
 
@@ -89,10 +91,12 @@ export function calculateOptionCost(
   const exchangeTxn = notional * OPTION_COST_RATES.exchangeTxnPct;
   const stamp = side === 'BUY' ? notional * OPTION_COST_RATES.stampBuyPct : 0;
   const sebi = notional * OPTION_COST_RATES.sebiPct;
-  const subtotal = brokerage + stt + exchangeTxn + stamp + sebi;
-  const gst = subtotal * OPTION_COST_RATES.gstPct;
+  // GST applies to the taxable broker/exchange/regulatory services ONLY
+  // (brokerage + exchange txn + SEBI). STT and stamp duty are statutory levies
+  // and sit OUTSIDE the GSTable base. Same basis as the FYERS desk.
+  const gst = (brokerage + exchangeTxn + sebi) * OPTION_COST_RATES.gstPct;
   const slippage = notional * (slippagePct / 10000);
-  const total = subtotal + gst + slippage;
+  const total = brokerage + stt + exchangeTxn + gst + sebi + stamp + slippage;
   return { notional, brokerage, stt, exchangeTxn, gst, sebi, stamp, slippage, total };
 }
 
@@ -559,7 +563,8 @@ export class UpstoxLivePaperService {
       openPositionCount: (portfolio.openPositionCount || 0) + 1,
     });
 
-    // Record P&L event for open.
+    // Single economic accounting path for OPEN: charge the entry-leg cost ONCE.
+    // The ledger event below is record-only (recordPnlEvent never mutates equity).
     const newNetPnl = Number(portfolio.netPnl) - costBreakdown.total;
     await this.portfolios.update(portfolio.id, { netPnl: newNetPnl });
     await this.recordPnlEvent(portfolio.id, savedTrade.id, -costBreakdown.total, 'TRADE_OPEN',
@@ -612,7 +617,11 @@ export class UpstoxLivePaperService {
     const exitCostBreakdown = calculateOptionCost(exitPrice, qty, trade.side === 'BUY' ? 'SELL' : 'BUY', slippagePct);
     const totalCost = Number(trade.cost) + exitCostBreakdown.total;
 
+    // Full round-trip net: this is the trade record AND the source the week roll
+    // sums. The portfolio only books the CLOSE-leg movement, because the entry
+    // leg was already charged at OPEN — charging it here again would double-count.
     const netPnl = grossPnl - totalCost;
+    const closeNetPnl = grossPnl - exitCostBreakdown.total;
 
     trade.exitPrice = exitPrice;
     trade.grossPnl = grossPnl;
@@ -648,7 +657,8 @@ export class UpstoxLivePaperService {
 
     // Update portfolio.
     const portfolio = trade.portfolio;
-    const newNetPnl = Number(portfolio.netPnl) + netPnl;
+    // Single economic accounting path for CLOSE (the only equity mutation here).
+    const newNetPnl = Number(portfolio.netPnl) + closeNetPnl;
     const deployedRelease = Number(portfolio.deployed) - (entry * qty);
     await this.portfolios.update(portfolio.id, {
       deployed: Math.max(0, deployedRelease),
@@ -657,7 +667,9 @@ export class UpstoxLivePaperService {
       openPositionCount: Math.max(0, (portfolio.openPositionCount || 0) - 1),
     });
 
-    // Record P&L events.
+    // Record P&L events. These are INFORMATIONAL component records for the audit
+    // trail (nothing sums their deltas); the equity movement already happened once
+    // above, and recordPnlEvent never mutates portfolio.netPnl.
     await this.recordPnlEvent(portfolio.id, trade.id, grossPnl, 'TRADE_CLOSE', `CLOSE ${trade.side} ${trade.instrument} @ ₹${exitPrice.toFixed(2)} · gross ₹${grossPnl.toFixed(2)} · net ₹${netPnl.toFixed(2)}`);
     await this.recordPnlEvent(portfolio.id, trade.id, netPnl, 'TRADE_CLOSE_NET', `Net P&L ₹${netPnl.toFixed(2)} (gross ₹${grossPnl.toFixed(2)}, cost ₹${totalCost.toFixed(2)})`);
     await this.recordPnlEvent(portfolio.id, trade.id, -totalCost, 'TRADE_COST', `Total cost ₹${totalCost.toFixed(2)}`);
@@ -768,14 +780,20 @@ export class UpstoxLivePaperService {
   ): Promise<void> {
     const portfolio = await this.portfolios.findOne({ where: { id: portfolioId } });
     if (!portfolio) return;
-    const newNetPnl = Math.max(-Number(portfolio.capital) * 2, Number(portfolio.netPnl) + pnlDelta);
-    await this.portfolios.update(portfolio.id, { netPnl: newNetPnl });
+    // LEDGER-ONLY. This is the audit trail, never an economic actor: it must NOT
+    // move portfolio.netPnl. Equity moves in exactly ONE place per event —
+    // openTrade() charges the entry-leg cost, closeTrade() adds gross less the
+    // exit-leg cost. Previously this method ALSO applied pnlDelta on top of the
+    // explicit update, so the entry leg was charged twice and the close three
+    // times. runningNetPnl below is a read-only snapshot taken after that single
+    // authoritative update, so the ledger still reflects the true equity.
+    const runningNetPnl = Number(portfolio.netPnl);
     const ev = this.pnlEvents.create({
       portfolioId,
       tradeId,
       eventType,
       pnlDelta,
-      runningNetPnl: newNetPnl,
+      runningNetPnl,
       description: description ?? eventType,
       context: context ? JSON.stringify(context) : null,
       dataSource: 'UPSTOX',
