@@ -4,7 +4,7 @@
     "The guard only accepts --allow / GATE_CLOSE_ALLOW for a single invocation; a push runs it from the",
     "pre-push hook, so an exemption that must hold for every future push has to be committed here.",
     "NARROW BY CONSTRUCTION: exact SHAs only (no paths/globs/ranges), and every entry needs a non-empty",
-    "reason + workstream + authority or it is IGNORED. It only ADDS to the allow set — every other",
+    "reason + workstream + authority or it is IGNORED. It only ADDS to the allow set \u2014 every other",
     "unlisted commit still classifies as DRIFT.",
     "FORBIDDEN USE: never add an entry to silence real drift in a workstream that project_checklist_items",
     "is supposed to track. Sync that row instead. Exemptions are for commits that legitimately belong to",
@@ -80,16 +80,16 @@
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
       "recorded": "2026-09-12T11:50+05:30 (session running the read-only Redis hot-path analysis; commit authored by the parallel JA session)",
-      "evidence": "git show --name-only e0fcb92 lists docs/TODO.md, src/job-application-roadmap/job-application-roadmap.service.ts, src/job-application/qualification.service.ts — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "evidence": "git show --name-only e0fcb92 lists docs/TODO.md, src/job-application-roadmap/job-application-roadmap.service.ts, src/job-application/qualification.service.ts \u2014 no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once e0fcb92 leaves the guard commit window (default: last 15 code commits)."
     },
     "9be09367ab7162579d66dfbd73349c5b3ab95606": {
       "short": "9be0936",
-      "reason": "Same separate Job Application workstream (JA-012): a deterministic, replayable JD intent extraction service in src/job-application/jd-intent.service.ts + jd-intent-model.ts, with a 27-test qualification suite (scripts/ja-012-jd-intent.test.js + ja-012-evidence-tagging.test.js). Extracts role title, seniority, must-have/preferred skills, responsibilities, experience (with range parsing), location/remote rules, employment type, compensation (with currency), work authorization, notice/start requirements, tech domain, channel, employer and freshness — each tagged explicit (matched in source text) vs inferred (labelled inference), with the original JD text preserved verbatim and a sha256 fingerprint guaranteeing same-JD stability. Authored by the PARALLEL job-application session in this shared working tree; tracked in that workstream's own control plane (job_application_roadmap_items row 6), which project_checklist_items deliberately does not mirror. Touches no trading, market-data, feed, risk, execution or schema code.",
+      "reason": "Same separate Job Application workstream (JA-012): a deterministic, replayable JD intent extraction service in src/job-application/jd-intent.service.ts + jd-intent-model.ts, with a 27-test qualification suite (scripts/ja-012-jd-intent.test.js + ja-012-evidence-tagging.test.js). Extracts role title, seniority, must-have/preferred skills, responsibilities, experience (with range parsing), location/remote rules, employment type, compensation (with currency), work authorization, notice/start requirements, tech domain, channel, employer and freshness \u2014 each tagged explicit (matched in source text) vs inferred (labelled inference), with the original JD text preserved verbatim and a sha256 fingerprint guaranteeing same-JD stability. Authored by the PARALLEL job-application session in this shared working tree; tracked in that workstream's own control plane (job_application_roadmap_items row 6), which project_checklist_items deliberately does not mirror. Touches no trading, market-data, feed, risk, execution or schema code.",
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
       "recorded": "2026-09-13T00:50+05:30 (session implementing JA-012 deterministic JD intent extraction; commit authored by the parallel JA session)",
-      "evidence": "git show --name-only 9be09367ab7162579d66dfbd73349c5b3ab95606 lists src/job-application/jd-intent-model.ts, src/job-application/jd-intent.service.ts, scripts/ja-012-jd-intent.test.js, scripts/ja-012-evidence-tagging.test.js — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "evidence": "git show --name-only 9be09367ab7162579d66dfbd73349c5b3ab95606 lists src/job-application/jd-intent-model.ts, src/job-application/jd-intent.service.ts, scripts/ja-012-jd-intent.test.js, scripts/ja-012-evidence-tagging.test.js \u2014 no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once 9be09367ab7162579d66dfbd73349c5b3ab95606 leaves the guard commit window (default: last 15 code commits)."
     },
     "e5349ffc025364736ee19ea1256fe2f7ff55ea80": {
@@ -98,8 +98,17 @@
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
       "recorded": "2026-09-13T03:00+05:30 (session completing trading-roadmap GATE 7/8 rows; commit authored by the parallel JA session)",
-      "evidence": "git show --name-only e5349ff lists public/dashboard.html, scripts/ja-013-candidate-evidence.test.js, src/app.module.ts, src/job-application/candidate-evidence.service.ts — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "evidence": "git show --name-only e5349ff lists public/dashboard.html, scripts/ja-013-candidate-evidence.test.js, src/app.module.ts, src/job-application/candidate-evidence.service.ts \u2014 no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once e5349ffc025364736ee19ea1256fe2f7ff55ea80 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "ab7cc1eb5dda847823758679ae0a2eea0aa9901d": {
+      "short": "ab7cc1e",
+      "reason": "Same separate Job Application workstream (JA-013): the candidate evidence-matching implementation (src/job-application/candidate-evidence.service.ts) + its 594-line test suite (scripts/ja-013-candidate-evidence.test.js) + DI registration (src/app.module.ts) + a dashboard link (public/dashboard.html). This commit (ab7cc1e) is a follow-on fix to the JA-013 implementation: corrects the experience-evidence note wording so the test assertion passes, and records the JA-013 allow-list entry in the same commit. Authored by the PARALLEL job-application session in this shared working tree; tracked in that workstream's own control plane (job_application_roadmap_items), which project_checklist_items deliberately does not mirror. Touches no trading, market-data, feed, risk, execution or schema code.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction for the job-application workstream (keep the Job Agent workstream completely separate). Delete this entry to revoke.",
+      "recorded": "2026-09-13T11:35+05:30 (parallel JA session; commit authored by the JA session)",
+      "evidence": "git show --name-only ab7cc1e lists src/job-application/candidate-evidence.service.ts + docs/gate-close-allow.json - no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "expires_hint": "Delete once ab7cc1e leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
