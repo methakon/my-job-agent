@@ -8,6 +8,7 @@ import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
 import { FeedHealthService } from '../unified-market-data/feed-health.service';
 import { FeedArbitrationService } from '../unified-market-data/feed-arbitration.service';
 import { TickInterpreterService } from '../unified-market-data/canonical/tick-interpreter.service';
+import { payloadHash } from '../unified-market-data/canonical/canonical-tick';
 import { UnifiedMarketDataService } from '../unified-market-data/unified-market-data.service';
 import { ownedUniverses, shortUniverse } from '../unified-market-data/feed-arbitration.state';
 import { universeForInstrument } from './upstox-live-paper.config';
@@ -75,6 +76,16 @@ export interface LiveOptionTick {
   volume: number | null; openInterest: number | null; oiChange: number | null;
   impliedVolatility: number | null; underlyingPrice: number | null; ts: Date; upstoxRef: string | null;
   dataSource: string; executionMode: string;
+  /**
+   * The PROVIDER's own quote time, when it publishes one; NULL when it published
+   * none — never a copy of `ts` (that would relabel capture time as market time).
+   * Optional so existing producers stay valid.
+   */
+  providerTs?: Date | null;
+  /** The provider's own previous-OI reference behind `oiChange`. */
+  prevOi?: number | null;
+  /** sha256 of the raw provider payload — makes an exact re-serve detectable. */
+  payloadHash?: string | null;
   /**
    * TRUE producer of this price: 'UPSTOX_LIVE' when this desk's own REST poll
    * produced it, or the other feed's label (e.g. 'FYERS_LIVE') when the tick was
@@ -665,6 +676,13 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       volume: vol === null ? null : Math.max(0, Math.trunc(vol)),
       openInterest: oi === null ? null : Math.max(0, Math.trunc(oi)),
       oiChange: oi !== null && prevOi !== null ? Math.trunc(oi - prevOi) : null,
+      // FACTS, not opinions: the provider's own reference for the ΔOI above, the
+      // provider's own quote time (never a copy of `ts`), and the payload identity
+      // that makes a byte-identical re-serve detectable instead of guessed at.
+      // Each stays NULL when the provider published nothing to record.
+      prevOi: prevOi === null ? null : Math.max(0, Math.trunc(prevOi)),
+      providerTs: parseTs(md.timestamp ?? md.last_trade_time),
+      payloadHash: payloadHash(leg),
       impliedVolatility: iv ?? greeks?.iv ?? null,
       underlyingPrice: spot, ts, upstoxRef: instrumentKey || key,
       dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource, executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
@@ -751,7 +769,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
   private stopPeriodicRefresh(): void { if (this.wsTimer) { clearInterval(this.wsTimer); this.wsTimer=null; } }
 
   private async persistOptionQuote(tick: LiveOptionTick): Promise<void> {
-    const entity = this.optionQuotes.create({ contractSymbol: tick.contractSymbol, instrumentToken: tick.instrumentToken, underlying: tick.underlying, expiry: tick.expiry, strike: tick.strike, optionType: tick.optionType, ltp: tick.ltp, bid: tick.bid, ask: tick.ask, bidQty: tick.bidQty, askQty: tick.askQty, volume: tick.volume, openInterest: tick.openInterest, oiChange: tick.oiChange, impliedVolatility: tick.impliedVolatility, underlyingPrice: tick.underlyingPrice, bidDepth: tick.bidQty?Math.round(tick.bidQty):null, askDepth: tick.askQty?Math.round(tick.askQty):null, ts: tick.ts, dataSource: tick.dataSource, executionMode: tick.executionMode });
+    const entity = this.optionQuotes.create({ contractSymbol: tick.contractSymbol, instrumentToken: tick.instrumentToken, underlying: tick.underlying, expiry: tick.expiry, strike: tick.strike, optionType: tick.optionType, ltp: tick.ltp, bid: tick.bid, ask: tick.ask, bidQty: tick.bidQty, askQty: tick.askQty, volume: tick.volume, openInterest: tick.openInterest, oiChange: tick.oiChange, impliedVolatility: tick.impliedVolatility, underlyingPrice: tick.underlyingPrice, bidDepth: tick.bidQty?Math.round(tick.bidQty):null, askDepth: tick.askQty?Math.round(tick.askQty):null, ts: tick.ts, providerTs: tick.providerTs ?? null, prevOi: tick.prevOi ?? null, payloadHash: tick.payloadHash ?? null, dataSource: tick.dataSource, executionMode: tick.executionMode });
     await this.optionQuotes.save(entity);
   }
 
