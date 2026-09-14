@@ -4,6 +4,7 @@ import { Repository, Not, IsNull } from 'typeorm';
 import { JobLead as Lead } from '../leads/job-lead.entity';
 import { CandidateProfile } from '../profile/candidate-profile.entity';
 import { AstroLeadScore } from '../astro/astro-lead-scoring.service';
+import { classifySkillGap, GapSeverity } from './skills/gap-severity';
 
 // ---------------------------------------------------------------------------
 // JA-010 Central Qualification Engine
@@ -62,6 +63,14 @@ export interface EvidenceResult extends EvaluatorResult {
   requiredSkillCount: number;
   titleRelevance: number; // 0-1 shared-token ratio
   matchedTags: string[];
+  // ---- JA-015: skill-gap severity (consumed by decide) --------------------
+  gapSeverity?: import('./skills/gap-severity').GapSeverity;
+  gapReasons?: string[];
+  gapMissingMustHave?: string[];
+  gapMissingPreferred?: string[];
+  gapCovered?: string[];
+  gapMitigatedMustHaves?: Array<{ skill: string; transferable: string[]; related: string[] }>;
+  gapMitigatedPreferred?: Array<{ skill: string; transferable: string[]; related: string[] }>;
 }
 
 export interface JobQualityResult extends EvaluatorResult {
@@ -711,6 +720,7 @@ export class QualificationService {
     const reasons: string[] = [];
     const profileSkills = splitComma(profile.skills);
     const requiredSkills: string[] = [];
+    const requirements: Array<{ name: string; kind: 'must-have' | 'preferred' | 'nice-to-have' }> = [];
 
     // Pull required skills from lead description via deterministic extraction
     // (keyword-based, not AI). We keep it simple: known tech tags present in
@@ -724,8 +734,44 @@ export class QualificationService {
     ].map(s => s.trim().toLowerCase()).filter(Boolean);
 
     for (const tech of KNOWN_TECH) {
-      if (desc.includes(tech)) requiredSkills.push(tech);
+      if (desc.includes(tech)) {
+        requiredSkills.push(tech);
+        requirements.push({ name: tech, kind: 'must-have' });
+      }
     }
+
+    // ---- JA-015: compute skill-gap severity --------------------------------
+    // Build the classifier input from data already available in this evaluator.
+    // The classifier is standalone, pure, deterministic — no side effects.
+    let gapSeverity: GapSeverity | undefined;
+    let gapReasons: string[] | undefined;
+    let gapMissingMustHave: string[] | undefined;
+    let gapMissingPreferred: string[] | undefined;
+    let gapCovered: string[] | undefined;
+    let gapMitigatedMustHaves: Array<{ skill: string; transferable: string[]; related: string[] }> | undefined;
+    let gapMitigatedPreferred: Array<{ skill: string; transferable: string[]; related: string[] }> | undefined;
+    try {
+      const profileSkillSet = new Set(profileSkills.map(s => s.toLowerCase().trim()).filter(Boolean));
+      const profileSeniority = this.extractSeniority(profile.headline ?? '', profile.experienceYears);
+      const leadSeniority = this.extractSeniority((lead.title ?? '') + ' ' + (lead.description ?? ''), profile.experienceYears);
+      const gapResult = classifySkillGap({
+        profileSkills: profileSkillSet,
+        requirements,
+        profileSeniority,
+        leadSeniority,
+      });
+      gapSeverity = gapResult.severity;
+      gapReasons = gapResult.reasons;
+      gapMissingMustHave = gapResult.missingMustHave;
+      gapMissingPreferred = gapResult.missingPreferred;
+      gapCovered = gapResult.covered;
+      gapMitigatedMustHaves = gapResult.mitigatedMustHaves;
+      gapMitigatedPreferred = gapResult.mitigatedPreferred;
+    } catch (e) {
+      // Classifier unavailable — degrade gracefully, do not break qualification
+      reasons.push(`gap-severity classification unavailable: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    // -------------------------------------------------------------------------
 
     const { matched, missing } = skillOverlap(profileSkills, requiredSkills);
     const skillMatches = matched.length;
@@ -753,6 +799,15 @@ export class QualificationService {
       requiredSkillCount,
       titleRelevance,
       matchedTags,
+      // ---- JA-015: expose gap severity to callers / decide() --------------
+      gapSeverity,
+      gapReasons,
+      gapMissingMustHave,
+      gapMissingPreferred,
+      gapCovered,
+      gapMitigatedMustHaves,
+      gapMitigatedPreferred,
+      // ---------------------------------------------------------------------
     };
   }
 
@@ -876,7 +931,45 @@ export class QualificationService {
   ): { decision: QualificationDecision; requiredAction: RequiredAction; reasons: string[] } {
     const reasons: string[] = [];
 
-    // Hard gates: eligibility + channel readiness
+    // ---- JA-015: skill-gap severity consumed by decide() --------------------
+    // A BLOCKING gap (unmitigated must-have) is a hard rejection even if
+    // eligibility passed — the candidate cannot meet mandatory requirements.
+    // A MAJOR gap downgrades the qualification to NEAR_MISS / CONDITIONAL
+    // depending on composite score, with the gap reasons surfaced.
+    if (ev.evidence.gapSeverity === 'BLOCKING') {
+      reasons.push(`REJECT: skill-gap severity BLOCKING — ${ev.evidence.gapReasons?.join('; ') ?? 'unmitigated must-have gap'}`);
+      return {
+        decision: 'REJECT',
+        requiredAction: 'do_not_apply',
+        reasons,
+      };
+    }
+    // -------------------------------------------------------------------------
+    // ---- JA-015: MAJOR gap downgrades QUALIFIED → NEAR_MISS / CONDITIONAL --
+    // A MAJOR gap means the candidate has significant skill deficits —
+    // downgrade the decision and surface the gap reasons.
+    if (ev.evidence.gapSeverity === 'MAJOR') {
+      const mh = ev.evidence.gapMissingMustHave?.length ?? 0;
+      const pref = ev.evidence.gapMissingPreferred?.length ?? 0;
+      if (ev.evidence.gapReasons) reasons.push(...ev.evidence.gapReasons);
+      if (composite >= 80) {
+        // Downgrade from QUALIFIED to CONDITIONAL
+        return {
+          decision: 'CONDITIONAL',
+          requiredAction: 'partial',
+          reasons: [...reasons, `CONDITIONAL: skill-gap severity MAJOR (${mh} must-have, ${pref} preferred gap(s)) — verify before applying`],
+        };
+      }
+      return {
+        decision: 'NEAR_MISS',
+        requiredAction: 'revisit',
+        reasons: [...reasons, `NEAR_MISS: skill-gap severity MAJOR (${mh} must-have, ${pref} preferred gap(s))`],
+      };
+    }
+    if (ev.evidence.gapSeverity === 'MODERATE' && ev.evidence.gapReasons) {
+      reasons.push(...ev.evidence.gapReasons);
+    }
+    // -------------------------------------------------------------------------
     if (!ev.eligibility.passed) {
       reasons.push('FAILED: eligibility gate (location/experience)');
       return {
