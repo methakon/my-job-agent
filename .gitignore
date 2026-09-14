@@ -33,6 +33,7 @@ temp/
 .env.local
 .env.*.local
 .env.bak*
+.env.backup
 !.env.example
 
 # Agent PID files — tracked (not junk); kept for agent lifecycle reference
