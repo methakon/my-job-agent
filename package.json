@@ -56,6 +56,8 @@
     "verify:micro-imbalance": "node scripts/micro-imbalance-replay.js",
     "test:spread-shock": "npm run build && node scripts/spread-shock.test.js",
     "verify:spread-shock": "node scripts/spread-shock-replay.js",
+    "test:trade-intensity": "npm run build && node scripts/trade-intensity.test.js",
+    "verify:trade-intensity": "node scripts/trade-intensity-replay.js",
     "test:fyers-depth-mapping": "npm run build && node scripts/fyers-depth-mapping.test.js",
     "test:iv-rv": "npm run build && node scripts/iv-rv.test.js",
     "verify:iv-rv": "node scripts/iv-rv-replay.js",
