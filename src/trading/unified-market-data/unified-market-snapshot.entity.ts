@@ -26,8 +26,26 @@ export class UnifiedMarketSnapshot {
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   ltp: number | null;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  volume: number;
+  /** NULL means the source did not publish a volume — never coerced to 0. */
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  volume: number | null;
+
+  /**
+   * Index/underlying L1 book. The snapshot table had no place to keep the
+   * bid/ask sizes the providers already deliver, so they were dropped on write.
+   * Nullable and additive — no consumer reads them yet.
+   */
+  @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
+  bid: number | null;
+
+  @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
+  ask: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  bidQty: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  askQty: number | null;
 
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   open: number | null;
@@ -40,6 +58,10 @@ export class UnifiedMarketSnapshot {
 
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   close: number | null;
+
+  /** Optional market-depth snapshot (JSON) — same block shape as UnifiedOptionQuote. */
+  @Column({ type: 'json', nullable: true })
+  depth: unknown;
 
   /** Source identity: FYERS_LIVE | UPSTOX_LIVE | … */
   @Column({ type: 'varchar', length: 24 })

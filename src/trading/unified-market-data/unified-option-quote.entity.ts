@@ -60,11 +60,16 @@ export class UnifiedOptionQuote {
   @Column({ type: 'int', nullable: true })
   askQty: number | null;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  volume: number;
+  /**
+   * NULL means the source did NOT publish a volume. It is never coerced to 0:
+   * a manufactured 0 cannot be told apart from a genuine one afterwards.
+   */
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  volume: number | null;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  oi: number;
+  /** NULL means the source did not publish open interest — never coerced to 0. */
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  oi: number | null;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
   previousOi: number | null;

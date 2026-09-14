@@ -28,6 +28,16 @@ export class PreOpenObservation {
   @Column({ type: 'varchar', length: 96 })
   instrumentKey: string;
 
+  /**
+   * The SAME instrument in the canonical identity space
+   * (canonicalInstrumentKey(): 'BSE_INDEX|SENSEX' -> 'BSE:SENSEX'), so a
+   * canonical consumer joins pre-open to the common store on ONE key instead of
+   * a second spelling of the same instrument. NULL when the key cannot be
+   * resolved — never guessed.
+   */
+  @Column({ type: 'varchar', length: 96, nullable: true })
+  canonicalKey: string | null;
+
   @Column({ type: 'varchar', length: 64, nullable: true })
   symbol: string | null;
 

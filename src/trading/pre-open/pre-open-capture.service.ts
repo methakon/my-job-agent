@@ -25,6 +25,7 @@ import {
   sessionPhaseAt,
 } from './pre-open-session';
 import { PRE_OPEN_QUOTE_SOURCE, PreOpenQuoteSource } from './pre-open-source.interface';
+import { canonicalInstrumentKey } from '../unified-market-data/canonical/canonical-tick';
 
 /**
  * GATE 2 slice 1 — pre-open / auction capture into point-in-time storage.
@@ -243,6 +244,7 @@ export class PreOpenCaptureService implements OnModuleInit, OnModuleDestroy {
 
     const row = new PreOpenObservation();
     row.instrumentKey = instrumentKey;
+    row.canonicalKey = canonicalInstrumentKey(instrumentKey, values.exchange);
     row.symbol = values.symbol ?? null;
     row.underlying = values.underlying ?? null;
     row.exchange = values.exchange ?? null;

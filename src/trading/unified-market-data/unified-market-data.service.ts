@@ -54,6 +54,21 @@ const finite = (value: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * Absence-preserving numeric coercion: an explicit null / undefined / blank
+ * string means the provider published NO value and stays null.
+ *
+ * This is deliberately separate from finite(), which is Number()-based and so
+ * maps null and '' to 0 (Number(null) === 0). Using finite() on an
+ * absence-sensitive field manufactures a zero that is indistinguishable from a
+ * real one. Applied to volume/OI (D4) and the index/underlying book fields (D5).
+ */
+const absentOrFinite = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return finite(value);
+};
+
 const tsOf = (value: unknown): Date | null => {
   if (value === null || value === undefined || value === '') return null;
   const date = value instanceof Date ? value : new Date(String(value));
@@ -213,8 +228,8 @@ export class UnifiedMarketDataService {
       ask,
       bidQty: finite(input.bidQty),
       askQty: finite(input.askQty),
-      volume: finite(input.volume) ?? 0,
-      oi: finite(input.oi) ?? 0,
+      volume: absentOrFinite(input.volume),
+      oi: absentOrFinite(input.oi),
       previousOi: finite(input.previousOi),
       changeOi: finite(input.changeOi),
       iv: finite(input.iv),
@@ -272,7 +287,12 @@ export class UnifiedMarketDataService {
       underlying: String(input.underlying ?? '').trim() || null,
       exchange: String(input.exchange ?? '').trim() || null,
       ltp,
-      volume: finite(input.volume) ?? 0,
+      volume: absentOrFinite(input.volume),
+      bid: absentOrFinite(input.bid),
+      ask: absentOrFinite(input.ask),
+      bidQty: absentOrFinite(input.bidQty),
+      askQty: absentOrFinite(input.askQty),
+      depth: input.depth ?? null,
       open: finite(input.open),
       high: finite(input.high),
       low: finite(input.low),
