@@ -75,6 +75,8 @@
     "verify:gap-dataset": "node scripts/gap-dataset-replay.js",
     "test:gap-labels": "npm run build && node scripts/gap-labels.test.js",
     "verify:gap-labels": "node scripts/gap-labels-replay.js",
+    "test:feature-gapatr": "npm run build && node scripts/feature-engine-gapatr.test.js",
+    "verify:feature-gapatr": "node scripts/feature-engine-gapatr-replay.js",
     "test:sandbox-ingestion": "npm run build && node scripts/upstox-sandbox-ingestion.test.js",
     "test:capital-continuity": "npm run build && node scripts/upstox-capital-continuity.test.js",
     "test:standby-credentials": "npm run build && node scripts/upstox-standby-credentials.test.js",
