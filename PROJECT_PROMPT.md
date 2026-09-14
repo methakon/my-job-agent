@@ -554,6 +554,50 @@ push `origin/dev` — never skip even on interrupt.
 - **Untouched**: rows 877/878, 20, 22, 23–26, 42, 427, 438, 876; the Job Agent workstream and its
   control plane were not read or written.
 
+## Progress (2026-09-14 10:50) — row 57 DONE (trade intensity / activity regime, GATE 5 #8)
+
+- **Row 57 → done, commit `2cbb203`** (control plane synced + render-verified; pushed). doneWhen: "A report
+  can reproduce the metric from archived data and shows the sample size/coverage used."
+- **The earlier `docs/GATE5_MICROSTRUCTURE_SCOPE.md` classification of row 57 as DATA-BLOCKED was wrong as a
+  blocker, and is corrected there.** Its reason — "Upstox volume is cumulative, not per-interval" — is true,
+  but a **cumulative series IS differencable**, so trade intensity is measurable without a trade tape. What
+  the note correctly implied is that the *snapshot* `volume` cannot be treated as a per-interval print:
+  the metric is therefore defined as a **snapshot-derived average**, stated explicitly in the module SPEC.
+- **Feature** (`src/trading/microstructure/trade-intensity.ts`, `tradeint-v1`, pure: no clock, no I/O, no DB,
+  no AI, no randomness, no production importer). Pinned:
+  - **Window = one instrument session** `(instrumentKey, sessionDate)`; consecutive snapshots ordered by
+    `(ts, sequenceNumber)`. The observed first→last window is **reported per session** — market hours are
+    never assumed (the archive's windows are mostly outside them, so assuming would be a fabrication).
+  - **Metric = `intensity = deltaVolume × 60 / dtSeconds`** (contracts per minute) over the snapshot gap,
+    where `deltaVolume` is the archived cumulative `volume` difference.
+  - **Regime** per interval against the **median of that session's PRIOR intervals only** (no look-ahead):
+    QUIET `< 0.5×median`, NORMAL, ACTIVE `> 2×median`, requiring ≥ 5 priors (`minHistory`).
+- **Refusals are null intensity AND null regime — never a fabricated 0**, because "the source recorded no
+  progression" is a different fact from "no trading happened": `NO_VOLUME`, `NO_TIMESTAMP`,
+  **`NO_VOLUME_PROGRESS` (delta = 0)**, `VOLUME_RESET` (delta < 0), `INSUFFICIENT_HISTORY`, `NO_SESSION_DATE`,
+  `SOURCE_MIXED` (one session carrying two sources is not one continuous series).
+- **No look-ahead, proven**: mutating ONLY a future snapshot leaves every earlier intensity, regime and
+  baseline unchanged; reversed/shuffled input yields an identical digest AND interval order.
+- **Evidence**: `test:trade-intensity` **71/71** (sections A–G: contract; exact metric and prior-only median
+  baseline; every refusal reachable with null values; disabled path computes nothing; determinism/look-ahead;
+  sessions never share a baseline + provenance/window echoed; purity + research-only guards).
+  `verify:trade-intensity` over the archive: **401,399 snapshots, 441 sessions, 107,053 decided, 293,905
+  refused**, digest `50e4654f102b4d3c`.
+- **Honest, unflattering coverage finding (reported, not hidden):** the metric exists **only** for
+  `source='UPSTOX'` (107,053 positive deltas). `UPSTOX_LIVE` (40,341 snapshots) has **zero** volume
+  progression — 39,084 zero-deltas, i.e. every interval is `NO_VOLUME_PROGRESS` — so that source is refused
+  rather than reported as zero activity. **419 of 441 observed windows lie outside 09:15–15:30 IST**, and are
+  reported as observed and **explicitly not claimed as market microstructure**. No synthetic, repaired or
+  interpolated value was produced anywhere.
+- **Two test failures during development were a real defect and a wrong expectation, both recorded**: the
+  formula `(Δvol/Δt)×60` produced `1000.0000000000001` for a 1,000-per-minute interval (float noise that
+  would pollute the digest) — fixed to `Δvol×60/Δt`, which is exact when Δt divides 60; and one fixture
+  expectation of mine was simply wrong (`[200,'NORMAL']` where the delta was 100).
+- **Untouched**: rows 45/46/55/56 stay blocked by their existing blockers; 877/878 stay `in_progress`
+  pending genuine market-hours proof; the trading-calendar capability and the expiry-timezone defects
+  identified on 2026-09-14 were **NOT** addressed here; no new roadmap row created; the Job Agent
+  workstream and its control plane were not read or written.
+
 ## Progress (2026-09-13 00:26) — row 43 DONE (early gap acceptance/rejection state, GATE 4 #6)
 
 - **Row 43 → done, commit `0fe88e2`** (control plane synced + render-verified; pushed). doneWhen: "The
