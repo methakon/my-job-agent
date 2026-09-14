@@ -32,11 +32,12 @@ export class FnfOptionQuote {
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   ask: number;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  volume: number;
+  /** NULL when the provider published none — absence must never become a real 0. */
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  volume: number | null;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  openInterest: number;
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  openInterest: number | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 4, nullable: true })
   impliedVolatility: number;

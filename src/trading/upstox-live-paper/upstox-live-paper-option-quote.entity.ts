@@ -51,17 +51,23 @@ export class UpstoxLivePaperOptionQuote {
   @Column({ name: 'askQty', type: 'int', nullable: true })
   askQty: number | null;
 
-  /** Volume (contracts/lots traded). */
-  @Column({ type: 'bigint', default: 0 })
-  volume: number;
+  /**
+   * Volume (contracts/lots traded). NULL when the provider published none —
+   * deliberately nullable so absence is never recorded as a real 0.
+   */
+  @Column({ type: 'bigint', nullable: true })
+  volume: number | null;
 
-  /** Open interest. */
-  @Column({ type: 'bigint', default: 0 })
-  openInterest: number;
+  /** Open interest. NULL when the provider published none (never a fabricated 0). */
+  @Column({ type: 'bigint', nullable: true })
+  openInterest: number | null;
 
-  /** Change in OI since previous snapshot. */
-  @Column({ name: 'oiChange', type: 'bigint', default: 0 })
-  oiChange: number;
+  /**
+   * Change in OI. NULL when either the current or the provider's previous OI was
+   * unknown — "we do not know the change" is not the same as "nothing changed".
+   */
+  @Column({ name: 'oiChange', type: 'bigint', nullable: true })
+  oiChange: number | null;
 
   /** Implied volatility (annualized, fraction). */
   @Column({ name: 'impliedVolatility', type: 'decimal', precision: 10, scale: 6, nullable: true })

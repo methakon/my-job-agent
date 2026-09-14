@@ -70,7 +70,9 @@ interface UpstoxMarketStatusResponse {
 export interface LiveOptionTick {
   contractSymbol: string; instrumentToken: string; underlying: string; expiry: string; strike: number;
   optionType: 'CE' | 'PE'; ltp: number; bid: number | null; ask: number | null;
-  bidQty: number | null; askQty: number | null; volume: number; openInterest: number; oiChange: number;
+  bidQty: number | null; askQty: number | null;
+  /** NULL when the provider did not publish it — absence must survive capture. */
+  volume: number | null; openInterest: number | null; oiChange: number | null;
   impliedVolatility: number | null; underlyingPrice: number | null; ts: Date; upstoxRef: string | null;
   dataSource: string; executionMode: string;
   /**
@@ -552,9 +554,11 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       contractSymbol: symbol, instrumentToken: instrumentKey || String(query.instrumentToken ?? ''),
       underlying, expiry, strike, optionType, ltp,
       bid: finite(row.bid), ask: finite(row.ask), bidQty: finite(row.bidQty), askQty: finite(row.askQty),
-      volume: Math.max(0, Math.trunc(finite(row.volume) ?? 0)),
-      openInterest: Math.max(0, Math.trunc(finite(row.oi) ?? 0)),
-      oiChange: Math.trunc(finite(row.changeOi) ?? 0),
+      // Same absence rule on the common-store consume path: a field the producer
+      // did not publish stays NULL instead of becoming a fabricated 0.
+      volume: finite(row.volume) === null ? null : Math.max(0, Math.trunc(finite(row.volume) as number)),
+      openInterest: finite(row.oi) === null ? null : Math.max(0, Math.trunc(finite(row.oi) as number)),
+      oiChange: finite(row.changeOi),
       impliedVolatility: finite(row.iv),
       underlyingPrice: this.latestUnderlyingPriceByInstrument.get(underlying) ?? null,
       ts: row.receivedTimestamp ?? row.ts,
@@ -645,6 +649,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     if (ltp === null || ltp <= 0) return null; // no honest tick without a traded price
     const oi = finite(md.oi) ?? finite(md.open_interest);
     const prevOi = finite(md.prev_oi);
+    const vol = finite(md.volume);
     const iv = finite(leg?.option_greeks?.iv);
     const spot = this.latestUnderlyingPriceByInstrument.get(symbol) ?? null;
     const greeks = this.computeGreeks(ltp, strike, expiry, spot, optionType, iv);
@@ -654,9 +659,12 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       instrumentToken: instrumentKey, underlying: symbol, expiry, strike, optionType,
       ltp, bid: finite(md.bid_price), ask: finite(md.ask_price),
       bidQty: finite(md.bid_qty), askQty: finite(md.ask_qty),
-      volume: Math.max(0, Math.trunc(finite(md.volume) ?? 0)),
-      openInterest: Math.max(0, Math.trunc(oi ?? 0)),
-      oiChange: oi !== null && prevOi !== null ? Math.trunc(oi - prevOi) : 0,
+      // ABSENCE IS NOT ZERO (Stage-1 D4, extended to this capture path): a field
+      // the provider did not publish becomes NULL. `?? 0` here is what filled the
+      // research archive with fabricated zeros that no OI feature can use.
+      volume: vol === null ? null : Math.max(0, Math.trunc(vol)),
+      openInterest: oi === null ? null : Math.max(0, Math.trunc(oi)),
+      oiChange: oi !== null && prevOi !== null ? Math.trunc(oi - prevOi) : null,
       impliedVolatility: iv ?? greeks?.iv ?? null,
       underlyingPrice: spot, ts, upstoxRef: instrumentKey || key,
       dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource, executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,

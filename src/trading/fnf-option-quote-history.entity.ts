@@ -34,11 +34,17 @@ export class FnfOptionQuoteHistory {
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   ask: number;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  volume: number;
+  /**
+   * NULL when the provider published none. This table is an INSERT..SELECT copy
+   * of fnf_option_quotes, so a fabricated 0 upstream (NOT NULL DEFAULT 0) is
+   * what produced this archive's 3.9M-row all-zero OI column — relaxing only the
+   * source table would leave that unfixable.
+   */
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  volume: number | null;
 
-  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  openInterest: number;
+  @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
+  openInterest: number | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 4, nullable: true })
   impliedVolatility: number;

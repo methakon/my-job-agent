@@ -29,9 +29,9 @@ export class UpstoxLivePaperMarketSnapshot {
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   ask: number | null;
 
-  /** Volume (lots for index proxy, shares for equity). */
-  @Column({ type: 'bigint', default: 0 })
-  volume: number;
+  /** Volume (lots for index proxy, shares for equity). NULL when unpublished. */
+  @Column({ type: 'bigint', nullable: true })
+  volume: number | null;
 
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   open: number | null;
