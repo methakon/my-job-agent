@@ -173,7 +173,7 @@
       "evidence": "git show --stat f342308 on ja-015-publish lists only docs/gate-close-allow.json; allow-list: corrected SHA for cherry-picked 21326c7c57729b29ecd2eec5e5f2826b8d5699da; no trading/algo Trading Agent files touched.",
       "expires_hint": "Delete once f3423085cc5fa394cce9c751d555de4fbe24fc61 leaves the guard commit window (default: last 15 code commits)."
     },
-    "fc84590267e8ef87276f82eb98a57c57f9125c0f4": {
+    "fc84590267e8ef87276f82eb98a57c57f9125c0f": {
       "short": "fc84590",
       "reason": "Job Application roadmap - JA-015 Skill-gap severity: remove duplicate + stale-SHA JA-015 allow-list entries for the cherry-picked JA commits on ja-015-publish branch (base: origin/dev b914364). Safe non-force JA-only publish; no shared dev history rewrite. Touches docs/gate-close-allow.json only (allow-list cleanup for cherry-picked SHAs).",
       "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
