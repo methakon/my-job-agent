@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { UnifiedMarketDataService } from '../unified-market-data.service';
+import { UnifiedMarketDataService, UnifiedTickInput } from '../unified-market-data.service';
 import { UnifiedOptionQuote } from '../unified-option-quote.entity';
 import {
   CanonicalTick,
@@ -45,11 +45,21 @@ export type InterpreterMetrics = {
   rejectionsBySource: Record<string, number>;
   latency: { samples: number; p50Ms: number | null; p95Ms: number | null; maxMs: number | null };
   latencyBudgetExceeded: number;
+  /** Streaming back-pressure: messages the bounded queue could not hold (ABSENT, never fabricated). */
+  droppedUnderLoad: number;
+  ingestQueueDepth: number;
+  ingestInFlight: number;
   lastSample: { source: string; instrumentKey: string; lagMs: number | null; accepted: boolean } | null;
 };
 
 /** Deterministic token/key → symbol resolver (see MapperContext). */
 export type ResolveSymbol = NonNullable<MapperContext['resolveSymbol']>;
+
+/** Positive integer env override, falling back to the documented default. */
+const envInt = (name: string, fallback: number): number => {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : fallback;
+};
 
 export type InterpretAndPersistInput = {
   source: string;
@@ -106,6 +116,24 @@ export class TickInterpreterService {
   /** Rejection warnings are throttled: a bad burst must not flood the log. */
   private lastRejectWarnAt = 0;
 
+  /**
+   * ── Bounded ingest queue (stream back-pressure) ──────────────────────────────
+   * A fire-and-forget feed handed the interpreter one independent async chain per
+   * provider message, each awaiting a WAN write, with NOTHING bounding how many
+   * were in flight: writes piled up without limit and the shared tape fell minutes
+   * behind the market and never recovered. The queue caps concurrency AND depth,
+   * so a fast provider cannot spawn unbounded work.
+   *
+   * A message the queue cannot hold is DROPPED AND COUNTED — never silently, never
+   * repaired, never fabricated. The observation simply never enters the store, and
+   * `droppedUnderLoad` says exactly how many; absence stays absence.
+   */
+  private readonly ingestQueue: Array<{ source: string; payload: unknown; opts: IngestOptions }> = [];
+  private ingestInFlight = 0;
+  private readonly maxIngestInFlight = envInt('CANONICAL_MAX_INGEST_INFLIGHT', 12);
+  private readonly maxIngestQueue = envInt('CANONICAL_MAX_INGEST_QUEUE', 5_000);
+  private droppedUnderLoad = 0;
+
   constructor(private readonly unified: UnifiedMarketDataService) {
     this.budgets = budgetsFromEnv();
   }
@@ -158,6 +186,7 @@ export class TickInterpreterService {
   async ingestMessage(source: string, payload: unknown, opts: IngestOptions = {}): Promise<IngestOutcome> {
     const receivedAt = opts.receivedAt ?? new Date();
     const outcome: IngestOutcome = { accepted: 0, rejected: 0, persisted: 0, withheld: 0, ignored: 0, rejections: [] };
+    const publishable: CanonicalTick[] = [];
     let records: unknown[];
     try {
       records = envelopeFor(source)(payload).slice(0, this.maxRecordsPerMessage);
@@ -185,9 +214,75 @@ export class TickInterpreterService {
         outcome.withheld += 1;
         continue;
       }
-      if (await this.persist(result.tick)) outcome.persisted += 1;
+      publishable.push(result.tick);
     }
+    // ONE batched write for every tick of this message (see persistMany).
+    outcome.persisted += await this.persistMany(publishable);
     return outcome;
+  }
+
+  /**
+   * Persist every canonical tick of ONE provider message in a single batched write.
+   *
+   * The tape is a real-time stream: a per-record awaited write costs one Oracle
+   * Cloud round trip each, and a fire-and-forget feed let those writes pile up
+   * unbounded — the shared tape then fell behind the market and never caught up.
+   * Batching changes only the TRANSPORT: same validation, identity, units,
+   * absence-preserving nulls, provenance and write-behind cache.
+   */
+  async persistMany(ticks: CanonicalTick[]): Promise<number> {
+    if (!ticks.length) return 0;
+    const quoteInputs: UnifiedTickInput[] = [];
+    const snapshotInputs: UnifiedTickInput[] = [];
+    for (const tick of ticks) {
+      const input = canonicalToTickInput(tick);
+      if (tick.instrumentType === 'INDEX' || tick.instrumentType === 'EQUITY' || tick.optionType === null) snapshotInputs.push(input);
+      else quoteInputs.push(input);
+    }
+    try {
+      const [quotes, snapshots] = await Promise.all([this.unified.ingestQuotes(quoteInputs), this.unified.ingestSnapshots(snapshotInputs)]);
+      const written = quotes.filter((row) => row !== null).length + snapshots.filter((row) => row !== null).length;
+      if (written) this.persisted += written;
+      return written;
+    } catch (error) {
+      this.logger.warn(`canonical batch persist failed for ${ticks.length} tick(s): ${(error as Error).message}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Back-pressured sibling of ingestMessage for a STREAMING feed: the message joins
+   * a bounded queue drained at a capped concurrency, so a fast provider can never
+   * spawn unbounded concurrent writes. Returns false when the queue is full — the
+   * message is then dropped and counted, never silently absorbed and never faked.
+   */
+  enqueueMessage(source: string, payload: unknown, opts: IngestOptions = {}): boolean {
+    if (this.ingestQueue.length >= this.maxIngestQueue) {
+      this.droppedUnderLoad += 1;
+      if (this.droppedUnderLoad === 1 || this.droppedUnderLoad % 500 === 0) {
+        this.logger.warn(
+          `canonical ingest queue full (depth ${this.ingestQueue.length}, in flight ${this.ingestInFlight}); ` +
+            `dropped ${this.droppedUnderLoad} message(s) under load — the observation is ABSENT in the store, never fabricated`,
+        );
+      }
+      return false;
+    }
+    this.ingestQueue.push({ source, payload, opts });
+    this.drainIngestQueue();
+    return true;
+  }
+
+  private drainIngestQueue(): void {
+    while (this.ingestInFlight < this.maxIngestInFlight && this.ingestQueue.length) {
+      const job = this.ingestQueue.shift()!;
+      this.ingestInFlight += 1;
+      void this.ingestMessage(job.source, job.payload, job.opts)
+        .catch((error: unknown) => this.logger.warn(`canonical ingest failed for ${job.source}: ${(error as Error).message}`))
+        .finally(() => {
+          this.ingestInFlight -= 1;
+          this.drainIngestQueue();
+        });
+    }
   }
 
   /** Persist a canonical tick into the common normalized layer (one writer shape). */
@@ -233,6 +328,9 @@ export class TickInterpreterService {
       rejectionsBySource: Object.fromEntries(this.rejectionsBySource),
       latency: { samples: sorted.length, p50Ms: at(0.5), p95Ms: at(0.95), maxMs: sorted.at(-1) ?? null },
       latencyBudgetExceeded: this.latencyBudgetExceeded,
+      droppedUnderLoad: this.droppedUnderLoad,
+      ingestQueueDepth: this.ingestQueue.length,
+      ingestInFlight: this.ingestInFlight,
       lastSample: this.lastSample,
     };
   }

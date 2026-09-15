@@ -653,12 +653,13 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     // the deterministic interpreter, which validates it and persists what passes
     // in canonical form into the common store. A rejected tick is dropped and
     // counted — it is never passed to broker-specific logic as a fallback.
-    void this.interpreter
-      .ingestMessage('FYERS_LIVE', message, { allowPublish: (tick) => this.allowCanonicalPublish(tick) })
-      .catch((error: unknown) => {
-        this.statusValue.lastError = `canonical ingest failed: ${this.safeMessage(error)}`;
-        this.logger.warn(this.statusValue.lastError);
-      });
+    //
+    // BACK-PRESSURED: the message joins the interpreter's bounded queue, drained at
+    // a capped concurrency with ONE batched write per message. Fire-and-forget here
+    // used to spawn an unbounded async chain per message, each awaiting a WAN write,
+    // which let the shared tape fall minutes behind the market and never recover.
+    // A message the queue cannot hold is counted as dropped (ABSENT, never faked).
+    this.interpreter.enqueueMessage('FYERS_LIVE', message, { allowPublish: (tick) => this.allowCanonicalPublish(tick) });
     this.recordTicks(this.parseMessage(message), 'fyers');
   }
 

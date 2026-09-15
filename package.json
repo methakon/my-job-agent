@@ -65,6 +65,7 @@
     "test:iv-rv": "npm run build && node scripts/iv-rv.test.js",
     "verify:iv-rv": "node scripts/iv-rv-replay.js",
     "test:upstox-common-chain": "npm run build && node scripts/upstox-common-chain.test.js",
+    "test:canonical-batch-ingest": "npm run build && node scripts/canonical-batch-ingest.test.js",
     "test:iv-surface": "npm run build && node scripts/iv-surface.test.js",
     "verify:iv-surface": "node scripts/iv-surface-replay.js",
     "test:iv-skew-term": "npm run build && node scripts/iv-skew-term.test.js",

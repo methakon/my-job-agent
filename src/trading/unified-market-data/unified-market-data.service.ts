@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, MoreThanOrEqual, Repository } from 'typeorm';
 import { UnifiedOptionQuote } from './unified-option-quote.entity';
@@ -186,6 +187,73 @@ export class UnifiedMarketDataService {
 
   /** Normalized option observation (options only; index ticks go to ingestSnapshot). */
   async ingestQuote(input: UnifiedTickInput): Promise<UnifiedOptionQuote | null> {
+    const built = this.buildQuoteRow(input);
+    if (!built) return null;
+    // Repeated observation of the SAME broker tick: the cache already holds the
+    // newest shape (buildQuoteRow refreshed it) and no second row is written.
+    if (built.repeated) return built.row;
+    try {
+      return await this.quotes.save(built.row);
+    } catch (error) {
+      this.logger.warn(`unified quote persist failed for ${built.row.instrumentKey}: ${(error as Error).message}`);
+      // Cache still holds the observation for the engines even if the write
+      // hiccups — the store is a write-behind cache first, table second.
+      return built.row;
+    }
+  }
+
+  /**
+   * Every option observation of one provider message, validated and cached exactly
+   * as ingestQuote does, but written in ONE multi-row INSERT.
+   *
+   * Measured motivation: a per-record awaited write costs one Oracle Cloud round
+   * trip (~330 ms p50, ~600 ms measured per message on the live FYERS feed) and
+   * fire-and-forget callers let those writes pile up unbounded, so the shared tape
+   * fell seconds behind the market and never recovered. Batching is a TRANSPORT
+   * change only: same validation, same canonical identity, same absence-preserving
+   * nulls, same provenance, same write-behind cache; replay-safety is unchanged
+   * (the deterministic primary key still dedupes a replayed batch).
+   *
+   * If the batched write fails the rows are retried ONE BY ONE, so a single bad row
+   * can never cost the whole message and no failure is ever silent.
+   */
+  async ingestQuotes(inputs: UnifiedTickInput[]): Promise<Array<UnifiedOptionQuote | null>> {
+    const built = (inputs ?? []).map((input) => this.buildQuoteRow(input));
+    const out = built.map((b) => (b ? b.row : null));
+    const toWrite = built.filter((b): b is { row: UnifiedOptionQuote; repeated: boolean } => b !== null && !b.repeated);
+    if (!toWrite.length) return out;
+    const rows = toWrite.map((b) => (b.row.id ? b.row : Object.assign(b.row, { id: randomUUID() })));
+    if (rows.length === 1) {
+      try {
+        await this.quotes.save(rows[0]);
+      } catch (error) {
+        this.logger.warn(`unified quote persist failed for ${rows[0].instrumentKey}: ${(error as Error).message}`);
+      }
+      return out;
+    }
+    try {
+      // The `depth` column is typed `unknown`, which TypeORM's insert typings reject;
+      // the row shape itself is exactly what the entity was created with.
+      await this.quotes.insert(rows as unknown as Parameters<Repository<UnifiedOptionQuote>['insert']>[0]);
+    } catch (error) {
+      this.logger.warn(`unified batch quote persist failed for ${rows.length} row(s); retrying row-by-row: ${(error as Error).message}`);
+      for (const row of rows) {
+        try {
+          await this.quotes.save(row);
+        } catch (rowError) {
+          this.logger.warn(`unified quote persist failed for ${row.instrumentKey}: ${(rowError as Error).message}`);
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Build the canonical option row (validation, identity, cache refresh) WITHOUT
+   * writing it. `repeated` marks the same broker tick already observed, which the
+   * callers skip writing. Returns null for an input with no identity at all.
+   */
+  private buildQuoteRow(input: UnifiedTickInput): { row: UnifiedOptionQuote; repeated: boolean } | null {
     const instrumentKey = String(input.instrumentKey ?? '').trim();
     const source = String(input.source ?? '').trim();
     if (!instrumentKey || !source) return null;
@@ -248,21 +316,53 @@ export class UnifiedMarketDataService {
 
     this.bumpSource(source, ts);
     this.latestQuotes.set(instrumentKey, row);
-    // Repeated observation of the SAME broker tick: refresh the cache (done
-    // above) but do not write a second row.
-    if (this.isRepeatedIngest(source, instrumentKey, ts)) return row;
-    try {
-      return await this.quotes.save(row);
-    } catch (error) {
-      this.logger.warn(`unified quote persist failed for ${instrumentKey}: ${(error as Error).message}`);
-      // Cache still holds the observation for the engines even if the write
-      // hiccups — the store is a write-behind cache first, table second.
-      return row;
-    }
+    return { row, repeated: this.isRepeatedIngest(source, instrumentKey, ts) };
   }
 
   /** Underlying/index observation. */
   async ingestSnapshot(input: UnifiedTickInput): Promise<UnifiedMarketSnapshot | null> {
+    const built = this.buildSnapshotRow(input);
+    if (!built) return null;
+    if (built.repeated) return built.row;
+    try {
+      return await this.snapshots.save(built.row);
+    } catch (error) {
+      this.logger.warn(`unified snapshot persist failed for ${built.row.symbol}: ${(error as Error).message}`);
+      return built.row;
+    }
+  }
+
+  /** Batch sibling of ingestSnapshot — one multi-row INSERT (see ingestQuotes). */
+  async ingestSnapshots(inputs: UnifiedTickInput[]): Promise<Array<UnifiedMarketSnapshot | null>> {
+    const built = (inputs ?? []).map((input) => this.buildSnapshotRow(input));
+    const out = built.map((b) => (b ? b.row : null));
+    const toWrite = built.filter((b): b is { row: UnifiedMarketSnapshot; repeated: boolean } => b !== null && !b.repeated);
+    if (!toWrite.length) return out;
+    const rows = toWrite.map((b) => (b.row.id ? b.row : Object.assign(b.row, { id: randomUUID() })));
+    if (rows.length === 1) {
+      try {
+        await this.snapshots.save(rows[0]);
+      } catch (error) {
+        this.logger.warn(`unified snapshot persist failed for ${rows[0].symbol}: ${(error as Error).message}`);
+      }
+      return out;
+    }
+    try {
+      await this.snapshots.insert(rows as unknown as Parameters<Repository<UnifiedMarketSnapshot>['insert']>[0]);
+    } catch (error) {
+      this.logger.warn(`unified batch snapshot persist failed for ${rows.length} row(s); retrying row-by-row: ${(error as Error).message}`);
+      for (const row of rows) {
+        try {
+          await this.snapshots.save(row);
+        } catch (rowError) {
+          this.logger.warn(`unified snapshot persist failed for ${row.symbol}: ${(rowError as Error).message}`);
+        }
+      }
+    }
+    return out;
+  }
+
+  private buildSnapshotRow(input: UnifiedTickInput): { row: UnifiedMarketSnapshot; repeated: boolean } | null {
     const symbol = String(input.instrumentKey ?? '').trim();
     const source = String(input.source ?? '').trim();
     if (!symbol || !source) return null;
@@ -307,13 +407,7 @@ export class UnifiedMarketDataService {
 
     this.bumpSource(source, ts);
     this.latestSnapshots.set(symbol, row);
-    if (this.isRepeatedIngest(source, symbol, ts)) return row;
-    try {
-      return await this.snapshots.save(row);
-    } catch (error) {
-      this.logger.warn(`unified snapshot persist failed for ${symbol}: ${(error as Error).message}`);
-      return row;
-    }
+    return { row, repeated: this.isRepeatedIngest(source, symbol, ts) };
   }
 
   /** Latest cached option observation for an instrument key (engines read this). */
