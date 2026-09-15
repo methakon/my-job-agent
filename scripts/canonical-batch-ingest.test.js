@@ -165,7 +165,7 @@ class FakeUnified {
     assert.strictEqual(rows.length, 3, 'every input maps to a row');
     assert.ok(rows.every((r) => r && r.id), 'each cached row carries its replay-safe id');
     assert.strictEqual(quotes.inserts.length, 0, 'the tape path performs NO I/O');
-    assert.deepStrictEqual(svc.writeBehindStats(), { pendingQuotes: 3, pendingSnapshots: 0, flushedRows: 0, droppedRows: 0, flushTimeouts: 0, flushing: false });
+    assert.deepStrictEqual(svc.writeBehindStats(), { pendingQuotes: 3, pendingSnapshots: 0, flushedRows: 0, droppedRows: 0, flushTimeouts: 0, poolReleases: 0, flushing: false });
     ok('the message path buffers rows without touching the database');
 
     await svc.flushPending();
@@ -264,6 +264,52 @@ class FakeUnified {
     assert.strictEqual(svc.writeBehindStats().pendingQuotes, 0, 'the buffer fully drains');
     ok('an INSERT is capped and the remainder drains over subsequent ticks');
     delete process.env.UNIFIED_MAX_ROWS_PER_FLUSH;
+  }
+
+  // ── [H] repeated timeouts force-release the wedged pool sockets ────────────
+  console.log('\n[H] a wedged pool is force-released');
+  {
+    process.env.UNIFIED_FLUSH_TIMEOUT_MS = '80';
+    process.env.UNIFIED_RECYCLE_AFTER_TIMEOUTS = '2';
+    const { UnifiedMarketDataService } = require(path.join(REPO, 'dist', 'trading', 'unified-market-data', 'unified-market-data.service'));
+    // Two sockets that mysql2-style stay "busy" forever: destroying them is the only
+    // way to free the pool slots the abandoned queries were holding.
+    const sockets = [{ destroyed: 0, destroy() { this.destroyed += 1; } }, { destroyed: 0, destroy() { this.destroyed += 1; } }];
+    class WedgedPoolRepo {
+      constructor() {
+        this.manager = { connection: { driver: { pool: { _allConnections: new Set(sockets) } } } };
+        this.inserts = 0;
+      }
+      create(o) { return { ...o }; }
+      insert() { this.inserts += 1; return new Promise(() => {}); }
+      async save(row) { return row; }
+    }
+    const ts = new Date().toISOString();
+    const tick = (s) => ({
+      instrumentKey: `NSE:NIFTY26SEP${s}PE`, underlying: 'NIFTY', exchange: 'NSE', segment: 'FO',
+      instrumentType: 'OPT', expiry: '2026-09-26', strike: s, optionType: 'PE', ltp: 1, bid: 1, ask: 2,
+      volume: null, oi: 1, source: 'FYERS_LIVE', sourceTimestamp: ts,
+    });
+    const quotes = new WedgedPoolRepo();
+    const svc = new UnifiedMarketDataService(quotes, new WedgedPoolRepo());
+
+    await svc.ingestQuotes([tick(23000)]);
+    await svc.flushPending();                       // timeout #1
+    assert.strictEqual(svc.writeBehindStats().poolReleases, 0, 'one timeout does not release sockets yet');
+    assert.strictEqual(sockets[0].destroyed, 0, 'no socket touched after a single timeout');
+    ok('a single timeout is tolerated (no disruptive release)');
+
+    await svc.ingestQuotes([tick(23100)]);
+    await svc.flushPending();                       // timeout #2 -> release
+    const st = svc.writeBehindStats();
+    assert.strictEqual(st.flushTimeouts, 2, 'both timeouts counted');
+    assert.strictEqual(st.poolReleases, 1, 'the pool release fired on the configured threshold');
+    assert.strictEqual(sockets[0].destroyed, 1, 'the wedged socket was destroyed (that is what frees the slot)');
+    assert.strictEqual(sockets[1].destroyed, 1, 'every wedged socket was destroyed');
+    ok('repeated timeouts force-release the wedged sockets so the pool frees');
+
+    delete process.env.UNIFIED_FLUSH_TIMEOUT_MS;
+    delete process.env.UNIFIED_RECYCLE_AFTER_TIMEOUTS;
   }
 
   console.log(`\n${pass} checks passed`);

@@ -183,6 +183,10 @@ export class UnifiedMarketDataService {
    */
   private readonly flushTimeoutMs = envInt('UNIFIED_FLUSH_TIMEOUT_MS', 20_000);
   private flushTimeouts = 0;
+  /** Consecutive flush timeouts before the pooled sockets are force-released. */
+  private readonly recycleAfterTimeouts = envInt('UNIFIED_RECYCLE_AFTER_TIMEOUTS', 3);
+  private consecutiveFlushTimeouts = 0;
+  private poolReleases = 0;
   /**
    * Idempotency window for repeated observations (source|instrument|source ts).
    * A producer that sends the same broker tick twice (doubled SDK subscription
@@ -333,13 +337,14 @@ export class UnifiedMarketDataService {
   }
 
   /** Write-behind diagnostics (observability only; never gates, never writes). */
-  writeBehindStats(): { pendingQuotes: number; pendingSnapshots: number; flushedRows: number; droppedRows: number; flushTimeouts: number; flushing: boolean } {
+  writeBehindStats(): { pendingQuotes: number; pendingSnapshots: number; flushedRows: number; droppedRows: number; flushTimeouts: number; poolReleases: number; flushing: boolean } {
     return {
       pendingQuotes: this.pendingQuoteRows.size,
       pendingSnapshots: this.pendingSnapshotRows.size,
       flushedRows: this.flushedRows,
       droppedRows: this.droppedRows,
       flushTimeouts: this.flushTimeouts,
+      poolReleases: this.poolReleases,
       flushing: this.flushingQuotes || this.flushingSnapshots,
     };
   }
@@ -370,6 +375,7 @@ export class UnifiedMarketDataService {
         () => this.noteFlushTimeout('quote'),
       );
       this.flushedRows += rows.length;
+      this.noteFlushSuccess();
       return rows.length;
     } catch (error) {
       this.logger.warn(`unified write-behind quote flush failed for ${rows.length} row(s); re-queueing: ${(error as Error).message}`);
@@ -393,6 +399,7 @@ export class UnifiedMarketDataService {
         () => this.noteFlushTimeout('snapshot'),
       );
       this.flushedRows += rows.length;
+      this.noteFlushSuccess();
       return rows.length;
     } catch (error) {
       this.logger.warn(`unified write-behind snapshot flush failed for ${rows.length} row(s); re-queueing: ${(error as Error).message}`);
@@ -407,12 +414,57 @@ export class UnifiedMarketDataService {
   /** A flush that exceeded its ceiling: ABSENT for now, counted, and loudly surfaced. */
   private noteFlushTimeout(kind: string): void {
     this.flushTimeouts += 1;
+    this.consecutiveFlushTimeouts += 1;
     if (this.flushTimeouts === 1 || this.flushTimeouts % 5 === 0) {
       this.logger.warn(
         `unified write-behind ${kind} flush exceeded ${this.flushTimeoutMs}ms (total ${this.flushTimeouts}) — ` +
           'the rows stay buffered and the next tick retries; check the database path (pool/tunnel)',
       );
     }
+    if (this.consecutiveFlushTimeouts >= this.recycleAfterTimeouts) this.releasePoolConnections();
+  }
+
+  /** A completed flush proves the database path is healthy again. */
+  private noteFlushSuccess(): void {
+    this.consecutiveFlushTimeouts = 0;
+  }
+
+  /**
+   * Force-release every pooled socket after repeated flush timeouts.
+   *
+   * Bounding the WAIT is not enough on its own: when a query is abandoned, mysql2
+   * still counts that connection as in use until it answers, so each wedged socket
+   * permanently consumes a pool slot. Enough of them and the pool is exhausted —
+   * every later flush merely queues and times out, the tape stops, and only a
+   * process restart ever recovered it (observed live: writes died at 11:44 and
+   * again at 11:58 while the server showed those connections merely `Sleep`, i.e.
+   * the queries had never even reached MySQL).
+   *
+   * Destroying the sockets makes the abandoned queries fail, which is what frees
+   * the slots; mysql2 then replaces them on the next flush. This touches only the
+   * write-behind path's own connection pool.
+   */
+  private releasePoolConnections(): void {
+    const connection = this.quotes?.manager?.connection as unknown as { driver?: { pool?: { _allConnections?: unknown } } } | undefined;
+    const pool = connection?.driver?.pool;
+    const sockets = pool?._allConnections;
+    let released = 0;
+    if (sockets && typeof (sockets as Iterable<unknown>)[Symbol.iterator] === 'function') {
+      for (const socket of sockets as Iterable<{ destroy?: () => void }>) {
+        try {
+          socket.destroy?.();
+          released += 1;
+        } catch {
+          // A socket already gone is exactly the outcome we want.
+        }
+      }
+    }
+    this.poolReleases += 1;
+    this.consecutiveFlushTimeouts = 0;
+    this.logger.warn(
+      `unified write-behind: released ${released} pooled socket(s) after ${this.recycleAfterTimeouts} consecutive flush timeouts ` +
+        `(release #${this.poolReleases}) — wedged connections were holding every pool slot; the next flush reconnects`,
+    );
   }
 
   /** Re-buffer rows a failed flush could not write. The id key makes this idempotent. */
