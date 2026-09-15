@@ -62,6 +62,34 @@ const envInt = (name: string, fallback: number): number => {
 };
 
 /**
+ * Resolve with `work`, or reject once `ms` has elapsed.
+ *
+ * A query on a half-dead pooled socket never answers on its own (mysql2 sets no read
+ * timeout), and a write-behind flush that waited on one forever would stop ALL
+ * writes: the in-flight flag stayed set, nothing else was ever attempted, and the
+ * buffer grew until the process ran out of memory. Bounding the wait guarantees the
+ * flag is released and the next tick retries.
+ */
+async function withTimeout<T>(work: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`operation exceeded ${ms}ms`));
+    }, ms);
+    // Deliberately NOT unref'd: this guard must fire even when the wedged query is
+    // the only thing left on the loop — that is exactly the case it exists for.
+  });
+  // Keep an abandoned rejection handled even when the timeout wins the race.
+  void work.catch(() => undefined);
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Absence-preserving numeric coercion: an explicit null / undefined / blank
  * string means the provider published NO value and stays null.
  *
@@ -140,6 +168,21 @@ export class UnifiedMarketDataService {
   /** Flush cadence and the hard bound on buffered rows (absence over unbounded memory). */
   private readonly flushIntervalMs = envInt('UNIFIED_WRITE_BEHIND_FLUSH_MS', 500);
   private readonly maxPendingRows = envInt('UNIFIED_MAX_PENDING_ROWS', 20_000);
+  /**
+   * Rows per INSERT. A batch is deliberately capped: a very large statement is slow
+   * enough to collapse the flush cadence, so the remainder simply waits for the next
+   * tick (which keeps the write stream steady instead of bursty).
+   */
+  private readonly maxRowsPerFlush = envInt('UNIFIED_MAX_ROWS_PER_FLUSH', 500);
+  /**
+   * Hard ceiling on one flush. A query on a half-dead pooled socket never returns on
+   * its own (mysql2 sets no read timeout), and a wedged flush used to hold the
+   * in-flight flag forever — no further write ever happened and the buffer grew
+   * until the process died. The timeout releases the flag, re-queues the rows and
+   * lets the next tick try again.
+   */
+  private readonly flushTimeoutMs = envInt('UNIFIED_FLUSH_TIMEOUT_MS', 20_000);
+  private flushTimeouts = 0;
   /**
    * Idempotency window for repeated observations (source|instrument|source ts).
    * A producer that sends the same broker tick twice (doubled SDK subscription
@@ -290,12 +333,13 @@ export class UnifiedMarketDataService {
   }
 
   /** Write-behind diagnostics (observability only; never gates, never writes). */
-  writeBehindStats(): { pendingQuotes: number; pendingSnapshots: number; flushedRows: number; droppedRows: number; flushing: boolean } {
+  writeBehindStats(): { pendingQuotes: number; pendingSnapshots: number; flushedRows: number; droppedRows: number; flushTimeouts: number; flushing: boolean } {
     return {
       pendingQuotes: this.pendingQuoteRows.size,
       pendingSnapshots: this.pendingSnapshotRows.size,
       flushedRows: this.flushedRows,
       droppedRows: this.droppedRows,
+      flushTimeouts: this.flushTimeouts,
       flushing: this.flushingQuotes || this.flushingSnapshots,
     };
   }
@@ -313,12 +357,18 @@ export class UnifiedMarketDataService {
   private async flushQuoteRows(): Promise<number> {
     if (this.flushingQuotes || !this.pendingQuoteRows.size) return 0;
     this.flushingQuotes = true;
-    const rows = [...this.pendingQuoteRows.values()];
-    this.pendingQuoteRows.clear();
+    // Take at most maxRowsPerFlush; the rest stays buffered for the next tick, so one
+    // statement can never grow large enough to stall the write stream.
+    const rows = [...this.pendingQuoteRows.values()].slice(0, this.maxRowsPerFlush);
+    for (const row of rows) this.pendingQuoteRows.delete(String(row.id));
     try {
       // The `depth` column is typed `unknown`, which TypeORM's insert typings reject;
       // the row shape itself is exactly what the entity was created with.
-      await this.quotes.insert(rows as unknown as Parameters<Repository<UnifiedOptionQuote>['insert']>[0]);
+      await withTimeout(
+        this.quotes.insert(rows as unknown as Parameters<Repository<UnifiedOptionQuote>['insert']>[0]),
+        this.flushTimeoutMs,
+        () => this.noteFlushTimeout('quote'),
+      );
       this.flushedRows += rows.length;
       return rows.length;
     } catch (error) {
@@ -334,10 +384,14 @@ export class UnifiedMarketDataService {
   private async flushSnapshotRows(): Promise<number> {
     if (this.flushingSnapshots || !this.pendingSnapshotRows.size) return 0;
     this.flushingSnapshots = true;
-    const rows = [...this.pendingSnapshotRows.values()];
-    this.pendingSnapshotRows.clear();
+    const rows = [...this.pendingSnapshotRows.values()].slice(0, this.maxRowsPerFlush);
+    for (const row of rows) this.pendingSnapshotRows.delete(String(row.id));
     try {
-      await this.snapshots.insert(rows as unknown as Parameters<Repository<UnifiedMarketSnapshot>['insert']>[0]);
+      await withTimeout(
+        this.snapshots.insert(rows as unknown as Parameters<Repository<UnifiedMarketSnapshot>['insert']>[0]),
+        this.flushTimeoutMs,
+        () => this.noteFlushTimeout('snapshot'),
+      );
       this.flushedRows += rows.length;
       return rows.length;
     } catch (error) {
@@ -347,6 +401,17 @@ export class UnifiedMarketDataService {
     } finally {
       this.flushingSnapshots = false;
       if (this.pendingSnapshotRows.size) this.scheduleFlush();
+    }
+  }
+
+  /** A flush that exceeded its ceiling: ABSENT for now, counted, and loudly surfaced. */
+  private noteFlushTimeout(kind: string): void {
+    this.flushTimeouts += 1;
+    if (this.flushTimeouts === 1 || this.flushTimeouts % 5 === 0) {
+      this.logger.warn(
+        `unified write-behind ${kind} flush exceeded ${this.flushTimeoutMs}ms (total ${this.flushTimeouts}) — ` +
+          'the rows stay buffered and the next tick retries; check the database path (pool/tunnel)',
+      );
     }
   }
 

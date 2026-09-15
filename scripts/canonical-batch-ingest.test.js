@@ -165,7 +165,7 @@ class FakeUnified {
     assert.strictEqual(rows.length, 3, 'every input maps to a row');
     assert.ok(rows.every((r) => r && r.id), 'each cached row carries its replay-safe id');
     assert.strictEqual(quotes.inserts.length, 0, 'the tape path performs NO I/O');
-    assert.deepStrictEqual(svc.writeBehindStats(), { pendingQuotes: 3, pendingSnapshots: 0, flushedRows: 0, droppedRows: 0, flushing: false });
+    assert.deepStrictEqual(svc.writeBehindStats(), { pendingQuotes: 3, pendingSnapshots: 0, flushedRows: 0, droppedRows: 0, flushTimeouts: 0, flushing: false });
     ok('the message path buffers rows without touching the database');
 
     await svc.flushPending();
@@ -189,6 +189,81 @@ class FakeUnified {
     await svc.flushPending();
     assert.strictEqual(svc.writeBehindStats().pendingQuotes, 0, 'the re-queued row is written on the next flush');
     ok('a failed flush re-queues (no silent loss) and recovers');
+  }
+
+  // ── [F] a wedged flush must never stop the writes ──────────────────────────
+  console.log('\n[F] a flush that never returns is bounded');
+  {
+    process.env.UNIFIED_FLUSH_TIMEOUT_MS = '150';
+    process.env.UNIFIED_MAX_ROWS_PER_FLUSH = '500';
+    const { UnifiedMarketDataService } = require(path.join(REPO, 'dist', 'trading', 'unified-market-data', 'unified-market-data.service'));
+    class WedgedRepo {
+      constructor() { this.inserts = 0; this.mode = 'hang'; }
+      create(o) { return { ...o }; }
+      insert() {
+        this.inserts += 1;
+        return this.mode === 'hang' ? new Promise(() => {}) : Promise.resolve({});
+      }
+      async save(row) { return row; }
+    }
+    const ts = new Date().toISOString();
+    const tick = (strike) => ({
+      instrumentKey: `NSE:NIFTY26SEP${strike}PE`, underlying: 'NIFTY', exchange: 'NSE', segment: 'FO',
+      instrumentType: 'OPT', expiry: '2026-09-26', strike, optionType: 'PE', ltp: 99.8, bid: 99.65, ask: 99.95,
+      volume: null, oi: 45000, source: 'FYERS_LIVE', sourceTimestamp: ts,
+    });
+    const quotes = new WedgedRepo();
+    const svc = new UnifiedMarketDataService(quotes, new WedgedRepo());
+
+    await svc.ingestQuotes([tick(23000), tick(23100)]);
+    const t0 = Date.now();
+    await svc.flushPending();
+    const elapsed = Date.now() - t0;
+    assert.ok(elapsed < 2000, `the flush returned instead of hanging (took ${elapsed}ms)`);
+    const st = svc.writeBehindStats();
+    assert.strictEqual(st.flushing, false, 'the in-flight flag is RELEASED, so writes can continue');
+    assert.strictEqual(st.flushTimeouts, 1, 'the timeout is counted');
+    assert.strictEqual(st.pendingQuotes, 2, 'the rows stay buffered — nothing is lost');
+    ok('a hung write is bounded, releases the pipeline and keeps the rows');
+
+    // ...and the pipeline actually recovers: the very next flush writes them.
+    quotes.mode = 'ok';
+    await svc.flushPending();
+    assert.strictEqual(svc.writeBehindStats().pendingQuotes, 0, 'the next flush writes the buffered rows');
+    assert.strictEqual(quotes.inserts, 2, 'a second attempt was made (the wedge did not stop the pipeline)');
+    ok('the pipeline recovers on the next tick (a wedge cannot stop the tape)');
+    delete process.env.UNIFIED_FLUSH_TIMEOUT_MS;
+  }
+
+  // ── [G] one INSERT is capped so it cannot grow into a stall ────────────────
+  console.log('\n[G] the batch size is capped');
+  {
+    process.env.UNIFIED_MAX_ROWS_PER_FLUSH = '2';
+    const { UnifiedMarketDataService } = require(path.join(REPO, 'dist', 'trading', 'unified-market-data', 'unified-market-data.service'));
+    class CapRepo {
+      constructor() { this.batches = []; }
+      create(o) { return { ...o }; }
+      async insert(rows) { this.batches.push((Array.isArray(rows) ? rows : [rows]).length); return {}; }
+      async save(row) { return row; }
+    }
+    const ts = new Date().toISOString();
+    const tick = (strike) => ({
+      instrumentKey: `NSE:NIFTY26SEP${strike}PE`, underlying: 'NIFTY', exchange: 'NSE', segment: 'FO',
+      instrumentType: 'OPT', expiry: '2026-09-26', strike, optionType: 'PE', ltp: 99.8, bid: 99.65, ask: 99.95,
+      volume: null, oi: 45000, source: 'FYERS_LIVE', sourceTimestamp: ts,
+    });
+    const quotes = new CapRepo();
+    const svc = new UnifiedMarketDataService(quotes, new CapRepo());
+    await svc.ingestQuotes([1, 2, 3, 4, 5].map((i) => tick(23000 + i * 100)));
+    await svc.flushPending();
+    assert.deepStrictEqual(quotes.batches, [2], 'the first flush writes only the cap');
+    assert.strictEqual(svc.writeBehindStats().pendingQuotes, 3, 'the remainder stays buffered for the next tick');
+    await svc.flushPending();
+    await svc.flushPending();
+    assert.deepStrictEqual(quotes.batches, [2, 2, 1], 'later ticks drain the remainder in bounded batches');
+    assert.strictEqual(svc.writeBehindStats().pendingQuotes, 0, 'the buffer fully drains');
+    ok('an INSERT is capped and the remainder drains over subsequent ticks');
+    delete process.env.UNIFIED_MAX_ROWS_PER_FLUSH;
   }
 
   console.log(`\n${pass} checks passed`);
