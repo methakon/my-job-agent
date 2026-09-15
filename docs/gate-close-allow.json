@@ -146,14 +146,14 @@
       "workstream": "chore: gate-close allow-list (not a roadmap workstream)",
       "authority": "operator approval 2026-09-13"
     },
-    "983b0337732f5deb36407e6b29f002564b36c6d8": {
+    "983b0330a92ad3c806923fa8c01a6d8f1656bc55": {
       "short": "983b033",
       "reason": "Job Application roadmap — JA-015 Skill-gap severity: standalone pure classifier (GapSeverity = NONE/MINOR/MODERATE/MAJOR/BLOCKING/UNKNOWN) derived ONLY from existing signals, wired into qualification, with deterministic trace evidence for failing test cases before any taxonomy changes. DoneWhen satisfied: gap classification is deterministic, explainable (classify + reason + traces), and used by qualification. Touches src/job-application/skills/gap-severity.ts (new), src/job-application/qualification.service.ts (+invoke), scripts/ja-015-skill-gap-severity.test.ts (new, 55 cases). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain code touched. Separate JA-roadmap control plane (job_application_roadmap_items id=9), not mirrored into project_checklist_items.",
       "workstream": "Job Application roadmap — JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-14 ('ok proceed for good by sequence' + 'Do not commit or push until I explicitly approve' satisfied — user approved commit/push); seed job_application_roadmap.seed.json JA-015 row + gate-close-check.js same_separate_workstream category",
       "recorded": "2026-09-14T07:15+05:30 (this session; cleanup of goodbye sequence after verification pivot)",
       "evidence": "git show --stat 983b033 lists only src/job-application/skills/gap-severity.ts +src/job-application/qualification.service.ts +scripts/ja-015-skill-gap-severity.test.ts; verification: tsc 0 errors/0 warnings, tests 120/120 (ja-010/012/013/015), build 0 errors/0 warnings, render 12/12; no trading/algo Trading Agent/market-data/feed/risk/execution/FNF/option-chain files.",
-      "expires_hint": "Delete once 983b0337732f5deb36407e6b29f002564b36c6d8 leaves the guard commit window (default: last 15 code commits)."
+      "expires_hint": "Delete once 983b0330a92ad3c806923fa8c01a6d8f1656bc55 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
