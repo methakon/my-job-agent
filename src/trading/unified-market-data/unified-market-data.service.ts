@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { Like, MoreThanOrEqual, Repository } from 'typeorm';
 import { UnifiedOptionQuote } from './unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './unified-market-snapshot.entity';
 import { canonicalInstrumentKey } from './canonical/canonical-tick';
@@ -496,6 +496,113 @@ export class UnifiedMarketDataService {
       this.logger.warn(`unified sharedQuotesForUnderlying(${wanted}) failed: ${(error as Error).message}`);
     }
     return [...newest.values()].slice(0, limit);
+  }
+
+  /**
+   * Newest fresh UNDERLYING observation for a universe from the COMMON store — the
+   * underlying-level sibling of sharedQuote(). A desk whose own feed is down still
+   * needs the LEVEL to locate ATM strikes, and the other producer publishes it
+   * (BSE:SENSEX / NSE:NIFTY50). In-memory first (a local producer), then the table
+   * (the other producer may be a different process). Rows older than maxAgeMs or
+   * flagged INVALID are rejected; `source` is carried through untouched.
+   */
+  async sharedSnapshot(
+    query: { symbol?: string | null; tail?: string | null; exchange?: string | null },
+    opts: { maxAgeMs?: number; now?: number } = {},
+  ): Promise<UnifiedMarketSnapshot | null> {
+    const nowMs = opts.now ?? Date.now();
+    const maxAgeMs = opts.maxAgeMs ?? Number(process.env.UNIFIED_SHARED_QUOTE_MAX_AGE_MS ?? 60_000);
+    const symbol = String(query.symbol ?? '').trim().toUpperCase();
+    const tail = String(query.tail ?? '').trim().toUpperCase();
+    const exchange = String(query.exchange ?? '').trim().toUpperCase();
+    const freshEnough = (row: UnifiedMarketSnapshot | null | undefined): row is UnifiedMarketSnapshot => {
+      if (!row) return false;
+      if (String(row.dataQuality ?? 'GOOD').toUpperCase() === 'INVALID') return false;
+      const at = (row.receivedTimestamp ?? row.ts)?.getTime?.() ?? 0;
+      return at > 0 && nowMs - at <= maxAgeMs;
+    };
+    const matches = (key: string | null | undefined): boolean => {
+      const k = String(key ?? '').trim().toUpperCase();
+      if (!k) return false;
+      if (symbol && k === symbol) return true;
+      return Boolean(tail) && (k === `${exchange ? `${exchange}:` : ''}${tail}` || k.endsWith(`:${tail}`));
+    };
+    // 1. In-process cache.
+    let newest: UnifiedMarketSnapshot | null = null;
+    for (const row of this.latestSnapshots.values()) {
+      if (!matches(row.symbol)) continue;
+      if (!newest || (row.receivedTimestamp ?? row.ts).getTime() > (newest.receivedTimestamp ?? newest.ts).getTime()) newest = row;
+    }
+    if (freshEnough(newest)) return newest;
+
+    // 2. Common table (another process produced it).
+    try {
+      const where: Record<string, unknown>[] = [];
+      if (symbol) where.push({ symbol });
+      if (tail) where.push({ symbol: Like(`%:${tail}`) });
+      if (!where.length) return null;
+      const rows = await this.snapshots.find({ where, order: { receivedTimestamp: 'DESC' }, take: 25 });
+      const match = rows.find((row) => (!exchange || String(row.exchange ?? '').toUpperCase() === exchange) && freshEnough(row)) ?? null;
+      return freshEnough(match) ? match : null;
+    } catch (error) {
+      this.logger.warn(`unified sharedSnapshot lookup failed: ${(error as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Ascending underlying observations since `sinceMs` for ONE universe — the tape a
+   * desk needs to build its own underlying candles when its own store has none.
+   * Read-only; the caller keeps each row's `source`.
+   */
+  async sharedSnapshotHistory(
+    query: { symbol?: string | null; tail?: string | null; exchange?: string | null },
+    opts: { sinceMs?: number; limit?: number } = {},
+  ): Promise<UnifiedMarketSnapshot[]> {
+    const since = new Date(opts.sinceMs ?? Date.now() - 60 * 60_000);
+    const limit = Math.max(1, Math.min(5_000, opts.limit ?? 2_000));
+    const symbol = String(query.symbol ?? '').trim().toUpperCase();
+    const tail = String(query.tail ?? '').trim().toUpperCase();
+    const exchange = String(query.exchange ?? '').trim().toUpperCase();
+    try {
+      const where: Record<string, unknown>[] = [];
+      if (symbol) where.push({ symbol, ts: MoreThanOrEqual(since) });
+      if (tail) where.push({ symbol: Like(`%:${tail}`), ts: MoreThanOrEqual(since) });
+      if (!where.length) return [];
+      const rows = await this.snapshots.find({ where, order: { ts: 'ASC' }, take: limit });
+      return exchange ? rows.filter((row) => String(row.exchange ?? '').toUpperCase() === exchange) : rows;
+    } catch (error) {
+      this.logger.warn(`unified sharedSnapshotHistory failed: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Ascending observations of ONE option contract since `sinceMs` — the tape a desk
+   * builds option candles from when its own store has none. Matched by the canonical
+   * key tail so a caller may pass its broker's symbol form. Read-only.
+   */
+  async sharedQuoteHistory(
+    instrumentKeyOrSymbol: string,
+    opts: { sinceMs?: number; limit?: number } = {},
+  ): Promise<UnifiedOptionQuote[]> {
+    const raw = String(instrumentKeyOrSymbol ?? '').trim();
+    if (!raw) return [];
+    const tail = raw.split(/[:|]/).pop()!.trim().toUpperCase();
+    if (!tail) return [];
+    const since = new Date(opts.sinceMs ?? Date.now() - 60 * 60_000);
+    const limit = Math.max(1, Math.min(5_000, opts.limit ?? 2_000));
+    try {
+      const rows = await this.quotes.find({
+        where: [{ instrumentKey: Like(`%:${tail}`), ts: MoreThanOrEqual(since) }, { instrumentKey: Like(`%|${tail}`), ts: MoreThanOrEqual(since) }],
+        order: { ts: 'ASC' },
+        take: limit,
+      });
+      return rows;
+    } catch (error) {
+      this.logger.warn(`unified sharedQuoteHistory(${tail}) failed: ${(error as Error).message}`);
+      return [];
+    }
   }
 
   /**

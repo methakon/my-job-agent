@@ -30,6 +30,16 @@ import { UpstoxLivePaperLearningService } from './upstox-live-paper-learning.ser
 import { UpstoxLivePaperConfig } from './upstox-live-paper.config';
 import { IST_OFFSET_MS, IST_SESSION_CLOSE_MINUTES } from './upstox-live-paper-instruction.rules';
 import { PaperRiskSnapshot } from './paper-risk';
+import { UnifiedMarketDataService } from '../unified-market-data/unified-market-data.service';
+import {
+  COMMON_CHAIN_VERSION,
+  CommonChainRow,
+  chainSourceDecision,
+  commonChainRowFromUnified,
+  commonRowsToAtmLegs,
+  commonRowsToChainLegs,
+  nearestExpiry,
+} from './upstox-live-paper-common-chain';
 
 /** The desk only evaluates inside the Indian cash session (IST). */
 const SESSION_OPEN_MINUTES = 9 * 60 + 15;
@@ -62,6 +72,7 @@ export class UpstoxLivePaperAutoEntryService {
     private readonly desk: UpstoxLivePaperService,
     private readonly risk: UpstoxLivePaperRiskService,
     private readonly learning: UpstoxLivePaperLearningService,
+    private readonly unified: UnifiedMarketDataService,
     @InjectRepository(UpstoxLivePaperPortfolio) private readonly portfolios: Repository<UpstoxLivePaperPortfolio>,
     @InjectRepository(UpstoxLivePaperOptionQuote) private readonly quotes: Repository<UpstoxLivePaperOptionQuote>,
     @InjectRepository(UpstoxLivePaperMarketSnapshot) private readonly snapshots: Repository<UpstoxLivePaperMarketSnapshot>,
@@ -108,6 +119,76 @@ export class UpstoxLivePaperAutoEntryService {
       .pop()!
       .toUpperCase()
       .replace(/[^A-Z0-9]/g, '');
+  }
+
+  /** Exchange of the desk's universe ('BSE_INDEX|SENSEX' → 'BSE'), for common-store matching. */
+  private get deskExchange(): string {
+    const key = String(this.underlyings[0] ?? '');
+    return key.includes('_') ? key.split('_')[0].toUpperCase() : '';
+  }
+
+  /**
+   * How old a COMMON-store observation may be for this desk to use it. The desk's
+   * own stale budget is the authority — the fallback must never be more permissive
+   * than the rule it stands in for.
+   */
+  private get sharedFallbackMaxAgeMs(): number {
+    const configured = Number(process.env.UNIFIED_SHARED_QUOTE_MAX_AGE_MS);
+    if (Number.isFinite(configured) && configured > 0) return configured;
+    return this.config.staleQuoteMaxAgeMs;
+  }
+
+  /**
+   * Rows of this desk's OWN table, normalised to the shared chain shape so a single
+   * set of rules (expiry, ATM, legs) applies to either source.
+   */
+  private ownRowsToChainShape(rows: UpstoxLivePaperOptionQuote[]): CommonChainRow[] {
+    const out: CommonChainRow[] = [];
+    for (const r of rows) {
+      const mapped = commonChainRowFromUnified({
+        instrumentKey: r.contractSymbol,
+        underlying: r.underlying,
+        expiry: r.expiry,
+        strike: r.strike,
+        optionType: r.optionType,
+        ltp: r.ltp,
+        bid: r.bid,
+        ask: r.ask,
+        bidQty: r.bidQty,
+        askQty: r.askQty,
+        volume: r.volume,
+        oi: r.openInterest,
+        changeOi: r.oiChange,
+        iv: r.impliedVolatility,
+        delta: r.delta,
+        gamma: r.gamma,
+        theta: r.theta,
+        vega: r.vega,
+        receivedTimestamp: r.ts,
+        source: 'UPSTOX_LIVE',
+      } as unknown as Record<string, unknown>);
+      if (mapped) out.push(mapped);
+    }
+    return out;
+  }
+
+  /**
+   * The COMMON store's chain for this universe — read ONLY when this desk's own feed
+   * has nothing fresh. Each row keeps its true producer; the desk never relabels it
+   * as its own. A lookup failure degrades to "nothing" rather than an exception.
+   */
+  private async commonStoreChain(underlying: string): Promise<{ rows: CommonChainRow[]; producer: string | null }> {
+    try {
+      const found = await this.unified.sharedQuotesForUnderlying(underlying, { maxAgeMs: this.sharedFallbackMaxAgeMs });
+      const rows = found
+        .map((row) => commonChainRowFromUnified(row as unknown as Record<string, unknown>))
+        .filter((row): row is CommonChainRow => row !== null);
+      const producers = [...new Set(rows.map((r) => r.source).filter(Boolean))].sort();
+      return { rows, producer: producers.length ? producers.join('+') : null };
+    } catch (err) {
+      this.logger.warn(`[UPSTOX-LIVE] common-store chain lookup failed for ${underlying}: ${err instanceof Error ? err.message : err}`);
+      return { rows: [], producer: null };
+    }
   }
 
   /** Throttled [UPSTOX] diagnostics (operator spec 2026-09-11): one line per
@@ -236,66 +317,133 @@ export class UpstoxLivePaperAutoEntryService {
     }
   }
 
-  /** ATM CE/PE candidates from the desk's own live chain, nearest expiry only. */
+  /**
+   * ATM CE/PE candidates, nearest expiry only.
+   *
+   * The desk's OWN chain is authoritative while it is fresh. When its own feed is
+   * down — dead credentials, or another provider owning the universe — the SAME
+   * universe is read from the common normalized store instead, so the desk keeps
+   * working off the one live tape. Each row keeps its TRUE producer, surfaced here as
+   * `feedSource`; a foreign tick is never presented as this desk's own, and nothing
+   * is interpolated or invented.
+   */
   private async atmUniverse(portfolio: UpstoxLivePaperPortfolio, snapshot: PaperRiskSnapshot) {
     const thresholds = entryPolicyThresholdsFromEnv();
     const since = new Date(Date.now() - this.lookbackMinutes * 60_000);
     const underlying = this.deskUnderlying;
+    const now = Date.now();
 
     const rows = await this.quotes.find({
       where: { underlying, ts: MoreThanOrEqual(since) },
       order: { ts: 'DESC' },
       take: 6000,
     });
-    if (!rows.length) return { legs: [] as AtmCandidateLeg[], spot: null as number | null, universe: null, thresholds, stale: 'no live option quotes in the lookback window' };
+    const ownNewestTsMs = rows.length ? new Date(rows[0].ts).getTime() : null;
 
     // Latest tick per contract — a stale leg must not masquerade as the chain.
     const latest = new Map<string, UpstoxLivePaperOptionQuote>();
     for (const r of rows) if (!latest.has(r.contractSymbol)) latest.set(r.contractSymbol, r);
+    const ownFresh = [...latest.values()].filter((r) => now - new Date(r.ts).getTime() <= this.config.staleQuoteMaxAgeMs * 4);
 
-    const now = Date.now();
-    const fresh = [...latest.values()].filter((r) => now - new Date(r.ts).getTime() <= this.config.staleQuoteMaxAgeMs * 4);
-    if (!fresh.length) return { legs: [] as AtmCandidateLeg[], spot: null as number | null, universe: null, thresholds, stale: 'every contract tick is older than the stale-quote budget' };
+    // The common-store read is only paid for when the desk's own chain cannot serve.
+    let commonRows: CommonChainRow[] = [];
+    let producer: string | null = null;
+    if (!ownFresh.length) {
+      const common = await this.commonStoreChain(underlying);
+      commonRows = common.rows;
+      producer = common.producer;
+    }
+    const decision = chainSourceDecision({
+      ownRows: ownFresh.length,
+      ownNewestTsMs,
+      commonRows: commonRows.length,
+      nowMs: now,
+      maxAgeMs: this.sharedFallbackMaxAgeMs,
+    });
 
-    // NEAREST listed expiry, from the broker's own contract rows (never a
-    // hard-coded date): today's expiry is used when today is expiry day.
+    const chainRows: CommonChainRow[] = decision.source === 'OWN' ? this.ownRowsToChainShape(ownFresh) : commonRows;
+    const chainRowsBySymbol = new Map<string, CommonChainRow>(chainRows.map((r) => [r.contractSymbol, r]));
+    const feedSource = decision.source === 'OWN' ? 'UPSTOX_LIVE' : producer ? `COMMON_STORE:${producer}` : null;
+    const provenance = {
+      chainSource: decision.source,
+      chainSourceReason: decision.reason,
+      feedSource,
+      chainVersion: decision.source === 'COMMON' ? COMMON_CHAIN_VERSION : null,
+      ownChainAgeMs: decision.ownAgeMs,
+      chainRows: chainRowsBySymbol,
+    };
+    if (decision.source !== 'COMMON') producer = null;
+
+    if (decision.source === 'NONE') {
+      const reason = decision.reason === 'OWN_STALE_NO_COMMON'
+        ? 'every contract tick is older than the stale-quote budget'
+        : 'no live option quotes in the lookback window';
+      return { legs: [] as AtmCandidateLeg[], spot: null as number | null, universe: null, thresholds, stale: reason, ...provenance };
+    }
+
+    // NEAREST listed expiry, from the SOURCE's own rows (never a hard-coded date):
+    // today's expiry is used when today is expiry day.
     const today = await this.risk.todayIst();
-    const expiries = [...new Set(fresh.map((r) => String(r.expiry).slice(0, 10)))]
-      .filter((e) => e >= today)
-      .sort();
-    const expiry = expiries[0];
-    if (!expiry) return { legs: [] as AtmCandidateLeg[], spot: null as number | null, universe: null, thresholds, stale: 'no expiry at or after today in the live chain' };
+    const expiry = nearestExpiry(chainRows, today);
+    if (!expiry) return { legs: [] as AtmCandidateLeg[], spot: null as number | null, universe: null, thresholds, stale: 'no expiry at or after today in the live chain', ...provenance };
 
-    const legs: AtmCandidateLeg[] = fresh
-      .filter((r) => String(r.expiry).slice(0, 10) === expiry && Number(r.ltp) > 0)
-      .map((r) => ({
-        contractSymbol: r.contractSymbol,
-        optionType: (String(r.optionType).toUpperCase() === 'PE' ? 'PE' : 'CE'),
-        strike: Number(r.strike),
-        expiry,
-        ltp: Number(r.ltp),
-        bid: r.bid === null ? null : Number(r.bid),
-        ask: r.ask === null ? null : Number(r.ask),
-        oi: Number(r.openInterest ?? 0),
-        volume: Number(r.volume ?? 0),
-      }));
-
+    const legs: AtmCandidateLeg[] = commonRowsToAtmLegs(chainRows, expiry);
     const spot = await this.latestSpot(underlying);
     const universe = buildAtmUniverse({ legs, spot, window: thresholds.atmStrikeWindow });
-    return { legs, spot, universe, thresholds, stale: null as string | null };
+    return { legs, spot, universe, thresholds, stale: null as string | null, ...provenance };
   }
 
+  /**
+   * The underlying LEVEL used to locate ATM strikes. Read from this desk's own
+   * snapshot store while it is FRESH; otherwise from the common store's index
+   * observation for the same universe. A stale level is never used — an ATM strike
+   * computed from an old price is worse than no trade — and the value is never
+   * invented.
+   */
   private async latestSpot(underlying: string): Promise<number | null> {
+    const now = Date.now();
+    const maxAge = this.sharedFallbackMaxAgeMs;
     const row = await this.snapshots.findOne({ where: { instrument: underlying }, order: { ts: 'DESC' } });
     const price = row ? Number(row.price) : null;
-    if (price !== null && Number.isFinite(price) && price > 0) return price;
+    const ownAgeMs = row ? Math.max(0, now - new Date(row.ts).getTime()) : null;
+    if (price !== null && Number.isFinite(price) && price > 0 && ownAgeMs !== null && ownAgeMs <= maxAge) return price;
+
+    // Own level absent or stale → the common store's index observation (the other
+    // producer publishes it: BSE:SENSEX / NSE:NIFTY50).
+    const shared = await this.unified.sharedSnapshot({ tail: underlying, exchange: this.deskExchange }, { maxAgeMs: maxAge, now });
+    const sharedPrice = shared ? Number(shared.ltp) : null;
+    if (sharedPrice !== null && Number.isFinite(sharedPrice) && sharedPrice > 0) return sharedPrice;
+
+    // Last resort: the level carried on this desk's own option rows, still gated.
     const byPrice = await this.quotes.findOne({ where: { underlying }, order: { ts: 'DESC' } });
+    const fromLegAgeMs = byPrice ? Math.max(0, now - new Date(byPrice.ts).getTime()) : null;
     const fromLeg = byPrice?.underlyingPrice === null || byPrice?.underlyingPrice === undefined ? null : Number(byPrice.underlyingPrice);
-    // Never invented: an underlying level must come from a real observation.
-    return fromLeg !== null && Number.isFinite(fromLeg) && fromLeg > 0 ? fromLeg : null;
+    // Never invented: an underlying level must come from a real, sufficiently recent observation.
+    return fromLeg !== null && Number.isFinite(fromLeg) && fromLeg > 0 && fromLegAgeMs !== null && fromLegAgeMs <= maxAge ? fromLeg : null;
   }
 
-  private async candlesFor(contractSymbol: string, underlying: string, since: Date): Promise<{ option: Candle[]; underlying: Candle[] }> {
+  /**
+   * Candles from this desk's own stores, or — when the desk is working off the
+   * common store because its own feed is down — from the common store's own history
+   * of the SAME contract and index. A tick with no usable price is dropped rather
+   * than bucketed as 0, so a foreign tape cannot inject a fake bar.
+   */
+  private async candlesFor(contractSymbol: string, underlying: string, since: Date, useCommonStore = false): Promise<{ option: Candle[]; underlying: Candle[] }> {
+    if (useCommonStore) {
+      const [sharedQuotes, sharedSnaps] = await Promise.all([
+        this.unified.sharedQuoteHistory(contractSymbol, { sinceMs: since.getTime() }),
+        this.unified.sharedSnapshotHistory({ tail: underlying, exchange: this.deskExchange }, { sinceMs: since.getTime() }),
+      ]);
+      const tick = (row: { receivedTimestamp?: Date | string | null; ts?: Date | string | null; ltp?: unknown }): TickLike | null => {
+        const at = row.receivedTimestamp ?? row.ts;
+        const price = Number(row.ltp);
+        if (!at || !Number.isFinite(price) || price <= 0) return null;
+        return { ts: at as unknown as Date, price, volume: 0 };
+      };
+      const optTicks = sharedQuotes.map(tick).filter((t): t is TickLike => t !== null);
+      const spotTicks = sharedSnaps.map(tick).filter((t): t is TickLike => t !== null);
+      return { option: bucketCandles(optTicks, BUCKET_MS), underlying: bucketCandles(spotTicks, BUCKET_MS) };
+    }
     const [optRows, spotRows] = await Promise.all([
       this.quotes.find({ where: { contractSymbol, ts: MoreThanOrEqual(since) }, order: { ts: 'ASC' }, take: 3000 }),
       this.snapshots.find({ where: { instrument: underlying, ts: MoreThanOrEqual(since) }, order: { ts: 'ASC' }, take: 3000 }),
@@ -305,7 +453,13 @@ export class UpstoxLivePaperAutoEntryService {
     return { option: bucketCandles(optTicks, BUCKET_MS), underlying: bucketCandles(spotTicks, BUCKET_MS) };
   }
 
-  private async chainLegs(underlying: string, expiry: string, strikes: Set<number>, since: Date): Promise<ChainLeg[]> {
+  /**
+   * Chain context (OI / IV) for the ATM strikes. When `chainRows` is supplied the
+   * desk is working off the common store and those SAME rows are used — no second
+   * read, and no mixing of two tapes. Otherwise the desk's own store is read.
+   */
+  private async chainLegs(underlying: string, expiry: string, strikes: Set<number>, since: Date, chainRows?: Map<string, CommonChainRow>): Promise<ChainLeg[]> {
+    if (chainRows) return commonRowsToChainLegs([...chainRows.values()], expiry, strikes) as unknown as ChainLeg[];
     const rows = await this.quotes.find({ where: { underlying, ts: MoreThanOrEqual(since) }, order: { ts: 'DESC' }, take: 6000 });
     const latest = new Map<string, UpstoxLivePaperOptionQuote>();
     for (const r of rows) if (!latest.has(r.contractSymbol)) latest.set(r.contractSymbol, r);
@@ -328,23 +482,29 @@ export class UpstoxLivePaperAutoEntryService {
   private async scanForEntries(portfolio: UpstoxLivePaperPortfolio, snapshot: PaperRiskSnapshot, now: number): Promise<Record<string, unknown>> {
     const built = await this.atmUniverse(portfolio, snapshot);
     const thresholds = built.thresholds;
-    // [UPSTOX][MARKET_DATA] — the first line to read when nothing trades.
+    const useCommonStore = built.chainSource === 'COMMON';
+    // [UPSTOX][MARKET_DATA] — the first line to read when nothing trades. It names the
+    // source the desk is ACTUALLY reading (its own feed, or the common store), so a
+    // foreign tape is never mistaken for this desk's own.
     const newest = await this.quotes.findOne({ where: { underlying: this.deskUnderlying }, order: { ts: 'DESC' } });
     const ageMs = newest ? Math.max(0, now - new Date(newest.ts).getTime()) : null;
     this.logThrottled(
-      `[UPSTOX][MARKET_DATA] source=UPSTOX_LIVE universe=${this.deskUnderlying} status=${newest ? 'TICKS' : 'NO_TICKS'} ` +
-        `last_tick=${newest ? new Date(newest.ts).toISOString() : 'none'} age_ms=${ageMs === null ? 'n/a' : ageMs}`,
+      `[UPSTOX][MARKET_DATA] source=${built.feedSource ?? 'UPSTOX_LIVE'} universe=${this.deskUnderlying} ` +
+        `own_feed=${newest ? 'TICKS' : 'NO_TICKS'} own_last_tick=${newest ? new Date(newest.ts).toISOString() : 'none'} own_age_ms=${ageMs === null ? 'n/a' : ageMs} ` +
+        `chain_source=${built.chainSource}(${built.chainSourceReason})`,
     );
     if (!built.universe || !built.legs.length) {
       const reason = built.stale ?? 'no ATM universe';
       this.logThrottled(`[UPSTOX][NO_TRADE] universe=${this.deskUnderlying} considered=0 reason=${reason}`);
-      return { considered: 0, evaluated: 0, qualified: 0, opened: null, skipped: reason };
+      return { considered: 0, evaluated: 0, qualified: 0, opened: null, skipped: reason, feedSource: built.feedSource, chainSource: built.chainSource };
     }
     const sessionDate = await this.risk.todayIst(now);
     const nowIstMinutes = this.istMinutes(now);
     const since = new Date(now - this.lookbackMinutes * 60_000);
     const strikes = new Set<number>([...built.universe.ce, ...built.universe.pe].map((l) => Number(l.strike)));
-    const chain = await this.chainLegs(this.deskUnderlying, built.universe.ce[0]?.expiry ?? built.universe.pe[0]?.expiry ?? '', strikes, since);
+    // The chain context comes from the SAME rows the universe was built from, so the
+    // desk never mixes two tapes.
+    const chain = await this.chainLegs(this.deskUnderlying, built.universe.ce[0]?.expiry ?? built.universe.pe[0]?.expiry ?? '', strikes, since, built.chainRows);
     const patternThresholds = patternThresholdsFromEnv();
 
     let evaluated = 0;
@@ -355,12 +515,15 @@ export class UpstoxLivePaperAutoEntryService {
     // CE and PE of the ATM strike both get a fair evaluation; the better setup
     // wins, and only one may be taken (max 1 open position).
     for (const leg of [...built.universe.ce, ...built.universe.pe]) {
-      const { option, underlying: underlyingCandles } = await this.candlesFor(leg.contractSymbol, this.deskUnderlying, since);
+      const { option, underlying: underlyingCandles } = await this.candlesFor(leg.contractSymbol, this.deskUnderlying, since, useCommonStore);
       if (option.length < 4) continue;
       evaluated += 1;
 
-      const latestQuote = (await this.quotes.findOne({ where: { contractSymbol: leg.contractSymbol }, order: { ts: 'DESC' } })) ?? null;
-      const quoteTs = latestQuote ? new Date(latestQuote.ts).getTime() : null;
+      // Book / OI / IV / greeks for THIS leg come from the row the ATM universe was
+      // built from — the same tape end to end, and no per-leg second read. Absent
+      // values stay null.
+      const chainRow = built.chainRows.get(leg.contractSymbol) ?? null;
+      const quoteTs = chainRow?.ts ? new Date(chainRow.ts).getTime() : null;
       const assessment: PatternAssessment = assessPattern({
         optionCandles: option,
         underlyingCandles,
@@ -369,12 +532,12 @@ export class UpstoxLivePaperAutoEntryService {
           ltp: leg.ltp,
           bid: leg.bid,
           ask: leg.ask,
-          bidQty: latestQuote?.bidQty === null || latestQuote?.bidQty === undefined ? null : Number(latestQuote.bidQty),
-          askQty: latestQuote?.askQty === null || latestQuote?.askQty === undefined ? null : Number(latestQuote.askQty),
-          ts: latestQuote ? new Date(latestQuote.ts) : new Date(now),
-          oi: leg.oi ?? null,
-          changeOi: latestQuote?.oiChange === null || latestQuote?.oiChange === undefined ? null : Number(latestQuote.oiChange),
-          iv: latestQuote?.impliedVolatility === null || latestQuote?.impliedVolatility === undefined ? null : Number(latestQuote.impliedVolatility),
+          bidQty: chainRow?.bidQty ?? null,
+          askQty: chainRow?.askQty ?? null,
+          ts: chainRow?.ts ?? new Date(now),
+          oi: leg.oi ?? chainRow?.oi ?? null,
+          changeOi: chainRow?.changeOi ?? null,
+          iv: chainRow?.iv ?? null,
         },
         optionType: leg.optionType,
         spot: built.spot,
@@ -415,12 +578,12 @@ export class UpstoxLivePaperAutoEntryService {
         spreadPct: assessment.liquidity?.spreadPct === null || assessment.liquidity?.spreadPct === undefined ? null : Number(assessment.liquidity.spreadPct),
         volume: leg.volume ?? null,
         openInterest: leg.oi ?? null,
-        oiChange: latestQuote?.oiChange === null || latestQuote?.oiChange === undefined ? null : Number(latestQuote.oiChange),
-        iv: latestQuote?.impliedVolatility === null || latestQuote?.impliedVolatility === undefined ? null : Number(latestQuote.impliedVolatility),
-        delta: latestQuote?.delta === null || latestQuote?.delta === undefined ? null : Number(latestQuote.delta),
-        gamma: latestQuote?.gamma === null || latestQuote?.gamma === undefined ? null : Number(latestQuote.gamma),
-        theta: latestQuote?.theta === null || latestQuote?.theta === undefined ? null : Number(latestQuote.theta),
-        vega: latestQuote?.vega === null || latestQuote?.vega === undefined ? null : Number(latestQuote.vega),
+        oiChange: chainRow?.changeOi ?? null,
+        iv: chainRow?.iv ?? null,
+        delta: chainRow?.delta ?? null,
+        gamma: chainRow?.gamma ?? null,
+        theta: chainRow?.theta ?? null,
+        vega: chainRow?.vega ?? null,
         optionAtr,
         underlyingAtr: atr(underlyingCandles, 14),
         tickAgeMs: quoteTs === null ? null : Math.max(0, now - quoteTs),
@@ -429,7 +592,7 @@ export class UpstoxLivePaperAutoEntryService {
         qualified: decision.qualified,
         decision: decision.side,
         refusals: decision.refusals,
-        notes: decision.notes,
+        notes: [...(decision.notes ?? []), `feed=${built.feedSource ?? 'UPSTOX_LIVE'} chain_source=${built.chainSource}`],
         entryState: decision.entryState,
         patternType: decision.patternType,
         confidence: decision.confidence,
@@ -497,7 +660,8 @@ export class UpstoxLivePaperAutoEntryService {
       this.logger.log(
         `[UPSTOX][PAPER] OPEN ${leg.contractSymbol} ${sizing.lots} lot(s) @ ₹${leg.ltp} · ` +
         `conf ${decision.confidence.toFixed(3)} · stop ₹${decision.stop?.toFixed(2)} target ₹${decision.target?.toFixed(2)} · ` +
-        `risk ₹${decision.risk.plannedRisk?.toFixed(2)} (${decision.risk.plannedRiskPct?.toFixed(2)}% of ₹${decision.risk.configuredCapital})`,
+        `risk ₹${decision.risk.plannedRisk?.toFixed(2)} (${decision.risk.plannedRiskPct?.toFixed(2)}% of ₹${decision.risk.configuredCapital}) · ` +
+        `feed=${built.feedSource ?? 'UPSTOX_LIVE'}`,
       );
     }
 
@@ -509,6 +673,9 @@ export class UpstoxLivePaperAutoEntryService {
       qualified,
       opened,
       decisions,
+      feedSource: built.feedSource,
+      chainSource: built.chainSource,
+      chainSourceReason: built.chainSourceReason,
     };
   }
 
@@ -523,8 +690,37 @@ export class UpstoxLivePaperAutoEntryService {
     const nowIstMinutes = this.istMinutes(now);
 
     for (const trade of open) {
-      const latest = await this.quotes.findOne({ where: { contractSymbol: trade.instrument }, order: { ts: 'DESC' } });
+      // A position must be manageable off the SAME tape it was opened on: the desk's
+      // own row while it is fresh, otherwise the common store's row for that contract.
+      // Without this an entry taken from the common store could never be exited here.
+      const ownLatest = await this.quotes.findOne({ where: { contractSymbol: trade.instrument }, order: { ts: 'DESC' } });
+      const ownFresh = ownLatest !== null && now - new Date(ownLatest.ts).getTime() <= this.sharedFallbackMaxAgeMs;
+      let sharedRow: CommonChainRow | null = null;
+      if (!ownFresh) {
+        const shared = await this.unified.sharedQuote({ contractSymbol: trade.instrument }, { maxAgeMs: this.sharedFallbackMaxAgeMs, now });
+        sharedRow = shared ? commonChainRowFromUnified(shared as unknown as Record<string, unknown>) : null;
+      }
+      const latest = ownFresh
+        ? ownLatest
+        : sharedRow
+          ? {
+              expiry: sharedRow.expiry,
+              strike: sharedRow.strike,
+              optionType: sharedRow.optionType,
+              ltp: sharedRow.ltp,
+              bid: sharedRow.bid,
+              ask: sharedRow.ask,
+              bidQty: sharedRow.bidQty,
+              askQty: sharedRow.askQty,
+              openInterest: sharedRow.oi,
+              oiChange: sharedRow.changeOi,
+              impliedVolatility: sharedRow.iv,
+              ts: sharedRow.ts,
+            }
+          : null;
       if (!latest) { out.push({ tradeId: trade.id, status: 'no quote' }); continue; }
+      const exitFromCommonStore = !ownFresh;
+      const exitSource = ownFresh ? 'UPSTOX_LIVE' : `COMMON_STORE:${sharedRow?.source || 'UNKNOWN'}`;
 
       const ltp = Number(latest.ltp);
       if (!(ltp > 0)) { out.push({ tradeId: trade.id, status: 'invalid premium' }); continue; }
@@ -535,7 +731,7 @@ export class UpstoxLivePaperAutoEntryService {
       if (candidate) await this.learning.updateExcursion(candidate.id, ltp);
 
       const since = new Date(new Date(entryTs).getTime() - 60_000);
-      const { option, underlying: underlyingCandles } = await this.candlesFor(trade.instrument, this.deskUnderlying, since);
+      const { option, underlying: underlyingCandles } = await this.candlesFor(trade.instrument, this.deskUnderlying, since, exitFromCommonStore);
       const optionAtr = atr(option, 14);
       const optionType: 'CE' | 'PE' = (String(candidate?.optionType ?? (trade.instrument.endsWith('PE') ? 'PE' : 'CE')).toUpperCase() === 'PE' ? 'PE' : 'CE');
 
@@ -552,7 +748,10 @@ export class UpstoxLivePaperAutoEntryService {
       let setupInvalidated = false;
       let adverseReversalScore: number | null = null;
       const expiry = candidate?.expiry ? String(candidate.expiry).slice(0, 10) : (latest.expiry ? String(latest.expiry).slice(0, 10) : sessionDate);
-      const chain = await this.chainLegs(this.deskUnderlying, expiry, new Set([Number(latest.strike)]), since);
+      const exitChainRows = exitFromCommonStore
+        ? new Map((await this.commonStoreChain(this.deskUnderlying)).rows.map((r) => [r.contractSymbol, r]))
+        : undefined;
+      const chain = await this.chainLegs(this.deskUnderlying, expiry, new Set([Number(latest.strike)]), since, exitChainRows);
       if (option.length >= 4 && optionType === (String(latest.optionType).toUpperCase() === 'PE' ? 'PE' : 'CE')) {
         const assessment = assessPattern({
           optionCandles: option,
@@ -561,7 +760,7 @@ export class UpstoxLivePaperAutoEntryService {
           quote: {
             ltp, bid: latest.bid === null ? null : Number(latest.bid), ask: latest.ask === null ? null : Number(latest.ask),
             bidQty: latest.bidQty === null ? null : Number(latest.bidQty), askQty: latest.askQty === null ? null : Number(latest.askQty),
-            ts: new Date(latest.ts), oi: latest.openInterest === null ? null : Number(latest.openInterest),
+            ts: latest.ts ? new Date(latest.ts) : new Date(now), oi: latest.openInterest === null ? null : Number(latest.openInterest),
             changeOi: latest.oiChange === null ? null : Number(latest.oiChange),
             iv: latest.impliedVolatility === null ? null : Number(latest.impliedVolatility),
           },
@@ -593,14 +792,14 @@ export class UpstoxLivePaperAutoEntryService {
       });
 
       if (!exit.exit) {
-        out.push({ tradeId: trade.id, ltp, stop: exit.stop, exit: false, notes: exit.notes });
+        out.push({ tradeId: trade.id, ltp, stop: exit.stop, exit: false, notes: exit.notes, source: exitSource });
         continue;
       }
 
       const closed = await this.desk.closeTrade({ tradeId: trade.id, exitPrice: ltp, exitTrigger: exit.reason ?? 'V1_EXIT' });
       if (candidate) await this.learning.markExit(candidate.id, { exitPrice: Number(closed.exitPrice), exitReason: exit.reason ?? 'V1_EXIT' });
       this.logger.log(`[UPSTOX-AUTO-V1] CLOSE ${trade.instrument} @ ₹${ltp} · ${exit.reason} · MFE ${((highest - entryPrice) / entryPrice * 100).toFixed(1)}% MAE ${((lowest - entryPrice) / entryPrice * 100).toFixed(1)}%`);
-      out.push({ tradeId: trade.id, ltp, exit: true, reason: exit.reason, candidateId: candidate?.id ?? null });
+      out.push({ tradeId: trade.id, ltp, exit: true, reason: exit.reason, candidateId: candidate?.id ?? null, source: exitSource });
       void snapshot;
     }
     return out;
