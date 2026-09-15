@@ -128,14 +128,17 @@ export class UpstoxLivePaperAutoEntryService {
   }
 
   /**
-   * How old a COMMON-store observation may be for this desk to use it. The desk's
-   * own stale budget is the authority — the fallback must never be more permissive
-   * than the rule it stands in for.
+   * How old a COMMON-store observation may be for this desk to use it. A cross-process
+   * read carries more latency than an in-process tick, so the shared path uses the
+   * common layer's own budget (`UNIFIED_SHARED_QUOTE_MAX_AGE_MS`, the knob every other
+   * consumer of the shared store uses) and never borrows the desk's tighter own-feed
+   * budget. The desk's own-feed rule (`staleQuoteMaxAgeMs`) is unchanged; a tick's
+   * true age is still journalled on the candidate as `tickAgeMs`.
    */
   private get sharedFallbackMaxAgeMs(): number {
     const configured = Number(process.env.UNIFIED_SHARED_QUOTE_MAX_AGE_MS);
     if (Number.isFinite(configured) && configured > 0) return configured;
-    return this.config.staleQuoteMaxAgeMs;
+    return 60_000;
   }
 
   /**
@@ -402,24 +405,26 @@ export class UpstoxLivePaperAutoEntryService {
    */
   private async latestSpot(underlying: string): Promise<number | null> {
     const now = Date.now();
-    const maxAge = this.sharedFallbackMaxAgeMs;
+    const ownMaxAge = this.config.staleQuoteMaxAgeMs;
+    const sharedMaxAge = this.sharedFallbackMaxAgeMs;
     const row = await this.snapshots.findOne({ where: { instrument: underlying }, order: { ts: 'DESC' } });
     const price = row ? Number(row.price) : null;
     const ownAgeMs = row ? Math.max(0, now - new Date(row.ts).getTime()) : null;
-    if (price !== null && Number.isFinite(price) && price > 0 && ownAgeMs !== null && ownAgeMs <= maxAge) return price;
+    if (price !== null && Number.isFinite(price) && price > 0 && ownAgeMs !== null && ownAgeMs <= ownMaxAge) return price;
 
     // Own level absent or stale → the common store's index observation (the other
     // producer publishes it: BSE:SENSEX / NSE:NIFTY50).
-    const shared = await this.unified.sharedSnapshot({ tail: underlying, exchange: this.deskExchange }, { maxAgeMs: maxAge, now });
+    const shared = await this.unified.sharedSnapshot({ tail: underlying, exchange: this.deskExchange }, { maxAgeMs: sharedMaxAge, now });
     const sharedPrice = shared ? Number(shared.ltp) : null;
     if (sharedPrice !== null && Number.isFinite(sharedPrice) && sharedPrice > 0) return sharedPrice;
 
-    // Last resort: the level carried on this desk's own option rows, still gated.
+    // Last resort: the level carried on this desk's own option rows, still gated by
+    // the desk's OWN budget (a foreign tape is never used to make an own row pass).
     const byPrice = await this.quotes.findOne({ where: { underlying }, order: { ts: 'DESC' } });
     const fromLegAgeMs = byPrice ? Math.max(0, now - new Date(byPrice.ts).getTime()) : null;
     const fromLeg = byPrice?.underlyingPrice === null || byPrice?.underlyingPrice === undefined ? null : Number(byPrice.underlyingPrice);
     // Never invented: an underlying level must come from a real, sufficiently recent observation.
-    return fromLeg !== null && Number.isFinite(fromLeg) && fromLeg > 0 && fromLegAgeMs !== null && fromLegAgeMs <= maxAge ? fromLeg : null;
+    return fromLeg !== null && Number.isFinite(fromLeg) && fromLeg > 0 && fromLegAgeMs !== null && fromLegAgeMs <= ownMaxAge ? fromLeg : null;
   }
 
   /**
@@ -694,7 +699,7 @@ export class UpstoxLivePaperAutoEntryService {
       // own row while it is fresh, otherwise the common store's row for that contract.
       // Without this an entry taken from the common store could never be exited here.
       const ownLatest = await this.quotes.findOne({ where: { contractSymbol: trade.instrument }, order: { ts: 'DESC' } });
-      const ownFresh = ownLatest !== null && now - new Date(ownLatest.ts).getTime() <= this.sharedFallbackMaxAgeMs;
+      const ownFresh = ownLatest !== null && now - new Date(ownLatest.ts).getTime() <= this.config.staleQuoteMaxAgeMs;
       let sharedRow: CommonChainRow | null = null;
       if (!ownFresh) {
         const shared = await this.unified.sharedQuote({ contractSymbol: trade.instrument }, { maxAgeMs: this.sharedFallbackMaxAgeMs, now });
