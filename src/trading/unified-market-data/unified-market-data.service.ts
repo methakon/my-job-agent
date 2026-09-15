@@ -55,6 +55,12 @@ const finite = (value: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+/** Positive integer env override with a documented default. */
+const envInt = (name: string, fallback: number): number => {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : fallback;
+};
+
 /**
  * Absence-preserving numeric coercion: an explicit null / undefined / blank
  * string means the provider published NO value and stays null.
@@ -116,6 +122,24 @@ export class UnifiedMarketDataService {
   private readonly latestQuotes = new Map<string, UnifiedOptionQuote>();
   /** Latest underlying/index observation per symbol. */
   private readonly latestSnapshots = new Map<string, UnifiedMarketSnapshot>();
+
+  /**
+   * ── Write-behind buffers (streaming path only) ──────────────────────────────
+   * Rows built by ingestQuotes/ingestSnapshots wait here until the next flush, so the
+   * tape path performs no I/O and the pool sees ONE multi-row INSERT per interval
+   * instead of one per provider message. Keyed by the row's (deterministic, replay-
+   * safe) id, so a re-queue after a failed flush is idempotent and cannot grow.
+   */
+  private readonly pendingQuoteRows = new Map<string, UnifiedOptionQuote>();
+  private readonly pendingSnapshotRows = new Map<string, UnifiedMarketSnapshot>();
+  private flushTimer: NodeJS.Timeout | null = null;
+  private flushingQuotes = false;
+  private flushingSnapshots = false;
+  private flushedRows = 0;
+  private droppedRows = 0;
+  /** Flush cadence and the hard bound on buffered rows (absence over unbounded memory). */
+  private readonly flushIntervalMs = envInt('UNIFIED_WRITE_BEHIND_FLUSH_MS', 500);
+  private readonly maxPendingRows = envInt('UNIFIED_MAX_PENDING_ROWS', 20_000);
   /**
    * Idempotency window for repeated observations (source|instrument|source ts).
    * A producer that sends the same broker tick twice (doubled SDK subscription
@@ -204,48 +228,161 @@ export class UnifiedMarketDataService {
 
   /**
    * Every option observation of one provider message, validated and cached exactly
-   * as ingestQuote does, but written in ONE multi-row INSERT.
+   * as ingestQuote does — but the WRITE is deferred to a coalescing flush.
    *
-   * Measured motivation: a per-record awaited write costs one Oracle Cloud round
-   * trip (~330 ms p50, ~600 ms measured per message on the live FYERS feed) and
-   * fire-and-forget callers let those writes pile up unbounded, so the shared tape
-   * fell seconds behind the market and never recovered. Batching is a TRANSPORT
-   * change only: same validation, same canonical identity, same absence-preserving
-   * nulls, same provenance, same write-behind cache; replay-safety is unchanged
-   * (the deterministic primary key still dedupes a replayed batch).
+   * Why: on the live FYERS tape each provider message needs a write, and one write
+   * through the SSH tunnel costs ~200 ms of round trip rising to ~1 s on the big
+   * table. One awaited write per message therefore cannot keep up with the tape
+   * (measured: the shared tape fell minutes behind and never recovered), and
+   * issuing one per message also spiked the pool against its idle-connection
+   * reaper (db.config.ts `maxIdle: 2`, `idleTimeout: 30s`) until in-flight writes
+   * stopped settling altogether.
    *
-   * If the batched write fails the rows are retried ONE BY ONE, so a single bad row
-   * can never cost the whole message and no failure is ever silent.
+   * So the streaming path is WRITE-BEHIND, which the store was always documented to
+   * be ("the store is a write-behind cache first, table second"): rows are built,
+   * cached and returned immediately, and the accumulated batch is written by
+   * ONE multi-row INSERT every UNIFIED_WRITE_BEHIND_FLUSH_MS. The message path
+   * performs no I/O at all, so its cost no longer scales with the tape rate.
+   *
+   * This changes only WHEN bytes reach the table. Validation, canonical identity,
+   * units, timestamps, absence-preserving nulls, provenance, replay-safe ids and
+   * the cache the engines read are all unchanged. Rows that cannot be written are
+   * re-queued (the id-keyed map makes a re-queue idempotent), and a row beyond
+   * UNIFIED_MAX_PENDING_ROWS is dropped AND COUNTED — absence stays absence.
    */
   async ingestQuotes(inputs: UnifiedTickInput[]): Promise<Array<UnifiedOptionQuote | null>> {
     const built = (inputs ?? []).map((input) => this.buildQuoteRow(input));
     const out = built.map((b) => (b ? b.row : null));
-    const toWrite = built.filter((b): b is { row: UnifiedOptionQuote; repeated: boolean } => b !== null && !b.repeated);
-    if (!toWrite.length) return out;
-    const rows = toWrite.map((b) => (b.row.id ? b.row : Object.assign(b.row, { id: randomUUID() })));
-    if (rows.length === 1) {
-      try {
-        await this.quotes.save(rows[0]);
-      } catch (error) {
-        this.logger.warn(`unified quote persist failed for ${rows[0].instrumentKey}: ${(error as Error).message}`);
-      }
-      return out;
+    let queued = 0;
+    for (const b of built) {
+      if (!b || b.repeated) continue;
+      const row = b.row.id ? b.row : Object.assign(b.row, { id: randomUUID() });
+      this.pendingQuoteRows.set(row.id as string, row);
+      queued += 1;
     }
+    if (queued) this.scheduleFlush();
+    return out;
+  }
+
+  /** Batch sibling of ingestSnapshot — same write-behind contract (see ingestQuotes). */
+  async ingestSnapshots(inputs: UnifiedTickInput[]): Promise<Array<UnifiedMarketSnapshot | null>> {
+    const built = (inputs ?? []).map((input) => this.buildSnapshotRow(input));
+    const out = built.map((b) => (b ? b.row : null));
+    let queued = 0;
+    for (const b of built) {
+      if (!b || b.repeated) continue;
+      const row = b.row.id ? b.row : Object.assign(b.row, { id: randomUUID() });
+      this.pendingSnapshotRows.set(row.id as string, row);
+      queued += 1;
+    }
+    if (queued) this.scheduleFlush();
+    return out;
+  }
+
+  /**
+   * Write every buffered row in one multi-row INSERT per table. Called by the flush
+   * timer; safe to call directly (tests, a graceful drain). A second call while a
+   * flush is running returns immediately — the running flush picks up whatever has
+   * accumulated, so the pool never sees a burst.
+   */
+  async flushPending(): Promise<{ quotes: number; snapshots: number }> {
+    return { quotes: await this.flushQuoteRows(), snapshots: await this.flushSnapshotRows() };
+  }
+
+  /** Write-behind diagnostics (observability only; never gates, never writes). */
+  writeBehindStats(): { pendingQuotes: number; pendingSnapshots: number; flushedRows: number; droppedRows: number; flushing: boolean } {
+    return {
+      pendingQuotes: this.pendingQuoteRows.size,
+      pendingSnapshots: this.pendingSnapshotRows.size,
+      flushedRows: this.flushedRows,
+      droppedRows: this.droppedRows,
+      flushing: this.flushingQuotes || this.flushingSnapshots,
+    };
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      void this.flushPending().catch((error: unknown) => this.logger.warn(`unified write-behind flush failed: ${(error as Error).message}`));
+    }, this.flushIntervalMs);
+    // Never hold the process open for a flush.
+    this.flushTimer.unref?.();
+  }
+
+  private async flushQuoteRows(): Promise<number> {
+    if (this.flushingQuotes || !this.pendingQuoteRows.size) return 0;
+    this.flushingQuotes = true;
+    const rows = [...this.pendingQuoteRows.values()];
+    this.pendingQuoteRows.clear();
     try {
       // The `depth` column is typed `unknown`, which TypeORM's insert typings reject;
       // the row shape itself is exactly what the entity was created with.
       await this.quotes.insert(rows as unknown as Parameters<Repository<UnifiedOptionQuote>['insert']>[0]);
+      this.flushedRows += rows.length;
+      return rows.length;
     } catch (error) {
-      this.logger.warn(`unified batch quote persist failed for ${rows.length} row(s); retrying row-by-row: ${(error as Error).message}`);
-      for (const row of rows) {
-        try {
-          await this.quotes.save(row);
-        } catch (rowError) {
-          this.logger.warn(`unified quote persist failed for ${row.instrumentKey}: ${(rowError as Error).message}`);
-        }
-      }
+      this.logger.warn(`unified write-behind quote flush failed for ${rows.length} row(s); re-queueing: ${(error as Error).message}`);
+      this.requeueQuoteRows(rows);
+      return 0;
+    } finally {
+      this.flushingQuotes = false;
+      if (this.pendingQuoteRows.size) this.scheduleFlush();
     }
-    return out;
+  }
+
+  private async flushSnapshotRows(): Promise<number> {
+    if (this.flushingSnapshots || !this.pendingSnapshotRows.size) return 0;
+    this.flushingSnapshots = true;
+    const rows = [...this.pendingSnapshotRows.values()];
+    this.pendingSnapshotRows.clear();
+    try {
+      await this.snapshots.insert(rows as unknown as Parameters<Repository<UnifiedMarketSnapshot>['insert']>[0]);
+      this.flushedRows += rows.length;
+      return rows.length;
+    } catch (error) {
+      this.logger.warn(`unified write-behind snapshot flush failed for ${rows.length} row(s); re-queueing: ${(error as Error).message}`);
+      this.requeueSnapshotRows(rows);
+      return 0;
+    } finally {
+      this.flushingSnapshots = false;
+      if (this.pendingSnapshotRows.size) this.scheduleFlush();
+    }
+  }
+
+  /** Re-buffer rows a failed flush could not write. The id key makes this idempotent. */
+  private requeueQuoteRows(rows: UnifiedOptionQuote[]): void {
+    for (const row of rows) {
+      const id = String(row.id ?? '');
+      if (!id) continue;
+      if (!this.pendingQuoteRows.has(id) && this.pendingQuoteRows.size >= this.maxPendingRows) {
+        this.droppedRows += 1;
+        continue;
+      }
+      this.pendingQuoteRows.set(id, row);
+    }
+    this.warnIfDropping('quote');
+  }
+
+  private requeueSnapshotRows(rows: UnifiedMarketSnapshot[]): void {
+    for (const row of rows) {
+      const id = String(row.id ?? '');
+      if (!id) continue;
+      if (!this.pendingSnapshotRows.has(id) && this.pendingSnapshotRows.size >= this.maxPendingRows) {
+        this.droppedRows += 1;
+        continue;
+      }
+      this.pendingSnapshotRows.set(id, row);
+    }
+    this.warnIfDropping('snapshot');
+  }
+
+  /** A dropped observation is ABSENT — count it and say so, loudly, but throttled. */
+  private warnIfDropping(kind: string): void {
+    if (!this.droppedRows) return;
+    if (this.droppedRows === 1 || this.droppedRows % 500 === 0) {
+      this.logger.warn(`unified write-behind buffer at capacity — dropped ${this.droppedRows} ${kind} row(s) (ABSENT in the store, never fabricated)`);
+    }
   }
 
   /**
@@ -330,36 +467,6 @@ export class UnifiedMarketDataService {
       this.logger.warn(`unified snapshot persist failed for ${built.row.symbol}: ${(error as Error).message}`);
       return built.row;
     }
-  }
-
-  /** Batch sibling of ingestSnapshot — one multi-row INSERT (see ingestQuotes). */
-  async ingestSnapshots(inputs: UnifiedTickInput[]): Promise<Array<UnifiedMarketSnapshot | null>> {
-    const built = (inputs ?? []).map((input) => this.buildSnapshotRow(input));
-    const out = built.map((b) => (b ? b.row : null));
-    const toWrite = built.filter((b): b is { row: UnifiedMarketSnapshot; repeated: boolean } => b !== null && !b.repeated);
-    if (!toWrite.length) return out;
-    const rows = toWrite.map((b) => (b.row.id ? b.row : Object.assign(b.row, { id: randomUUID() })));
-    if (rows.length === 1) {
-      try {
-        await this.snapshots.save(rows[0]);
-      } catch (error) {
-        this.logger.warn(`unified snapshot persist failed for ${rows[0].symbol}: ${(error as Error).message}`);
-      }
-      return out;
-    }
-    try {
-      await this.snapshots.insert(rows as unknown as Parameters<Repository<UnifiedMarketSnapshot>['insert']>[0]);
-    } catch (error) {
-      this.logger.warn(`unified batch snapshot persist failed for ${rows.length} row(s); retrying row-by-row: ${(error as Error).message}`);
-      for (const row of rows) {
-        try {
-          await this.snapshots.save(row);
-        } catch (rowError) {
-          this.logger.warn(`unified snapshot persist failed for ${row.symbol}: ${(rowError as Error).message}`);
-        }
-      }
-    }
-    return out;
   }
 
   private buildSnapshotRow(input: UnifiedTickInput): { row: UnifiedMarketSnapshot; repeated: boolean } | null {

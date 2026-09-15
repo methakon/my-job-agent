@@ -222,13 +222,16 @@ export class TickInterpreterService {
   }
 
   /**
-   * Persist every canonical tick of ONE provider message in a single batched write.
+   * Persist every canonical tick of ONE provider message as a single batched,
+   * write-behind submission.
    *
    * The tape is a real-time stream: a per-record awaited write costs one Oracle
    * Cloud round trip each, and a fire-and-forget feed let those writes pile up
    * unbounded — the shared tape then fell behind the market and never caught up.
-   * Batching changes only the TRANSPORT: same validation, identity, units,
-   * absence-preserving nulls, provenance and write-behind cache.
+   * The store buffers what is submitted here and writes it in one multi-row INSERT
+   * per flush interval, so this call performs no I/O and its cost does not scale
+   * with the tape rate. Validation, identity, units, absence-preserving nulls,
+   * provenance and replay-safe ids are unchanged.
    */
   async persistMany(ticks: CanonicalTick[]): Promise<number> {
     if (!ticks.length) return 0;

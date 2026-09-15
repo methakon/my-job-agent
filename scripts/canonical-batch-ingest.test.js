@@ -137,6 +137,60 @@ class FakeUnified {
     ok('malformed payloads are dropped/counted without breaking the stream');
   }
 
+  // ── [E] the write-behind store path itself ─────────────────────────────────
+  console.log('\n[E] write-behind flush');
+  {
+    const { UnifiedMarketDataService } = require(path.join(REPO, 'dist', 'trading', 'unified-market-data', 'unified-market-data.service'));
+    class FakeRepo {
+      constructor() { this.inserts = []; this.saves = 0; this.fail = false; }
+      create(o) { return { ...o }; }
+      async insert(rows) {
+        if (this.fail) throw new Error('simulated write failure');
+        this.inserts.push(Array.isArray(rows) ? rows : [rows]);
+        return {};
+      }
+      async save(row) { this.saves += 1; this.inserts.push([row]); return row; }
+    }
+    const ts = new Date().toISOString();
+    const tickInput = (strike) => ({
+      instrumentKey: `NSE:NIFTY26SEP${strike}PE`, underlying: 'NIFTY', exchange: 'NSE', segment: 'FO',
+      instrumentType: 'OPT', expiry: '2026-09-26', strike, optionType: 'PE', ltp: 99.8, bid: 99.65, ask: 99.95,
+      volume: null, oi: 45000, source: 'FYERS_LIVE', sourceTimestamp: ts,
+    });
+    const quotes = new FakeRepo();
+    const snaps = new FakeRepo();
+    const svc = new UnifiedMarketDataService(quotes, snaps);
+
+    const rows = await svc.ingestQuotes([tickInput(23000), tickInput(23100), tickInput(23200)]);
+    assert.strictEqual(rows.length, 3, 'every input maps to a row');
+    assert.ok(rows.every((r) => r && r.id), 'each cached row carries its replay-safe id');
+    assert.strictEqual(quotes.inserts.length, 0, 'the tape path performs NO I/O');
+    assert.deepStrictEqual(svc.writeBehindStats(), { pendingQuotes: 3, pendingSnapshots: 0, flushedRows: 0, droppedRows: 0, flushing: false });
+    ok('the message path buffers rows without touching the database');
+
+    await svc.flushPending();
+    assert.strictEqual(quotes.inserts.length, 1, 'the flush issues ONE statement');
+    assert.strictEqual(quotes.inserts[0].length, 3, 'carrying every buffered row (a real multi-row INSERT)');
+    assert.strictEqual(quotes.saves, 0, 'no row-by-row writes');
+    assert.strictEqual(svc.writeBehindStats().flushedRows, 3, 'flushed rows are counted');
+    ok('one flush = one multi-row INSERT for the whole batch');
+
+    await svc.ingestQuotes([tickInput(23000)]);
+    assert.strictEqual(svc.writeBehindStats().pendingQuotes, 0, 'a repeated observation is not queued again');
+    ok('a repeated tick is not buffered twice (replay-safe)');
+
+    await svc.ingestQuotes([tickInput(23300)]);
+    assert.strictEqual(svc.writeBehindStats().pendingQuotes, 1, 'a new tick is buffered');
+    quotes.fail = true;
+    await svc.flushPending();
+    assert.strictEqual(svc.writeBehindStats().pendingQuotes, 1, 'a failed flush re-queues rather than losing the row');
+    assert.strictEqual(svc.writeBehindStats().flushedRows, 3, 'a failed flush is not counted as written');
+    quotes.fail = false;
+    await svc.flushPending();
+    assert.strictEqual(svc.writeBehindStats().pendingQuotes, 0, 'the re-queued row is written on the next flush');
+    ok('a failed flush re-queues (no silent loss) and recovers');
+  }
+
   console.log(`\n${pass} checks passed`);
 })().catch((err) => {
   console.error(`\nFAILED: ${err && err.message}`);
