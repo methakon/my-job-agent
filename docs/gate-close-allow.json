@@ -145,6 +145,42 @@
       "recorded": "2026-09-14T07:15+05:30 (this session; cleanup of goodbye sequence after verification pivot)",
       "evidence": "git show --stat 983b033 lists only src/job-application/skills/gap-severity.ts +src/job-application/qualification.service.ts +scripts/ja-015-skill-gap-severity.test.ts; verification: tsc 0 errors/0 warnings, tests 120/120 (ja-010/012/013/015), build 0 errors/0 warnings, render 12/12; no trading/algo Trading Agent/market-data/feed/risk/execution/FNF/option-chain files.",
       "expires_hint": "Delete once 983b0330a92ad3c806923fa8c01a6d8f1656bc55 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "21326c7c57729b29ecd2eec5e5f2826b8d5699da": {
+      "short": "21326c7",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: standalone pure classifier (GapSeverity = NONE/MINOR/MODERATE/MAJOR/BLOCKING/UNKNOWN) derived ONLY from existing signals, wired into qualification, with deterministic trace evidence for failing test cases. Cherry-pick onto ja-015-publish branch (base: origin/dev b914364) for safe JA-only push; no shared dev history rewrite, no force-push. Touches src/job-application/skills/gap-severity.ts (new), src/job-application/qualification.service.ts (+invoke), scripts/ja-015-skill-gap-severity.test.ts (new, 55 cases). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain code touched. Separate JA-roadmap control plane (job_application_roadmap_items id=9).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat 21326c7 on ja-015-publish lists only src/job-application/skills/gap-severity.ts + src/job-application/qualification.service.ts + scripts/ja-015-skill-gap-severity.test.ts; tsc 0 errors, npm run build 0 errors on ja-015-publish branch; no trading/algo Trading Agent/market-data/feed/risk/execution/FNF/option-chain files.",
+      "expires_hint": "Delete once 21326c7c57729b29ecd2eec5e5f2826b8d5699da leaves the guard commit window (default: last 15 code commits)."
+    },
+    "c2260dc1fd5af9fc9bf057b54ebc04cbcddb58d9": {
+      "short": "c2260dc",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: allow-list entry for the JA-015 commit cherry-picked onto ja-015-publish branch (base: origin/dev b914364). Safe non-force JA-only publish; no shared dev history rewrite. Touches docs/gate-close-allow.json only (allow-list update for cherry-picked SHA).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat c2260dc on ja-015-publish lists only docs/gate-close-allow.json; allow-list: single clean entry keyed by full correct SHA 21326c7c57729b29ecd2eec5e5f2826b8d5699da; no trading/algo Trading Agent files touched.",
+      "expires_hint": "Delete once c2260dc1fd5af9fc9bf057b54ebc04cbcddb58d9 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "f3423085cc5fa394cce9c751d555de4fbe24fc61": {
+      "short": "f342308",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: allow-list SHA correction for the cherry-picked JA-015 commit on ja-015-publish branch (base: origin/dev b914364). Safe non-force JA-only publish; no shared dev history rewrite. Touches docs/gate-close-allow.json only (allow-list SHA correction for cherry-picked SHA).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat f342308 on ja-015-publish lists only docs/gate-close-allow.json; allow-list: corrected SHA for cherry-picked 21326c7c57729b29ecd2eec5e5f2826b8d5699da; no trading/algo Trading Agent files touched.",
+      "expires_hint": "Delete once f3423085cc5fa394cce9c751d555de4fbe24fc61 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "fc84590267e8ef87276f82eb98a57c57f9125c0f4": {
+      "short": "fc84590",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: remove duplicate + stale-SHA JA-015 allow-list entries for the cherry-picked JA commits on ja-015-publish branch (base: origin/dev b914364). Safe non-force JA-only publish; no shared dev history rewrite. Touches docs/gate-close-allow.json only (allow-list cleanup for cherry-picked SHAs).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat fc84590 on ja-015-publish lists only docs/gate-close-allow.json; allow-list: duplicates collapsed, stale-SHA keys removed; no trading/algo Trading Agent files touched.",
+      "expires_hint": "Delete once fc84590267e8ef87276f82eb98a57c57f9125c0f4 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
