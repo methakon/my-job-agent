@@ -25,9 +25,9 @@ export interface UpstoxV3Tick {
   closePrice: number | null;
   lastTradeTime: number | null;
   lastTradeQty: number | null;
-  // Option chain specific
-  firstDepth: { bidP: number; bidQ: number; askP: number; askQ: number } | null;
-  optionGreeks: { delta: number; theta: number; gamma: number; vega: number; rho: number } | null;
+  // Option chain specific — null means provider did not send this field
+  firstDepth: { bidP: number | null; bidQ: number | null; askP: number | null; askQ: number | null } | null;
+  optionGreeks: { delta: number | null; theta: number | null; gamma: number | null; vega: number | null; rho: number | null } | null;
   iv: number | null;
   oi: number | null;
   volume: number | null;
@@ -78,6 +78,9 @@ export class UpstoxV3WebSocketService implements OnModuleDestroy {
   private marketInfoCallbacks: ((info: UpstoxV3MarketInfo) => void)[] = [];
   private connected = false;
   private lastError: string | null = null;
+  /** Per-instrument merge cache for partial-update protection. */
+  private feedMergeCache = new Map<string, UpstoxV3Tick>();
+  private static readonly MAX_MERGE_CACHE_SIZE = 10_000;
 
   constructor() {
     this.loadProto();
@@ -271,8 +274,11 @@ export class UpstoxV3WebSocketService implements OnModuleDestroy {
       if (!feedResponse.feeds) return;
 
       for (const [instrumentKey, feed] of Object.entries(feedResponse.feeds)) {
-        const tick = this.parseFeed(instrumentKey, feedType, feedResponse.currentTs, feed);
-        if (tick) {
+        const parsed = this.parseFeed(instrumentKey, feedType, feedResponse.currentTs, feed);
+        if (parsed) {
+          // Merge with last known values to protect against partial updates.
+          // Proto3 absent fields → undefined → parseFeed returns null → ?? preserves prev.
+          const tick = this.mergeWithCache(parsed);
           for (const cb of this.tickCallbacks) {
             try { cb(tick); } catch (e) { /* swallow */ }
           }
@@ -319,19 +325,19 @@ export class UpstoxV3WebSocketService implements OnModuleDestroy {
       }
       if (flg.firstDepth) {
         firstDepth = {
-          bidP: flg.firstDepth.bidP ?? 0,
-          bidQ: Number(flg.firstDepth.bidQ ?? 0),
-          askP: flg.firstDepth.askP ?? 0,
-          askQ: Number(flg.firstDepth.askQ ?? 0),
+          bidP: flg.firstDepth.bidP ?? null,
+          bidQ: flg.firstDepth.bidQ != null ? Number(flg.firstDepth.bidQ) : null,
+          askP: flg.firstDepth.askP ?? null,
+          askQ: flg.firstDepth.askQ != null ? Number(flg.firstDepth.askQ) : null,
         };
       }
       if (flg.optionGreeks) {
         optionGreeks = {
-          delta: flg.optionGreeks.delta ?? 0,
-          theta: flg.optionGreeks.theta ?? 0,
-          gamma: flg.optionGreeks.gamma ?? 0,
-          vega: flg.optionGreeks.vega ?? 0,
-          rho: flg.optionGreeks.rho ?? 0,
+          delta: flg.optionGreeks.delta ?? null,
+          theta: flg.optionGreeks.theta ?? null,
+          gamma: flg.optionGreeks.gamma ?? null,
+          vega: flg.optionGreeks.vega ?? null,
+          rho: flg.optionGreeks.rho ?? null,
         };
       }
       iv = flg.iv ?? null;
@@ -352,19 +358,19 @@ export class UpstoxV3WebSocketService implements OnModuleDestroy {
         if (ff.marketFF.marketLevel?.bidAskQuote?.length > 0) {
           const q = ff.marketFF.marketLevel.bidAskQuote[0];
           firstDepth = {
-            bidP: q.bidP ?? 0,
-            bidQ: Number(q.bidQ ?? 0),
-            askP: q.askP ?? 0,
-            askQ: Number(q.askQ ?? 0),
+            bidP: q.bidP ?? null,
+            bidQ: q.bidQ != null ? Number(q.bidQ) : null,
+            askP: q.askP ?? null,
+            askQ: q.askQ != null ? Number(q.askQ) : null,
           };
         }
         if (ff.marketFF.optionGreeks) {
           optionGreeks = {
-            delta: ff.marketFF.optionGreeks.delta ?? 0,
-            theta: ff.marketFF.optionGreeks.theta ?? 0,
-            gamma: ff.marketFF.optionGreeks.gamma ?? 0,
-            vega: ff.marketFF.optionGreeks.vega ?? 0,
-            rho: ff.marketFF.optionGreeks.rho ?? 0,
+            delta: ff.marketFF.optionGreeks.delta ?? null,
+            theta: ff.marketFF.optionGreeks.theta ?? null,
+            gamma: ff.marketFF.optionGreeks.gamma ?? null,
+            vega: ff.marketFF.optionGreeks.vega ?? null,
+            rho: ff.marketFF.optionGreeks.rho ?? null,
           };
         }
         iv = ff.marketFF.iv ?? null;
@@ -396,6 +402,75 @@ export class UpstoxV3WebSocketService implements OnModuleDestroy {
       iv,
       oi,
       volume,
+    };
+  }
+
+  /**
+   * Merge a new parsed tick with the last known values for the same instrument.
+   * Proto3 partial updates set absent fields to 0 (not null). With `optional`
+   * on the proto, absent fields decode as undefined → parseFeed turns them to
+   * null. This method preserves the previous non-null values for any field
+   * the provider did not update in this tick.
+   *
+   * State is scoped by instrument key and provider (V3 WS only).
+   */
+  private mergeWithCache(tick: UpstoxV3Tick): UpstoxV3Tick {
+    const prev = this.feedMergeCache.get(tick.instrumentKey);
+    if (!prev) {
+      this.feedMergeCache.set(tick.instrumentKey, tick);
+      return tick;
+    }
+
+    const merged: UpstoxV3Tick = {
+      instrumentKey: tick.instrumentKey,
+      type: tick.type,
+      timestamp: tick.timestamp,
+      ltp: tick.ltp ?? prev.ltp,
+      closePrice: tick.closePrice ?? prev.closePrice,
+      lastTradeTime: tick.lastTradeTime ?? prev.lastTradeTime,
+      lastTradeQty: tick.lastTradeQty ?? prev.lastTradeQty,
+      firstDepth: this.mergeDepth(prev.firstDepth, tick.firstDepth),
+      optionGreeks: this.mergeGreeks(prev.optionGreeks, tick.optionGreeks),
+      iv: tick.iv ?? prev.iv,
+      oi: tick.oi ?? prev.oi,
+      volume: tick.volume ?? prev.volume,
+    };
+
+    this.feedMergeCache.set(tick.instrumentKey, merged);
+    // Evict oldest entries if cache grows too large
+    if (this.feedMergeCache.size > UpstoxV3WebSocketService.MAX_MERGE_CACHE_SIZE) {
+      const firstKey = this.feedMergeCache.keys().next().value;
+      if (firstKey) this.feedMergeCache.delete(firstKey);
+    }
+    return merged;
+  }
+
+  private mergeDepth(
+    prev: UpstoxV3Tick['firstDepth'],
+    next: UpstoxV3Tick['firstDepth'],
+  ): UpstoxV3Tick['firstDepth'] {
+    if (!next) return prev; // no depth in this tick → keep previous
+    if (!prev) return next; // no previous → use what we got
+    return {
+      bidP: next.bidP ?? prev.bidP,
+      bidQ: next.bidQ ?? prev.bidQ,
+      askP: next.askP ?? prev.askP,
+      askQ: next.askQ ?? prev.askQ,
+    };
+  }
+
+  private mergeGreeks(
+    prev: UpstoxV3Tick['optionGreeks'],
+    next: UpstoxV3Tick['optionGreeks'],
+  ): UpstoxV3Tick['optionGreeks'] {
+    if (!next) return prev;
+    if (!prev) return next;
+    return {
+      delta: next.delta ?? prev.delta,
+      theta: next.theta ?? prev.theta,
+      gamma: next.gamma ?? prev.gamma,
+      vega: next.vega ?? prev.vega,
+      rho: next.rho ?? prev.rho,
     };
   }
 

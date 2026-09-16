@@ -18,19 +18,19 @@ message MarketOHLC {
   repeated OHLC ohlc = 1;
 }
 
-message Quote {
-  int64 bidQ = 1;
-  double bidP = 2;
-  int64 askQ = 3;
-  double askP = 4;
+message Quote{
+  optional int64 bidQ = 1;
+  optional double bidP = 2;
+  optional int64 askQ = 3;
+  optional double askP = 4;
 }
 
-message OptionGreeks {
-  double delta = 1;
-  double theta = 2;
-  double gamma = 3;
-  double vega = 4;
-  double rho = 5;
+message OptionGreeks{
+  optional double delta = 1;
+  optional double theta = 2;
+  optional double gamma = 3;
+  optional double vega = 4;
+  optional double rho = 5;
 }
 
 message OHLC {
@@ -56,8 +56,8 @@ message MarketFullFeed{
   MarketOHLC marketOHLC = 4;
   double atp = 5;
   int64 vtt = 6;
-  double oi = 7;
-  double iv = 8;
+  optional double oi = 7;
+  optional double iv = 8;
   double tbq =9;
   double tsq = 10;
   double iep = 11;
@@ -86,8 +86,8 @@ message FirstLevelWithGreeks{
   Quote firstDepth = 2;
   OptionGreeks optionGreeks = 3;
   int64 vtt = 4;
-  double oi = 5;
-  double iv = 6;
+  optional double oi = 5;
+  optional double iv = 6;
 }
 
 message Feed {
