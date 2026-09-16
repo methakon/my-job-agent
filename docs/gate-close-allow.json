@@ -184,7 +184,7 @@
     },
     "77b30513e8baac420780972aa14269c0a11fed0d": {
       "short": "77b3051",
-      "reason": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Touches ONLY Job Agent files: src/app.module.ts (AdaptationMatcherService DI provider), src/applications/apply-engine.service.ts (P5 adaptation blocks in applyToLead/prepareApplication/submitPrepared), src/job-application-roadmap/job-application-roadmap-page.controller.ts (@BypassAuth on GET only; mutations protected), src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts, scripts/ja-roadmap-status.js (new CLI status-sync helper). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. No .env change, no schema change. Reconciliation: JA-012→done, JA-013→done via API; JA-014 stays in_progress (doneWhen requires measured recall improvement, not matcher existence). Public GET /job-application-roadmap now serves 200 without auth; POST/DELETE/align-content mutations require session or x-operator-password (401 without). Login page already has the roadmap tile (no change).",
+      "reason": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Touches ONLY Job Agent files: src/app.module.ts (AdaptationMatcherService DI provider), src/applications/apply-engine.service.ts (P5 adaptation blocks in applyToLead/prepareApplication/submitPrepared), src/job-application-roadmap/job-application-roadmap-page.controller.ts (@BypassAuth on GET only; mutations protected), src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts, scripts/ja-roadmap-status.js (new CLI status-sync helper). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. No .env change, no schema change. Reconciliation: JA-012\u2192done, JA-013\u2192done via API; JA-014 stays in_progress (doneWhen requires measured recall improvement, not matcher existence). Public GET /job-application-roadmap now serves 200 without auth; POST/DELETE/align-content mutations require session or x-operator-password (401 without). Login page already has the roadmap tile (no change).",
       "workstream": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap sync + public roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-17 ('This is DEVELOPMENT status. Therefore: commits ARE allowed, pushes ARE allowed... You MAY: stage Job Agent changes, commit, push.')",
       "recorded": "2026-09-17T00:52+05:30 (this session; commit 77b3051 on ja-015-publish)",
@@ -250,6 +250,12 @@
       "reason": "Provider tick compatibility audit fixes: V3 WS mapper, V2 REST greeks, FYERS NULLs, timestamp model",
       "workstream": "Trading Agent \u2014 Provider Failover Architecture",
       "authority": "operator-directed compatibility audit"
+    },
+    "48de27fa55ccdf0a1b627f4f5ea27457acd400cb": {
+      "sha": "48de27fa55ccdf0a1b627f4f5ea27457acd400cb",
+      "reason": "V3 WS data integrity: proto3 optional presence + per-instrument merge cache",
+      "approved_by": "user (trading agent worker, inline approval)",
+      "timestamp": "2026-09-16T19:31:27Z"
     }
   }
 }
