@@ -3,8 +3,6 @@ import { Response } from 'express';
 import { JobApplicationRoadmapService } from './job-application-roadmap.service';
 import { BypassAuth } from '../auth/bypass-auth.decorator';
 
-const OPERATOR_PASSWORD_HEADER = 'x-operator-password';
-
 function esc(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -42,24 +40,12 @@ function bar(filled: number, total: number): string {
 }
 
 @Controller('job-application-roadmap')
-@BypassAuth()
 export class JobApplicationRoadmapPageController {
   constructor(private readonly jaSvc: JobApplicationRoadmapService) {}
 
   @Get()
-  async page(@Req() req: any, @Res() res: Response) {
-    const passwordHeader = req.headers[OPERATOR_PASSWORD_HEADER];
-    const sessionUser = req.session?.user as { id?: string; username?: string } | undefined;
-
-    if (!sessionUser && !passwordHeader) {
-      res.redirect(302, '/');
-      return;
-    }
-    if (passwordHeader && process.env.SESSION_PASSWORD && passwordHeader !== process.env.SESSION_PASSWORD) {
-      res.status(401).type('text/plain').send('unauthorized');
-      return;
-    }
-
+  @BypassAuth()
+  async page(@Res() res: Response) {
     const [items, identity] = await Promise.all([
       this.jaSvc.findAll(),
       Promise.resolve(JobApplicationRoadmapService.IDENTITY),
@@ -234,19 +220,7 @@ ${withNotes
 
   @Post('align-content')
   @HttpCode(HttpStatus.OK)
-  async alignContent(@Req() req: any, @Res() res: Response) {
-    const passwordHeader = req.headers[OPERATOR_PASSWORD_HEADER];
-    const sessionUser = req.session?.user as { id?: string; username?: string } | undefined;
-
-    if (!sessionUser && !passwordHeader) {
-      res.redirect(302, '/');
-      return;
-    }
-    if (passwordHeader && process.env.SESSION_PASSWORD && passwordHeader !== process.env.SESSION_PASSWORD) {
-      res.status(401).type('text/plain').send('unauthorized');
-      return;
-    }
-
+  async alignContent(@Res() res: Response) {
     const result = await this.jaSvc.alignContentToSeed();
     res.type('application/json').send(JSON.stringify(result, null, 2));
   }

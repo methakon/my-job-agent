@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { mysqlConfig } from './shared/db.config';
 import { CandidateProfile } from './profile/candidate-profile.entity';
 import { CandidateEvidenceService } from './job-application/candidate-evidence.service';
+import { AdaptationMatcherService } from './job-application/skills/adaptation-matcher.service';
 import { JobLead } from './leads/job-lead.entity';
 import { Application } from './applications/application.entity';
 import { LearningWeight } from './applications/learning-weight.entity';
@@ -110,6 +111,7 @@ import { DatabaseSyncConfigService } from './database-sync/database-sync.config.
 import { DatabaseSyncAudit } from './database-sync/database-sync.entity';
 import { AuthController } from './auth/auth.controller';
 import { AppFallbackController } from './app-fallback.controller';
+import { HealthController } from './trading/health.controller';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
 import { ProfileService } from './profile/profile.service';
@@ -193,6 +195,7 @@ import {
     CvRegionFormatController, FyersAuthController, FyersOAuthController, UpstoxTradingPageController,
     PatternEngineController,
     AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
+    HealthController, // /health — must register BEFORE the fallback
     AppFallbackController, // MUST stay last: serves dashboard.html for unmatched GETs
   ],
   providers: [
@@ -207,6 +210,7 @@ import {
     ProjectClarificationService,
     PatternEngineService, PatternSignalDispatchService,
     CandidateEvidenceService,
+    AdaptationMatcherService,
   ],
 })
 export class AppModule {}
