@@ -118,6 +118,7 @@
     "helmet": "^8.3.0",
     "imapflow": "^1.7.6",
     "mailparser": "^3.9.16",
+    "mocha": "^11.8.0",
     "mysql2": "^3.11.0",
     "node-rsa": "^2.0.0",
     "nodemailer": "^9.0.5",
@@ -125,8 +126,10 @@
     "passport-google-oauth20": "^2.0.0",
     "pdfkit": "^0.20.1",
     "playwright-core": "^1.62.1",
+    "protobufjs": "^8.8.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "tsconfig-paths": "^4.2.0",
     "typeorm": "^0.3.20"
   },
   "devDependencies": {
@@ -136,6 +139,8 @@
     "@types/node": "^22.4.0",
     "@types/nodemailer": "^8.0.1",
     "@types/pdfkit": "^0.17.6",
+    "@types/protobufjs": "^6.0.0",
+    "ts-mocha": "^11.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"
   }

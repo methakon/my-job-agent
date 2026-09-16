@@ -85,9 +85,21 @@ export class UpstoxLivePaperAutoEntryService {
    * The registered underlyings. The desk account model has no per-account
    * instrument, so the universe is the same one the desk ingests — the broker's
    * configured instruments, never a symbol invented here.
+   *
+   * TEMPORARY OVERRIDE (17 Sep 2026): when UPSTOX_TRADING_UNIVERSE is set,
+   * only underlyings in that list are eligible for trading. Data capture for
+   * ALL configured instruments continues unaffected.
    */
   private get underlyings(): string[] {
-    return this.config.liveInstruments;
+    const all = this.config.liveInstruments;
+    const tradingUniverse = this.config.tradingUniverse;
+    if (tradingUniverse.length === 0) return all;
+
+    // Filter to only underlyings in the trading universe
+    return all.filter(key => {
+      const short = String(key.split('|').pop() ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return tradingUniverse.includes(short);
+    });
   }
 
   /**

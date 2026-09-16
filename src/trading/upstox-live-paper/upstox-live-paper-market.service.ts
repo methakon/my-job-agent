@@ -13,6 +13,8 @@ import { ownedUniverses, shortUniverse } from '../unified-market-data/feed-arbit
 import { universeForInstrument } from './upstox-live-paper.config';
 import { UPSTOX_LIVE_DATA_ISOLATION } from './upstox-live-paper.const';
 import { UpstoxLivePaperOptionQuote, UpstoxLivePaperMarketSnapshot } from './upstox-live-paper-entities';
+import { UpstoxV3WebSocketService, UpstoxV3Tick } from './upstox-v3-websocket.service';
+import { UpstoxOptionChainDiscoveryService } from './upstox-option-chain-discovery.service';
 
 /** Feed name this desk's REST poll registers under with the arbiter. */
 const UPSTOX_REST_FEED = 'UPSTOX_REST';
@@ -309,7 +311,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     private readonly arbitration: FeedArbitrationService,
     private readonly unified: UnifiedMarketDataService,
     // Canonical interpreter (shadow by default): measures this RAW Upstox leg.
-    private readonly interpreter: TickInterpreterService) {
+    private readonly interpreter: TickInterpreterService,
+    private readonly v3WebSocket: UpstoxV3WebSocketService,
+    private readonly optionChainDiscovery: UpstoxOptionChainDiscoveryService) {
     this.config = config; this.optionQuotes = optionQuotes; this.marketSnapshots = marketSnapshots;
     this.paperOnly = config.paperOnly; this.safetyLockActive = config.safetyLockActive;
     // Feed-health gate registration (brief s6/s8): the Upstox desk's own REST
@@ -362,9 +366,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     if (!this.config.liveInstruments.length) { this.logger.warn('[UPSTOX-LIVE] no instruments — market ingestion no-op'); return; }
     if (!this.config.liveCredentialsPresent) { this.logger.warn('[UPSTOX-LIVE] missing credentials — REST calls will fail auth'); return; }
     void this.fetchOptionChain(); void this.fetchMarketStatus(); this.startPeriodicRefresh();
-    if (this.config.liveWebSocketEnabled) void this.startWebSocket();
+    if (this.config.liveWebSocketEnabled) void this.startV3WebSocket();
   }
-  onModuleDestroy(): void { this.stopPeriodicRefresh(); this.stopWebSocket(); }
+  onModuleDestroy(): void { this.stopPeriodicRefresh(); this.v3WebSocket.onModuleDestroy(); }
 
   status(): LiveFeedStatus {
     const src: LiveFeedStatus['marketDataSource'] = !this.config.liveCredentialsPresent ? 'UPSTOX_LIVE_DISABLED'
@@ -479,6 +483,103 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       credentialsOk: true,
     });
     return { fetched, errors };
+  }
+
+  /**
+   * Fetch option chains using the discovery service for NIFTY, BANKNIFTY, SENSEX.
+   * This is a higher-level method that discovers contracts and fetches live data.
+   */
+  async fetchOptionChainsViaDiscovery(): Promise<{ fetched: number; errors: string[] }> {
+    if (!this.config.liveCredentialsPresent) {
+      this.restLastError = 'LIVE credentials missing';
+      return { fetched: 0, errors: [this.restLastError] };
+    }
+
+    const headers = await this.liveAuthHeaders();
+    if (!headers) {
+      this.lastAuthOk = false;
+      this.restLastError = `AUTH_REQUIRED — ${this.restLastError ?? 'Upstox access token missing/expired'}`;
+      return { fetched: 0, errors: [this.restLastError] };
+    }
+    this.lastAuthOk = true;
+
+    try {
+      const chains = await this.optionChainDiscovery.fetchAllOptionChains(
+        headers,
+        this.config.livePreferTodayExpiry,
+      );
+
+      let fetched = 0;
+      const errors: string[] = [];
+
+      for (const chain of chains) {
+        try {
+          // Persist each leg as an option quote
+          for (const leg of chain.legs) {
+            const tick: LiveOptionTick = {
+              contractSymbol: leg.tradingSymbol,
+              instrumentToken: leg.instrumentKey,
+              underlying: chain.underlying,
+              expiry: chain.expiry,
+              strike: leg.strike,
+              optionType: leg.optionType as 'CE' | 'PE',
+              ltp: leg.ltp,
+              bid: leg.bid,
+              ask: leg.ask,
+              bidQty: leg.bidQty,
+              askQty: leg.askQty,
+              volume: leg.volume,
+              openInterest: leg.openInterest,
+              oiChange: leg.oiChange,
+              impliedVolatility: leg.iv,
+              underlyingPrice: chain.underlyingPrice,
+              ts: leg.ts,
+              upstoxRef: leg.instrumentKey,
+              dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource,
+              executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
+            };
+
+            await this.persistOptionQuote(tick);
+            this.markOptionQuoteTs(tick.contractSymbol, tick.ts.getTime());
+            this.quotesPersistedToday++;
+            fetched++;
+          }
+
+          // Persist underlying snapshot
+          if (chain.underlyingPrice > 0) {
+            await this.persistMarketSnapshot({
+              instrument: chain.underlying,
+              price: chain.underlyingPrice,
+              bid: null,
+              ask: null,
+              volume: 0,
+              open: null,
+              high: null,
+              low: null,
+              close: null,
+              ts: chain.fetchedAt,
+              dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource,
+              executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
+              upstoxRef: chain.underlyingKey,
+            });
+            this.markMarketSnapshotTs(chain.underlying, chain.fetchedAt.getTime());
+          }
+        } catch (err) {
+          errors.push(`${chain.underlying}: ${this.errorMessage(err)}`);
+          this.logger.warn(`[UPSTOX-LIVE] Discovery fetch failed for ${chain.underlying}: ${this.errorMessage(err)}`);
+        }
+      }
+
+      this.optionChainFetchedAt = nowUtc();
+      this.restLastError = errors.length ? errors.join('; ').slice(0, 300) : null;
+      this.logger.log(`[UPSTOX-LIVE] Option chain (discovery): ${fetched} quotes persisted from ${chains.length} underlying(s)`);
+
+      return { fetched, errors };
+    } catch (err) {
+      this.restLastError = `Discovery fetch failed: ${this.errorMessage(err)}`;
+      this.logger.error(`[UPSTOX-LIVE] ${this.restLastError}`);
+      return { fetched: 0, errors: [this.restLastError] };
+    }
   }
 
   /**
@@ -722,12 +823,296 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     return segment.replace(/_INDEX$/, '');
   }
 
-  private async startWebSocket(): Promise<void> {
-    if (!this.config.liveCredentialsPresent) { this.wsLastError='LIVE credentials missing'; return; }
-    this.logger.log('[UPSTOX-LIVE] starting WS for live ticks'); this.reconnectTimer=null; await this.connectWebSocket();
+  /**
+   * Start V3 WebSocket connection for live ticks.
+   * 1. Connects to Upstox V3 WebSocket
+   * 2. Discovers option contracts for each underlying (NIFTY, BANKNIFTY, SENSEX)
+   * 3. Subscribes to both index feeds AND individual option contracts
+   *
+   * The V3 WebSocket requires subscribing to specific instrument keys.
+   * Index keys (NSE_INDEX|Nifty 50) give underlying price updates.
+   * Option contract keys (NSE_FO|XXXXXX) give individual contract ticks.
+   */
+  private async startV3WebSocket(): Promise<void> {
+    if (!this.config.liveCredentialsPresent) {
+      this.wsLastError = 'LIVE credentials missing';
+      return;
+    }
+
+    this.logger.log('[UPSTOX-LIVE] Starting V3 WebSocket for live ticks');
+
+    // Get fresh access token
+    const headers = await this.liveAuthHeaders();
+    if (!headers?.Authorization) {
+      this.wsLastError = 'Failed to get access token for V3 WebSocket';
+      this.logger.error(`[UPSTOX-LIVE] ${this.wsLastError}`);
+      return;
+    }
+
+    const token = headers.Authorization.replace('Bearer ', '');
+
+    // Connect to V3 WebSocket
+    const connected = await this.v3WebSocket.connect(token, this.config.liveApiKey);
+    if (!connected) {
+      this.wsLastError = 'V3 WebSocket connection failed';
+      this.logger.error(`[UPSTOX-LIVE] ${this.wsLastError}`);
+      return;
+    }
+
+    // Subscribe to tick events
+    this.v3WebSocket.onTick((tick: UpstoxV3Tick) => {
+      this.handleV3Tick(tick);
+    });
+
+    // Subscribe to market info events
+    this.v3WebSocket.onMarketInfo((info) => {
+      this.logger.log(`[UPSTOX-LIVE] V3 WebSocket market info: ${JSON.stringify(info.segmentStatus)}`);
+    });
+
+    // 1. Subscribe to INDEX feeds (underlying price for NIFTY, BANKNIFTY, SENSEX)
+    const indexKeys = this.config.liveInstruments.filter(k => k.includes('INDEX'));
+    if (indexKeys.length > 0) {
+      this.v3WebSocket.subscribe(indexKeys, 'option_chain');
+      this.logger.log(`[UPSTOX-LIVE] V3 WebSocket subscribed to ${indexKeys.length} index feeds`);
+    }
+
+    // 2. Discover and subscribe to individual option contracts
+    // Use the option chain discovery service to find contracts, then subscribe
+    // to their individual instrument keys for live ticks.
+    try {
+      const optionContractKeys = await this.discoverOptionContractKeys(headers);
+      if (optionContractKeys.length > 0) {
+        // Subscribe in batches to respect V3 limits
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < optionContractKeys.length; i += BATCH_SIZE) {
+          const batch = optionContractKeys.slice(i, i + BATCH_SIZE);
+          this.v3WebSocket.subscribe(batch, 'option_chain');
+        }
+        this.logger.log(`[UPSTOX-LIVE] V3 WebSocket subscribed to ${optionContractKeys.length} option contracts`);
+      }
+    } catch (err) {
+      this.logger.warn(`[UPSTOX-LIVE] V3 option contract discovery failed (indices still subscribed): ${this.errorMessage(err)}`);
+    }
+
+    this.wsConnected = true;
+    this.wsLastError = null;
   }
-  private async connectWebSocket(): Promise<void> { this.wsConnected=false; this.wsLastError=null; this.logger.log('[UPSTOX-LIVE] WS path prepared; using REST polling fallback'); }
-  private stopWebSocket(): void { this.wsConnected=false; if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer=null; } }
+
+  /**
+   * Discover option contract instrument keys for all configured underlyings.
+   * Returns an array of instrument keys suitable for V3 WebSocket subscription.
+   * Only subscribes to strikes within the configured strike window around ATM.
+   */
+  private async discoverOptionContractKeys(headers: Record<string, string>): Promise<string[]> {
+    const allKeys: string[] = [];
+
+    // Map configured instruments to their underlying keys
+    const underlyingKeys: string[] = [];
+    for (const key of this.config.liveInstruments) {
+      if (key.includes('INDEX')) {
+        underlyingKeys.push(key);
+      }
+    }
+
+    for (const underlyingKey of underlyingKeys) {
+      try {
+        // Discover contracts for this underlying
+        const contracts = await this.optionChainDiscovery.fetchOptionContracts(
+          underlyingKey,
+          headers,
+        );
+
+        if (contracts.length === 0) {
+          this.logger.warn(`[UPSTOX-LIVE] No option contracts found for ${underlyingKey}`);
+          continue;
+        }
+
+        // Find the nearest expiry
+        const expiry = await this.optionChainDiscovery.getNearestExpiry(
+          underlyingKey,
+          this.config.livePreferTodayExpiry,
+          headers,
+        );
+
+        if (!expiry) {
+          this.logger.warn(`[UPSTOX-LIVE] No expiry found for ${underlyingKey}`);
+          continue;
+        }
+
+        // Filter to the nearest expiry
+        const expiryContracts = contracts.filter(c => c.expiry === expiry);
+
+        // Get underlying price for strike window calculation
+        const spot = this.latestUnderlyingPriceByInstrument.get(
+          shortUniverse(underlyingKey),
+        );
+
+        // Apply strike window filter if we have a spot price
+        let filteredContracts = expiryContracts;
+        if (spot && spot > 0) {
+          const strikes = [...new Set(expiryContracts.map(c => c.strike))].sort((a, b) => a - b);
+          const atm = strikes.reduce((best, s) =>
+            (Math.abs(s - spot) < Math.abs(best - spot) ? s : best),
+            strikes[0],
+          );
+          const atmIdx = strikes.indexOf(atm);
+          const w = this.config.liveStrikeWindow;
+          const keepStrikes = new Set(strikes.slice(Math.max(0, atmIdx - w), atmIdx + w + 1));
+          filteredContracts = expiryContracts.filter(c => keepStrikes.has(c.strike));
+        }
+
+        // Extract instrument keys
+        const contractKeys = filteredContracts
+          .map(c => c.instrumentKey)
+          .filter(k => k && k.length > 0);
+
+        allKeys.push(...contractKeys);
+        this.logger.log(
+          `[UPSTOX-LIVE] ${shortUniverse(underlyingKey)}: ${contractKeys.length} option contracts ` +
+          `(expiry ${expiry}, ${filteredContracts.length}/${expiryContracts.length} within strike window)`,
+        );
+
+        // Store lot sizes from contract master
+        if (filteredContracts.length > 0 && filteredContracts[0].lotSize > 0) {
+          this.lotSizeByUnderlyingKey.set(underlyingKey, filteredContracts[0].lotSize);
+          this.lotSizeByUnderlyingKey.set(shortUniverse(underlyingKey), filteredContracts[0].lotSize);
+        }
+      } catch (err) {
+        this.logger.warn(`[UPSTOX-LIVE] V3 option discovery failed for ${underlyingKey}: ${this.errorMessage(err)}`);
+      }
+    }
+
+    return [...new Set(allKeys)]; // dedupe
+  }
+
+  /**
+   * Handle a V3 WebSocket tick and feed it into:
+   * 1. The desk's own option_quotes table (direct persistence)
+   * 2. The canonical pipeline (common store for cross-desk consumption)
+   *
+   * Both writes happen: the desk's own store is authoritative for this desk's
+   * P&L/trade decisions, while the canonical store is shared across all desks.
+   */
+  private handleV3Tick(tick: UpstoxV3Tick): void {
+    try {
+      // Resolve symbol from instrument key via the broker's contract master
+      const resolved = this.resolveContractSymbol(tick.instrumentKey);
+      const symbol = resolved?.symbol ?? tick.instrumentKey.split('|').pop() ?? tick.instrumentKey;
+      const exchange = resolved?.exchange ?? (tick.instrumentKey.startsWith('BSE') ? 'BSE' : 'NSE');
+
+      // Determine the underlying from the instrument key
+      const underlying = shortUniverse(tick.instrumentKey);
+
+      // Determine instrument type: INDEX tick vs option contract
+      const isIndex = tick.instrumentKey.includes('INDEX') || tick.instrumentKey.includes('Nifty');
+      const instrumentType = isIndex ? 'INDEX' : 'OPT';
+
+      // Parse expiry/strike/optionType from symbol if it's an option contract
+      const optionMatch = symbol.match(/^(.+?)(\d{2}[A-Z]{3}\d{4})(\d+)(CE|PE)$/i);
+      const expiry = optionMatch ? parseExpiryDate(optionMatch[2]) ?? null : null;
+      const strike = optionMatch ? Number(optionMatch[3]) : null;
+      const optionType = optionMatch ? (optionMatch[4].toUpperCase() as 'CE' | 'PE') : null;
+
+      // 1. PERSIST TO DESK'S OWN STORE (option_quotes table)
+      // Only persist option contracts, not index ticks
+      if (optionType && tick.ltp !== null && tick.ltp > 0) {
+        const tickTs = new Date(tick.timestamp);
+        const liveTick: LiveOptionTick = {
+          contractSymbol: symbol,
+          instrumentToken: tick.instrumentKey,
+          underlying,
+          expiry: expiry ?? '',
+          strike: strike ?? 0,
+          optionType,
+          ltp: tick.ltp,
+          bid: tick.firstDepth?.bidP ?? null,
+          ask: tick.firstDepth?.askP ?? null,
+          bidQty: tick.firstDepth?.bidQ ? Number(tick.firstDepth.bidQ) : null,
+          askQty: tick.firstDepth?.askQ ? Number(tick.firstDepth.askQ) : null,
+          volume: Math.max(0, Math.trunc(tick.volume ?? 0)),
+          openInterest: Math.max(0, Math.trunc(tick.oi ?? 0)),
+          oiChange: 0, // V3 doesn't provide oiChange directly
+          impliedVolatility: tick.iv,
+          underlyingPrice: this.latestUnderlyingPriceByInstrument.get(underlying) ?? null,
+          ts: tickTs,
+          upstoxRef: tick.instrumentKey,
+          dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource,
+          executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
+          feedSource: 'UPSTOX_V3_WS',
+        };
+        // Non-blocking persist — the canonical pipeline is the mandatory path,
+        // the desk's own store is a convenience copy for direct desk queries.
+        this.persistOptionQuote(liveTick).catch(err => {
+          this.logger.warn(`[UPSTOX-LIVE] V3 desk store persist failed for ${symbol}: ${this.errorMessage(err)}`);
+        });
+        this.markOptionQuoteTs(symbol, tick.timestamp);
+        this.quotesPersistedToday++;
+      }
+
+      // 2. PERSIST INDEX SNAPSHOT to desk's own store
+      if (isIndex && tick.ltp !== null && tick.ltp > 0) {
+        this.persistMarketSnapshot({
+          instrument: underlying,
+          price: tick.ltp,
+          bid: tick.firstDepth?.bidP ?? null,
+          ask: tick.firstDepth?.askP ?? null,
+          volume: Math.max(0, Math.trunc(tick.volume ?? 0)),
+          open: null,
+          high: null,
+          low: null,
+          close: tick.closePrice,
+          ts: new Date(tick.timestamp),
+          dataSource: UPSTOX_LIVE_DATA_ISOLATION.dataSource,
+          executionMode: UPSTOX_LIVE_DATA_ISOLATION.executionMode,
+          upstoxRef: tick.instrumentKey,
+        }).catch(err => {
+          this.logger.warn(`[UPSTOX-LIVE] V3 snapshot persist failed for ${underlying}: ${this.errorMessage(err)}`);
+        });
+        this.markMarketSnapshotTs(underlying, tick.timestamp);
+        this.latestUnderlyingPriceByInstrument.set(underlying, tick.ltp);
+      }
+
+      // 3. FEED INTO CANONICAL PIPELINE (common store for cross-desk consumption)
+      const canonicalTick = {
+        providerInstrumentId: tick.instrumentKey,
+        ltp: tick.ltp,
+        closePrice: tick.closePrice,
+        volume: tick.volume,
+        openInterest: tick.oi,
+        bidPrice: tick.firstDepth?.bidP ?? null,
+        bidQty: tick.firstDepth?.bidQ ?? null,
+        askPrice: tick.firstDepth?.askP ?? null,
+        askQty: tick.firstDepth?.askQ ?? null,
+        iv: tick.iv,
+        delta: tick.optionGreeks?.delta ?? null,
+        theta: tick.optionGreeks?.theta ?? null,
+        gamma: tick.optionGreeks?.gamma ?? null,
+        vega: tick.optionGreeks?.vega ?? null,
+        rho: tick.optionGreeks?.rho ?? null,
+        expiry,
+        strike,
+        optionType,
+        ts: new Date(tick.timestamp),
+      };
+
+      this.interpreter.ingestMessage('UPSTOX_V3_WS', canonicalTick, {
+        receivedAt: new Date(tick.timestamp),
+        identity: {
+          providerInstrumentId: tick.instrumentKey,
+          underlying,
+          exchange,
+          instrumentType,
+          expiry: expiry ?? undefined,
+          strike: strike ?? undefined,
+          optionType: optionType ?? undefined,
+        },
+      }).catch(err => {
+        this.logger.warn(`[UPSTOX-LIVE] V3 canonical ingest failed for ${tick.instrumentKey}: ${this.errorMessage(err)}`);
+      });
+    } catch (err) {
+      this.logger.warn(`[UPSTOX-LIVE] V3 tick handling error: ${this.errorMessage(err)}`);
+    }
+  }
 
   private startPeriodicRefresh(): void {
     if (this.wsTimer) return;

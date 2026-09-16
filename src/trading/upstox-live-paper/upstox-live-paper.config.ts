@@ -97,6 +97,22 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
   /** Strikes kept per side around ATM, bounding each poll's universe. */
   readonly liveStrikeWindow: number;
 
+  /**
+   * TEMPORARY session-level trading universe override (2026-09-17 only).
+   * When set, ONLY underlyings in this comma-separated list are eligible for
+   * paper trading decisions. Data capture for ALL configured instruments
+   * continues unaffected.
+   *
+   * Examples:
+   *   UPSTOX_TRADING_UNIVERSE=SENSEX         → trade SENSEX only
+   *   UPSTOX_TRADING_UNIVERSE=NIFTY,SENSEX   → trade NIFTY + SENSEX
+   *   (empty/missing)                        → no restriction, all underlyings
+   *
+   * REMOVE this override after 17 Sep 2026 to restore normal multi-underlying
+   * behavior. This is a TEMPORARY mechanism, not a permanent configuration.
+   */
+  readonly tradingUniverse: string[];
+
   /** Derived README-style status string for the UI. */
   readonly safetyStatusText: string;
 
@@ -143,6 +159,16 @@ export class UpstoxLivePaperConfig implements OnModuleInit {
     this.liveWebSocketEnabled = /^(1|true|yes)$/i.test(config.get<string>('UPSTOX_LIVE_WS_ENABLED') ?? 'true');
     this.livePreferTodayExpiry = /^(1|true|yes)$/i.test(config.get<string>('UPSTOX_LIVE_PREFER_TODAY_EXPIRY') ?? 'true');
     this.liveStrikeWindow = Math.max(1, Math.min(50, Number(config.get<string>('UPSTOX_LIVE_STRIKE_WINDOW') ?? 10) || 10));
+
+    // TEMPORARY session-level trading universe override (17 Sep 2026 only).
+    // REMOVE after 17 Sep to restore normal multi-underlying behavior.
+    this.tradingUniverse = (config.get<string>('UPSTOX_TRADING_UNIVERSE') ?? '')
+      .split(',')
+      .map(s => s.trim().toUpperCase())
+      .filter(Boolean);
+    if (this.tradingUniverse.length > 0) {
+      this.logger.log(`[UPSTOX-LIVE-PAPER] TEMPORARY trading universe override: ${this.tradingUniverse.join(', ')} (data capture unaffected)`);
+    }
 
     this.safetyStatusText = this.buildSafetyStatusText();
   }

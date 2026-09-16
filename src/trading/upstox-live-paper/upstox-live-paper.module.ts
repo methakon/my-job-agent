@@ -1,6 +1,8 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { UpstoxV3WebSocketService } from './upstox-v3-websocket.service';
+import { UpstoxOptionChainDiscoveryService } from './upstox-option-chain-discovery.service';
 import { UpstoxLivePaperConfig } from './upstox-live-paper.config';
 import {
   UpstoxLivePaperPortfolio,
@@ -66,6 +68,8 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperAutoEntryService,
     UpstoxLivePaperCapitalContinuityService,
     EncryptionService, // token/credential AES (same convention as FYERS/fnF)
+    UpstoxV3WebSocketService,
+    UpstoxOptionChainDiscoveryService,
   ],
   exports: [
     UpstoxLivePaperConfig,
@@ -77,6 +81,8 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     UpstoxLivePaperLearningService,
     UpstoxLivePaperAutoEntryService,
     UpstoxLivePaperCapitalContinuityService,
+    UpstoxV3WebSocketService,
+    UpstoxOptionChainDiscoveryService,
   ],
 })
 export class UpstoxLivePaperModule implements OnModuleInit {
