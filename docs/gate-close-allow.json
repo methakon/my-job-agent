@@ -190,6 +190,42 @@
       "recorded": "2026-09-16T23:45+05:30",
       "evidence": "git show --name-only e28df17 lists only upstox-live-paper/* + package.json (protobufjs dep). No FYERS, no real-trading, no schema changes.",
       "expires_hint": "Entry can be deleted once e28df17 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "2ce34f5": {
+      "short": "2ce34f5",
+      "reason": "Upstox paper workstream: correct NSE options exchange transaction charge. Part of Upstox V3 implementation work authorized by operator.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only 2ce34f5 lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once 2ce34f5 leaves the guard commit window."
+    },
+    "63e497b": {
+      "short": "63e497b",
+      "reason": "Upstox paper workstream: single economic accounting path + current option cost model. Part of Upstox V3 implementation.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only 63e497b lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once 63e497b leaves the guard commit window."
+    },
+    "6dc951f": {
+      "short": "6dc951f",
+      "reason": "Upstox paper workstream: PAPER capital continuity + week-start carry-forward positions. Part of Upstox V3 implementation.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only 6dc951f lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once 6dc951f leaves the guard commit window."
+    },
+    "b98d9d9": {
+      "short": "b98d9d9",
+      "reason": "Upstox live workstream: measure feed credentials while STANDBY (unblock election + failover). Part of Upstox V3 implementation.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only b98d9d9 lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once b98d9d9 leaves the guard commit window."
     }
   }
 }
