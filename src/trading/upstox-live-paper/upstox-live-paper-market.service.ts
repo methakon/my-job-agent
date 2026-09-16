@@ -334,7 +334,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       universes: this.trackedUniverses(),
       enabled: () => this.config.liveCredentialsPresent && this.config.liveInstruments.length > 0,
       credentialsOk: () => this.lastAuthOk,
-      note: 'upstox-paper REST poll (secondary by default)',
+      note: 'upstox-paper V3 WS + REST poll (equal priority — arbiter picks by freshness)',
       ageMs: () => (this.lastLiveTickMs === null ? null : Math.max(0, Date.now() - this.lastLiveTickMs)),
     });
   }

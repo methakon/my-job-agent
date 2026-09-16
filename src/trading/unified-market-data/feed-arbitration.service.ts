@@ -5,6 +5,7 @@ import {
   ArbitrationMode,
   DEFAULT_FEED_DOWN_AFTER_MS,
   DEFAULT_FEED_STALE_AFTER_MS,
+  DEFAULT_FEED_SWITCH_COOLDOWN_MS,
   FeedCandidate,
   OwnershipDecision,
   decideOwnership,
@@ -121,6 +122,8 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
   private lastState = new Map<string, string>();
   private lastFailOpenWarnMs = 0;
   private readonly host = process.env.HOSTNAME ?? process.env.COMPUTERNAME ?? 'unknown-host';
+  private readonly switchCooldownMs: number;
+  private previousOwners: Record<string, { owner: string | null; switchAt: number }> = {};
 
   constructor(
     // The lease transport is a DEDICATED single connection, deliberately NOT the
@@ -138,6 +141,7 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
     this.leaseTtlMs = Math.max(this.downAfterMs, Number(process.env.FEED_LEASE_TTL_MS ?? 90_000));
     this.heartbeatMs = Math.max(2_000, Number(process.env.FEED_HEARTBEAT_MS ?? 15_000));
     this.dbTimeoutMs = Math.max(1_000, Number(process.env.FEED_DB_TIMEOUT_MS ?? 8_000));
+    this.switchCooldownMs = Math.max(0, Number(process.env.FEED_FAILOVER_COOLDOWN_MS ?? DEFAULT_FEED_SWITCH_COOLDOWN_MS));
   }
 
   onModuleInit(): void {
@@ -243,7 +247,8 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
       staleAfterMs: this.staleAfterMs,
       downAfterMs: this.downAfterMs,
       mode: this.mode,
-    });
+      switchCooldownMs: this.switchCooldownMs,
+    }, this.previousOwners);
 
     const annotated: FeedArbitrationStatus['candidates'] = candidates.map((c) => ({
       ...c,

@@ -231,7 +231,10 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('[FEED-ARBITER] no option universe configured for this feed — arbiter registration skipped (index-only subscription)');
       return;
     }
-    const priority = this.arbitration.priorityFor(this.feedName, 0);
+    // NEITHER provider is hardcoded primary — both start at priority 1 (equal).
+    // The arbiter elects ownership based on ACTUAL DATA FRESHNESS, not config.
+    // Use FEED_PRIORITY_FYERS_WS=0 to force FYERS primary if needed.
+    const priority = this.arbitration.priorityFor(this.feedName, 1);
     this.arbitration.register({
       name: this.feedName,
       priority,
@@ -243,7 +246,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
         if (!at) return null;
         return Math.max(0, Date.now() - new Date(at).getTime());
       },
-      note: 'FYERS market-data WebSocket (primary by default)',
+      note: 'FYERS market-data WebSocket (equal priority — arbiter picks by freshness)',
     });
     this.logger.log(
       `[FEED-ARBITER] registered ${this.feedName} priority=${priority} universes=${this.arbiterUniverses.join(',')} (option coverage only)`,
