@@ -30,6 +30,8 @@ import { LinkedInProfileService } from './linkedin-profile.service';
 import { ProfileService } from '../profile/profile.service';
 import { LeadRepository } from '../leads/lead.repository';
 import { Application } from './application.entity';
+import { ProfileRepository } from '../profile/profile.repository';
+import { AdaptationMatcherService } from '../job-application/skills/adaptation-matcher.service';
 import { QualificationService, QualificationResult } from '../job-application/qualification.service';
 
 /**
@@ -47,6 +49,7 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly settingsRepo: ApplySettingRepository,
 		private readonly answers: AnswerBankService,
 		private readonly profileService: ProfileService,
+		private readonly profileRepo: ProfileRepository,
 		public readonly leadRepo: LeadRepository,
 		private readonly emailTracker: EmailTrackerService,
 		private readonly detector: DirectChannelDetector,
@@ -62,6 +65,7 @@ export class ApplyEngineService implements OnModuleInit {
 		private readonly linkedin: LinkedInProfileService,
 		private readonly inbox: InboxReaderService,
 		private readonly qualification: QualificationService,
+		private readonly adaptation: AdaptationMatcherService,
 	) {}
 
 	onModuleInit(): void {
@@ -180,6 +184,24 @@ export class ApplyEngineService implements OnModuleInit {
 		}
 		if (qual.decision === 'NEAR_MISS' || qual.decision === 'CONDITIONAL') {
 			this.logger.warn(`JA-010 qualification ${qual.decision} for lead ${lead.id} (${lead.title}, ${lead.company}) — composite ${qual.compositeScore}/100; proceeding: ${qual.reasons.join('; ')}`);
+		}
+
+		// JA-014/adaptation: profile-fit gate layered on top of JA-010 qualification.
+		// Runs AFTER the JA-010 hard block (REJECT/INSUFFICIENT_DATA) so it never
+		// bypasses existing qualification. no-go → skip; partial/risky → warn but
+		// proceed (same treatment as NEAR_MISS/CONDITIONAL above); ready → silent.
+		if (profileResp) {
+			const profile = await this.profileRepo.findFirst();
+			if (profile) {
+				const verdict = this.adaptation.evaluateLead(profile, lead);
+				if (verdict.applyReadiness === 'no-go') {
+					this.logger.warn(`JA-014 adaptation no-go for lead ${lead.id} (${lead.title}, ${lead.company}) — gap ${verdict.gapSeverity}, missing ${verdict.mustMissing.slice(0, 4).join(', ')}; not applying: ${verdict.reasons.slice(0, 3).join('; ')}`);
+					return { ok: false, status: 'needs_info', missingInfo: [`adaptation: ${verdict.gapSeverity} gap — ${verdict.reasons.slice(0, 2).join('; ')}`], applicationId: undefined };
+				}
+				if (verdict.applyReadiness === 'partial' || verdict.applyReadiness === 'risky') {
+					this.logger.warn(`JA-014 adaptation ${verdict.applyReadiness} for lead ${lead.id} (${lead.title}, ${lead.company}) — fitScore ${verdict.fitScore}, gap ${verdict.gapSeverity}, ${verdict.mustMissing.length} must + ${verdict.preferredMissing.length} pref missing, ${verdict.transferable.length} transferable; proceeding: ${verdict.reasons.slice(0, 3).join('; ')}`);
+				}
+			}
 		}
 
 		// REUSE the failed row on retry — never spawn duplicate application rows
@@ -441,6 +463,22 @@ export class ApplyEngineService implements OnModuleInit {
 			return { ok: false, status: 'failed', errorDetail: `JA-010 qualification ${qual.decision}: ${qual.reasons.join('; ')}` };
 		}
 
+		// JA-014/adaptation: profile-fit gate layered on top of JA-010 qualification.
+		// Runs AFTER the JA-010 hard block so it never bypasses existing qualification.
+		// no-go → skip; partial/risky → warn but proceed; ready → silent.
+		if (profileResp) {
+			const profile = await this.profileRepo.findFirst();
+			if (profile) {
+				const verdict = this.adaptation.evaluateLead(profile, lead);
+				if (verdict.applyReadiness === 'no-go') {
+					return { ok: false, status: 'failed', errorDetail: `JA-014 adaptation no-go — gap ${verdict.gapSeverity}: ${verdict.reasons.slice(0, 2).join('; ')}` };
+				}
+				if (verdict.applyReadiness === 'partial' || verdict.applyReadiness === 'risky') {
+					this.logger.warn(`JA-014 adaptation ${verdict.applyReadiness} for lead ${lead.id} (${lead.title}, ${lead.company}) — fitScore ${verdict.fitScore}, gap ${verdict.gapSeverity}, ${verdict.mustMissing.length} must + ${verdict.preferredMissing.length} pref missing; proceeding: ${verdict.reasons.slice(0, 3).join('; ')}`);
+				}
+			}
+		}
+
 		try {
 			const questions = await (adapter as unknown as { probeQuestions?(lead: ScrapedLead): Promise<string[]> } | undefined)?.probeQuestions?.(lead) ?? [];
 			const resolved = await this.answers.resolve(questions);
@@ -542,6 +580,22 @@ export class ApplyEngineService implements OnModuleInit {
 			});
 			if (qual.decision === 'REJECT' || qual.decision === 'INSUFFICIENT_DATA') {
 				return { ok: false, status: 'needs_info', missingInfo: [`JA-010 re-qualification ${qual.decision}: ${qual.reasons.join('; ')}`] };
+			}
+		}
+
+		// JA-014/adaptation: profile-fit gate layered on top of JA-010 re-qualification.
+		// Runs AFTER the JA-010 hard block so it never bypasses existing qualification.
+		// no-go → block send; partial/risky → warn but proceed; ready → silent.
+		if (profileResp) {
+			const profile = await this.profileRepo.findFirst();
+			if (profile) {
+				const verdict = this.adaptation.evaluateLead(profile, lead);
+				if (verdict.applyReadiness === 'no-go') {
+					return { ok: false, status: 'needs_info', missingInfo: [`adaptation: ${verdict.gapSeverity} gap — ${verdict.reasons.slice(0, 2).join('; ')}`] };
+				}
+				if (verdict.applyReadiness === 'partial' || verdict.applyReadiness === 'risky') {
+					this.logger.warn(`JA-014 adaptation ${verdict.applyReadiness} on submit for lead ${lead.id} (${lead.title}, ${lead.company}) — fitScore ${verdict.fitScore}, gap ${verdict.gapSeverity}, ${verdict.mustMissing.length} must + ${verdict.preferredMissing.length} pref missing; proceeding: ${verdict.reasons.slice(0, 3).join('; ')}`);
+				}
 			}
 		}
 
