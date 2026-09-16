@@ -163,6 +163,8 @@ export const fyersMapper: ProviderMapper = (payload, ctx) => {
       ltp: pick(tick, 'ltp', 'lp', 'last_traded_price') ?? pick(v, 'lp', 'ltp'),
       volume: pick(tick, 'vol_traded_today', 'volume', 'volume_traded') ?? pick(v, 'vol_traded_today', 'volume'),
       oi: pick(tick, 'oi', 'open_interest', 'openInterest') ?? pick(v, 'oi'),
+      previousOi: null, // FYERS WebSocket SymbolUpdate does not provide previous OI
+      changeOi: null,   // FYERS WebSocket SymbolUpdate does not provide OI change
       bid: zeroIsAbsent(pick(tick, 'bid', 'bid_price') ?? pick(v, 'bid')),
       ask: zeroIsAbsent(pick(tick, 'ask', 'ask_price') ?? pick(v, 'ask')),
       bidQty: zeroIsAbsent(pick(tick, 'bid_size', 'bidQty', 'bid_qty') ?? pick(v, 'bid_size')),
@@ -171,6 +173,11 @@ export const fyersMapper: ProviderMapper = (payload, ctx) => {
       high: pick(tick, 'high_price'),
       low: pick(tick, 'low_price'),
       close: pick(tick, 'prev_close_price'),
+      iv: null, // FYERS WebSocket SymbolUpdate does not provide IV
+      delta: null, // FYERS WebSocket SymbolUpdate does not provide Greeks
+      gamma: null,
+      theta: null,
+      vega: null,
       sourceTimestamp: sourceTimestamp as string | number | null,
       sourceTimestampSemantics: semantics,
       raw: payload,
@@ -224,6 +231,9 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
   // Values are passed through exactly as the provider sent them (unknown-ish) and
   // validated by the interpreter; the cast only reflects that the adapter does not
   // pre-judge them.
+  // Upstox V2 option-chain legs carry option_greeks as a nested object alongside
+  // market_data. Extract them deterministically — a field that is absent stays null.
+  const greeks = record(envelope.option_greeks);
   return {
     ok: true,
     observation: ({
@@ -245,6 +255,11 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
       volume: pick(quote, 'volume', 'volume_traded'),
       oi: pick(quote, 'oi', 'open_interest'),
       previousOi: pick(quote, 'prev_oi', 'previous_oi'),
+      iv: pick(greeks, 'iv') ?? null,
+      delta: pick(greeks, 'delta') ?? null,
+      gamma: pick(greeks, 'gamma') ?? null,
+      theta: pick(greeks, 'theta') ?? null,
+      vega: pick(greeks, 'vega') ?? null,
       bid: zeroIsAbsent(pick(quote, 'bid', 'bid_price') ?? depth.bid),
       ask: zeroIsAbsent(pick(quote, 'ask', 'ask_price') ?? depth.ask),
       bidQty: zeroIsAbsent(pick(quote, 'bid_qty', 'bid_size') ?? depth.bidQty),
@@ -317,6 +332,72 @@ export const zerodhaMapper: ProviderMapper = (payload, ctx) => {
   } as MappedObservation;
 };
 
+/**
+ * Upstox V3 WebSocket tick. The V3 adapter (handleV3Tick) constructs a
+ * RawObservation-compatible object from the decoded protobuf — this mapper
+ * normalizes it into the canonical schema. The V3 tick carries LTPC, optional
+ * firstDepth (bid/ask), optional optionGreeks (delta/theta/gamma/vega/rho),
+ * OI, IV, and volume. Missing fields stay null — never defaulted to 0.
+ *
+ * Timestamp model:
+ *  - sourceTimestamp = ltpc.ltt (last trade time) when available, else currentTs
+ *  - receivedTimestamp = Date.now() at the adapter (injected by interpreter)
+ *  - freshnessTimestamp = receivedTimestamp (feed delivery time for arbiter)
+ */
+export const upstoxV3Mapper: ProviderMapper = (payload, ctx) => {
+  const tick = record(payload);
+  const providerInstrumentId = pick(tick, 'providerInstrumentId') as string | null;
+  if (!providerInstrumentId) {
+    return hasTickValue(tick, ['ltp', 'closePrice', 'volume', 'oi', 'iv'])
+      ? { ok: false, reason: 'Upstox V3 tick has no instrument key' }
+      : { ok: false, reason: 'Upstox V3 control/ack record (not a tick)', skip: true };
+  }
+  // The V3 adapter provides contract metadata via identity context.
+  // Use the payload's own values when present; fall back to identity.
+  const expiry = pick(tick, 'expiry') as string | null ?? ctx.identity?.expiry ?? null;
+  const strike = pick(tick, 'strike') ?? ctx.identity?.strike ?? null;
+  const optionType = pick(tick, 'optionType') as string | null ?? ctx.identity?.optionType ?? null;
+  // V3 WS timestamps: ltpc.ltt (last trade time, epoch ms) and ts (currentTs, feed delivery).
+  // sourceTimestamp = last trade time when available (trade semantics), else currentTs.
+  const ltt = pick(tick, 'lastTradeTime');
+  const feedTs = pick(tick, 'ts');
+  const sourceTimestamp = ltt ?? feedTs;
+  const semantics: TickSourceSemantics = ltt ? 'LAST_TRADE' : 'QUOTE';
+  return {
+    ok: true,
+    observation: ({
+      providerInstrumentId: String(providerInstrumentId),
+      providerSymbol: String(providerInstrumentId),
+      underlying: ctx.identity?.underlying ?? null,
+      exchange: ctx.identity?.exchange ?? (String(providerInstrumentId).includes('_') ? String(providerInstrumentId).split('_')[0] : null),
+      segment: ctx.identity?.segment ?? (String(providerInstrumentId).includes('|') ? String(providerInstrumentId).split('|')[0].split('_').pop() : null) as string | null,
+      instrumentType: ctx.identity?.instrumentType ?? null,
+      expiry,
+      strike,
+      optionType,
+      ltp: pick(tick, 'ltp'),
+      close: pick(tick, 'closePrice'),
+      bid: zeroIsAbsent(pick(tick, 'bidPrice')),
+      ask: zeroIsAbsent(pick(tick, 'askPrice')),
+      bidQty: zeroIsAbsent(pick(tick, 'bidQty')),
+      askQty: zeroIsAbsent(pick(tick, 'askQty')),
+      volume: pick(tick, 'volume'),
+      oi: pick(tick, 'openInterest') ?? pick(tick, 'oi'),
+      // V3 WS option_greeks mode does not provide previousOi or changeOi.
+      previousOi: null,
+      changeOi: null,
+      iv: pick(tick, 'iv'),
+      delta: pick(tick, 'delta'),
+      gamma: pick(tick, 'gamma'),
+      theta: pick(tick, 'theta'),
+      vega: pick(tick, 'vega'),
+      sourceTimestamp: sourceTimestamp as string | number | null,
+      sourceTimestampSemantics: semantics,
+      raw: payload,
+    } as RawObservation),
+  } as MappedObservation;
+};
+
 /** Supported providers. Unknown ids are rejected, never silently accepted. */
 export const PROVIDER_MAPPERS: Record<string, ProviderMapper> = {
   FYERS: fyersMapper,
@@ -325,6 +406,7 @@ export const PROVIDER_MAPPERS: Record<string, ProviderMapper> = {
   UPSTOX: upstoxMapper,
   UPSTOX_LIVE: upstoxMapper,
   UPSTOX_REST: upstoxMapper,
+  UPSTOX_V3_WS: upstoxV3Mapper,
   ZERODHA: zerodhaMapper,
   ZERODHA_KITE: zerodhaMapper,
   KITE: zerodhaMapper,

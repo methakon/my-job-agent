@@ -1073,30 +1073,40 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
       }
 
       // 3. FEED INTO CANONICAL PIPELINE (common store for cross-desk consumption)
+      // Timestamp model:
+      //  - sourceTimestamp = ltpc.ltt (last trade time, epoch ms) when available
+      //  - receivedTimestamp = Date.now() at adapter (currentTs from protobuf)
+      //  - freshnessTimestamp = receivedTimestamp (feed delivery time for arbiter)
+      // This ensures depth/book updates don't appear stale when ltt hasn't changed.
       const canonicalTick = {
         providerInstrumentId: tick.instrumentKey,
         ltp: tick.ltp,
         closePrice: tick.closePrice,
         volume: tick.volume,
-        openInterest: tick.oi,
+        openInterest: tick.oi ?? null,
         bidPrice: tick.firstDepth?.bidP ?? null,
-        bidQty: tick.firstDepth?.bidQ ?? null,
+        bidQty: tick.firstDepth?.bidQ != null ? Number(tick.firstDepth.bidQ) : null,
         askPrice: tick.firstDepth?.askP ?? null,
-        askQty: tick.firstDepth?.askQ ?? null,
+        askQty: tick.firstDepth?.askQ != null ? Number(tick.firstDepth.askQ) : null,
         iv: tick.iv,
         delta: tick.optionGreeks?.delta ?? null,
         theta: tick.optionGreeks?.theta ?? null,
         gamma: tick.optionGreeks?.gamma ?? null,
         vega: tick.optionGreeks?.vega ?? null,
         rho: tick.optionGreeks?.rho ?? null,
+        lastTradeTime: tick.lastTradeTime,
         expiry,
         strike,
         optionType,
         ts: new Date(tick.timestamp),
       };
 
+      // sourceTimestamp = ltpc.ltt (last trade time) when available, else currentTs.
+      // This separates trade-time from feed-delivery-time for correct arbiter freshness.
+      const sourceTimestampMs = tick.lastTradeTime ?? tick.timestamp;
+      const receivedAt = new Date(tick.timestamp);
       this.interpreter.ingestMessage('UPSTOX_V3_WS', canonicalTick, {
-        receivedAt: new Date(tick.timestamp),
+        receivedAt,
         identity: {
           providerInstrumentId: tick.instrumentKey,
           underlying,
