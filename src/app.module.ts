@@ -111,7 +111,7 @@ import { DatabaseSyncConfigService } from './database-sync/database-sync.config.
 import { DatabaseSyncAudit } from './database-sync/database-sync.entity';
 import { AuthController } from './auth/auth.controller';
 import { AppFallbackController } from './app-fallback.controller';
-import { HealthController } from './trading/health.controller';
+import { MarketDataHealthController } from './trading/unified-market-data/market-data-health.controller';
 import { NaukriAdapter } from './scout/naukri.adapter';
 import { ProfileController } from './profile/profile.controller';
 import { ProfileService } from './profile/profile.service';
@@ -195,7 +195,7 @@ import {
     CvRegionFormatController, FyersAuthController, FyersOAuthController, UpstoxTradingPageController,
     PatternEngineController,
     AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
-    HealthController, // /health — must register BEFORE the fallback
+    MarketDataHealthController, // /market-data/health — must register BEFORE the fallback
     AppFallbackController, // MUST stay last: serves dashboard.html for unmatched GETs
   ],
   providers: [
