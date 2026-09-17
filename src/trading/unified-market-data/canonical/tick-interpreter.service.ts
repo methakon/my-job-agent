@@ -195,7 +195,36 @@ export class TickInterpreterService {
       return outcome;
     }
     for (const record of records) {
-      const result = this.interpret({ source, payload: record, receivedAt, resolveSymbol: opts.resolveSymbol, identity: opts.identity });
+      // V3 WS canonical instrument resolution: when the payload carries only a
+      // numeric instrument token, resolve the full identity from the authoritative
+      // broker master BEFORE the mapper runs, so the mapper gets underlying,
+      // expiry, strike, and optionType via ctx.identity (no heuristics, no guesses).
+      let identityForRecord = opts.identity;
+      if (opts.resolveSymbol && source.toUpperCase().includes('UPSTOX')) {
+        const rec = record as Record<string, unknown>;
+        const tokenCandidate = String(
+          rec.instrument_token ?? rec.instrumentKey ?? rec.instrument_key ?? ''
+        ).trim();
+        const tail = tokenCandidate.split('|').pop() ?? tokenCandidate;
+        if (/^\d+$/.test(tail)) {
+          const resolved = opts.resolveSymbol(tokenCandidate);
+          if (resolved && typeof resolved === 'object' && 'symbol' in resolved) {
+            const ri = resolved as { symbol: string; exchange?: string | null; underlying?: string | null; expiry?: string | null; strike?: number | null; optionType?: string | null };
+            identityForRecord = {
+              providerInstrumentId: tokenCandidate,
+              providerSymbol: ri.symbol,
+              underlying: ri.underlying ?? opts.identity?.underlying ?? null,
+              exchange: ri.exchange ?? opts.identity?.exchange ?? null,
+              segment: opts.identity?.segment ?? null,
+              instrumentType: opts.identity?.instrumentType ?? null,
+              expiry: ri.expiry ?? opts.identity?.expiry ?? null,
+              strike: ri.strike ?? opts.identity?.strike ?? null,
+              optionType: ri.optionType ?? opts.identity?.optionType ?? null,
+            };
+          }
+        }
+      }
+      const result = this.interpret({ source, payload: record, receivedAt, resolveSymbol: opts.resolveSymbol, identity: identityForRecord });
       if (!result.ok) {
         // A provider control/ack record is not market data: ignored, never counted
         // as invalid and never persisted.

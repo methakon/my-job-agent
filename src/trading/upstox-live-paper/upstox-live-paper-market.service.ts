@@ -199,8 +199,8 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
    * canonical interpreter refuses to guess one, so the adapter supplies the
    * broker's own symbols here instead.
    */
-  private readonly symbolByInstrumentKey = new Map<string, { symbol: string; exchange: string | null }>();
-  private readonly symbolByToken = new Map<string, { symbol: string; exchange: string | null }>();
+  private readonly symbolByInstrumentKey = new Map<string, { symbol: string; exchange: string | null; underlying?: string | null; expiry?: string | null; strike?: number | null; optionType?: string | null }>();
+  private readonly symbolByToken = new Map<string, { symbol: string; exchange: string | null; underlying?: string | null; expiry?: string | null; strike?: number | null; optionType?: string | null }>();
 
   slippageBps(): number { return this.config.defaultSlippageBps; }
   staleThresholdMs(): number { return this.config.staleQuoteMaxAgeMs; }
@@ -261,13 +261,20 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
     const short = underlyingShortName(key);
     const exchange = String(key).split('|')[0].split('_')[0] || null;
     // The same response is the ONLY honest source of a numeric token's identity:
-    // remember instrument_key → trading_symbol so the canonical interpreter can
-    // resolve a chain leg instead of rejecting it (never a guessed symbol).
+    // remember instrument_key → trading_symbol (plus contract metadata) so the
+    // canonical interpreter can resolve a chain leg instead of rejecting it
+    // (never a guessed symbol).
     for (const row of rows) {
       const instrumentKey = String(row.instrument_key ?? '').trim();
       const tradingSymbol = String(row.trading_symbol ?? '').trim();
       if (!instrumentKey || !tradingSymbol) continue;
-      const identity = { symbol: tradingSymbol, exchange };
+      const underlyingKey = String(row.underlying_key ?? '').trim() || null;
+      const rowExpiry = String(row.expiry ?? '').trim() || null;
+      const rowStrike = typeof row.strike_price === 'number' ? row.strike_price : null;
+      // Derive optionType from trading symbol suffix (CE/PE) — authoritative, not guessed.
+      const symbolSuffix = tradingSymbol.toUpperCase().slice(-2);
+      const rowOptionType = (symbolSuffix === 'CE' || symbolSuffix === 'PE') ? symbolSuffix : null;
+      const identity = { symbol: tradingSymbol, exchange, underlying: underlyingKey, expiry: rowExpiry, strike: rowStrike, optionType: rowOptionType };
       this.symbolByInstrumentKey.set(instrumentKey.toUpperCase(), identity);
       const token = instrumentKey.split('|').pop() ?? '';
       if (/^\d+$/.test(token)) this.symbolByToken.set(token, identity);
@@ -305,7 +312,7 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
    * A token the master has never described stays unresolved and the tick is
    * rejected by the interpreter — visible in its rejection counters.
    */
-  private resolveContractSymbol(providerInstrumentId: string): { symbol: string; exchange: string | null } | null {
+  private resolveContractSymbol(providerInstrumentId: string): { symbol: string; exchange: string | null; underlying?: string | null; expiry?: string | null; strike?: number | null; optionType?: string | null } | null {
     const key = String(providerInstrumentId ?? '').trim();
     if (!key) return null;
     const direct = this.symbolByInstrumentKey.get(key.toUpperCase());
@@ -750,6 +757,9 @@ export class UpstoxLivePaperMarketService implements OnModuleInit, OnModuleDestr
 
   private async startWebSocket(): Promise<void> {
     if (!this.config.liveCredentialsPresent) { this.wsLastError='LIVE credentials missing'; return; }
+    // V2 REST periodic refresh provides snapshot/contract coverage alongside V3 WS real-time ticks.
+    // Idempotent — safe to call even if already running from onModuleInit.
+    this.startPeriodicRefresh();
     this.logger.log('[UPSTOX-LIVE] starting WS for live ticks'); this.reconnectTimer=null; await this.connectWebSocket();
   }
   private async connectWebSocket(): Promise<void> { this.wsConnected=false; this.wsLastError=null; this.logger.log('[UPSTOX-LIVE] WS path prepared; using REST polling fallback'); }

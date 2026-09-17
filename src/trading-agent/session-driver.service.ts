@@ -155,13 +155,40 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 			try {
 				await this.trading.ensureCalibrations(portfolio.id);
 				const openTrades = (await this.trading.listTrades(portfolio.id, 500)).filter((t) => t.status === 'OPEN');
-				// Exits are position-driven: each open position is checked against its
-				// own live price source (option premium quote for contracts, market
-				// snapshot for legacy index positions) and its stored target/stop.
+
+				// ── PHASE 4A: Continuous position monitoring ──────────────────────
+				// Run the full monitoring pipeline: canonical data → health → shadow
+				// → exit evaluation. Deterministic exit authorization only.
 				let exits = 0;
-				for (const position of openTrades) {
-					if (await this.manageExit(position)) exits += 1;
+				if (openTrades.length > 0) {
+					const evaluations = await this.trading.evaluateOpenPositions(portfolio.id);
+					for (const ev of evaluations) {
+						if (ev.exitRecommended && ev.exitReason) {
+							try {
+								// Get exit price: use currentPremium from monitoring
+								const exitPrice = ev.currentPremium;
+								if (exitPrice > 0) {
+									await this.trading.closeTrade(ev.tradeId, {
+										exitPrice,
+										exitTrigger: ev.exitReason,
+									});
+									this.logger.log(
+										`[FNF-MONITOR] paper exit ${ev.tradeId} (${ev.instrument}) @ ${exitPrice}: ${ev.exitReason} | health=${ev.healthState} shadow=${ev.shadowAction} pnl=${ev.pnlPct.toFixed(1)}% trap=${ev.trapScore.toFixed(2)} src=${ev.dataSource}`,
+									);
+									exits += 1;
+								}
+							} catch (error) {
+								this.throttledWarn(`monitoring exit failed for ${ev.tradeId}: ${(error as Error).message}`);
+							}
+						} else {
+							// Log position state even when no exit is recommended
+							this.logger.debug(
+								`[FNF-MONITOR] ${ev.tradeId} (${ev.instrument}): health=${ev.healthState} shadow=${ev.shadowAction} pnl=${ev.pnlPct.toFixed(1)}% mae=${ev.mae} mfe=${ev.mfe} trap=${ev.trapScore.toFixed(2)} src=${ev.dataSource}`,
+							);
+						}
+					}
 				}
+
 				// Opens only from option-contract signals (the engine never emits an
 				// index instrument anymore; openTrade additionally hard-rejects any).
 				const signals = await this.trading.generateSignals(portfolio.id);
@@ -177,37 +204,6 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 			} catch (error) {
 				this.throttledWarn(`portfolio cycle failed (${portfolio.label}): ${(error as Error).message}`);
 			}
-		}
-	}
-
-	/** Close an open position when its own live price touches the stored
-	 *  target or stop-loss. Price source resolves by instrument: option premium
-	 *  quote for contracts, market snapshot for legacy index positions. */
-	private async manageExit(position: Trade): Promise<boolean> {
-		const price = await this.trading.latestReferencePrice(position.instrument);
-		if (price === null || !Number.isFinite(price) || price <= 0) return false;
-		let decision: { target?: number; stopLoss?: number; contract?: unknown } = {};
-		try {
-			decision = position.decisionParams ? (JSON.parse(position.decisionParams) as { target?: number; stopLoss?: number; contract?: unknown }) : {};
-		} catch {
-			decision = {};
-		}
-		const target = Number(decision.target);
-		const stop = Number(decision.stopLoss);
-		if (!Number.isFinite(target) || !Number.isFinite(stop) || target <= 0 || stop <= 0) return false;
-
-		const side = position.side as 'BUY' | 'SELL';
-		const hitWin = side === 'BUY' ? price >= target : price <= target;
-		const hitLoss = side === 'BUY' ? price <= stop : price >= stop;
-		if (!hitWin && !hitLoss) return false;
-
-		try {
-			await this.trading.closeTrade(position.id, { exitPrice: price, exitTrigger: hitWin ? 'target' : 'stop' });
-			this.logger.log(`[FYERS][REAL] paper exit ${position.id} (${side} ${position.instrument} @ ${price}): ${hitWin ? 'TARGET-HIT' : 'STOP-HIT'}`);
-			return true;
-		} catch (error) {
-			this.throttledWarn(`exit failed for ${position.id}: ${(error as Error).message}`);
-			return false;
 		}
 	}
 

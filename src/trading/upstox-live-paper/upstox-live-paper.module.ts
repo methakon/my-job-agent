@@ -19,16 +19,22 @@ import {
 import { UpstoxLivePaperMarketService } from './upstox-live-paper-market.service';
 import { UpstoxLivePaperMarketStabilityService } from './upstox-live-paper-market-stability.service';
 import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
-import { UpstoxLivePaperTokenController } from './upstox-live-paper-token.controller';
-import { UpstoxLivePaperScheduledService } from './upstox-live-paper-scheduled.service';
-import { UpstoxLivePaperInstructionService } from './upstox-live-paper-instruction.service';
-import { UpstoxLivePaperService } from './upstox-live-paper.service';
-import { UpstoxLivePaperWeeklyReportService } from './upstox-live-paper-weekly-report.service';
-import { UpstoxLivePaperRiskService } from './upstox-live-paper-risk.service';
-import { UpstoxLivePaperLearningService } from './upstox-live-paper-learning.service';
-import { UpstoxLivePaperAutoEntryService } from './upstox-live-paper-autoentry.service';
-import { UpstoxLivePaperCapitalContinuityService } from './upstox-live-paper-capital-continuity.service';
-import { UpstoxLivePaperController } from './upstox-live-paper.controller';
+// ── Phase 1 (single paper portfolio): execution components retired ────────────
+// The following services, controllers and cron jobs are no longer registered:
+//   ✗ UpstoxLivePaperAutoEntryService  (@Cron autoentry + labelling every 30s)
+//   ✗ UpstoxLivePaperRiskService       (per-trade risk checks)
+//   ✗ UpstoxLivePaperCapitalContinuityService (capital balance mgmt)
+//   ✗ UpstoxLivePaperWeeklyReportService (weekly P&L reports)
+//   ✗ UpstoxLivePaperLearningService    (trade reflection)
+//   ✗ UpstoxLivePaperScheduledService   (@Cron weekly report generation)
+//   ✗ UpstoxLivePaperInstructionService (pre-cleared instructions)
+//   ✗ UpstoxLivePaperService            (portfolio/trade/order CRUD)
+//   ✗ UpstoxLivePaperController         (REST API)
+//   ✗ UpstoxLivePaperTokenController    (OAuth endpoints)
+//
+// /fnf-trading is now the ONLY paper execution/portfolio system.
+// FYERS + Upstox are redundant market-data providers only.
+// ──────────────────────────────────────────────────────────────────────────────
 import { EncryptionService } from '../../auth/encryption.service';
 import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-data.module';
 
@@ -37,6 +43,8 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     ConfigModule,
     UnifiedMarketDataModule,
     TypeOrmModule.forFeature([
+      // All entity registrations kept for market-data tables (upstox_live_paper_option_quotes, etc.)
+      // Portfolio/trade/order entities retained for historical data access if needed.
       UpstoxLivePaperPortfolio,
       UpstoxLivePaperTrade,
       UpstoxLivePaperOrder,
@@ -51,32 +59,21 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
       UpstoxLivePaperCandidate,
     ]),
   ],
-  controllers: [UpstoxLivePaperTokenController, UpstoxLivePaperController],
+  // No controllers — paper execution REST + OAuth endpoints retired.
+  controllers: [],
   providers: [
+    // Market-data services (ACTIVE)
     UpstoxLivePaperConfig,
     UpstoxLivePaperMarketService,
     UpstoxLivePaperMarketStabilityService,
     UpstoxLivePaperTokenService,
-    UpstoxLivePaperScheduledService,
-    UpstoxLivePaperInstructionService,
-    UpstoxLivePaperService,
-    UpstoxLivePaperWeeklyReportService,
-    UpstoxLivePaperRiskService,
-    UpstoxLivePaperLearningService,
-    UpstoxLivePaperAutoEntryService,
-    UpstoxLivePaperCapitalContinuityService,
-    EncryptionService, // token/credential AES (same convention as FYERS/fnF)
+    EncryptionService, // token/credential AES (same convention as FYERS/FNF)
   ],
   exports: [
+    // Only market-data services exported — consumed by pre-open, pattern engine (read-only).
     UpstoxLivePaperConfig,
     UpstoxLivePaperMarketService,
     UpstoxLivePaperTokenService,
-    UpstoxLivePaperService,
-    UpstoxLivePaperInstructionService,
-    UpstoxLivePaperRiskService,
-    UpstoxLivePaperLearningService,
-    UpstoxLivePaperAutoEntryService,
-    UpstoxLivePaperCapitalContinuityService,
   ],
 })
 export class UpstoxLivePaperModule implements OnModuleInit {
