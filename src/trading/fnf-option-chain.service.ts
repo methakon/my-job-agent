@@ -208,6 +208,12 @@ export class FnfOptionChainService {
     return this.contracts.find({ order: { underlying: 'ASC', expiry: 'ASC', strike: 'ASC' } });
   }
 
+  /** Get the most recent quote for a contract symbol. */
+  async getLatestQuote(symbol: string): Promise<FnfOptionQuote | null> {
+    const rows = await this.quotes.find({ where: { contractSymbol: symbol }, order: { ts: 'DESC' }, take: 1 });
+    return rows[0] ?? null;
+  }
+
   async listContracts(query: Record<string, string | undefined> = {}): Promise<FnfOptionContract[]> {
     const parsed = this.parseQuery(query);
     const builder = this.contracts.createQueryBuilder('c').orderBy('c.underlying', 'ASC').addOrderBy('c.expiry', 'ASC').addOrderBy('c.strike', 'ASC').take(parsed.limit);

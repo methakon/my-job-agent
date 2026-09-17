@@ -16,7 +16,13 @@ import { FnfOptionChainService } from './fnf-option-chain.service';
 import { OptionContract } from './option-chain-parser';
 import { CreatePortfolioDto, UpdatePortfolioDto, CreateTradeDto, CloseTradeDto, IngestSnapshotDto, SetDecayCalibrationDto } from './fnf-trading.dto';
 import { AstroMuhurtaService } from '../astro/astro-muhurta.service';
-
+import { fnfRiskSnapshot, fnfRiskPolicyFromEnv, fnfSizeFromRisk, fnfDetermineStop } from './fnf-risk';
+import { fnfDetectTraps } from './fnf-trap-detection';
+import { fnfEvaluatePositionHealth, PositionHealthState } from './fnf-position-health';
+import { fnfShadowEntry, fnfShadowMonitor, ShadowAction } from './fnf-shadow-engine';
+import { fnfEvaluateExit, ExitReason } from './fnf-exit-engine';
+import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
+import { FeedHealthService } from './unified-market-data/feed-health.service';
 export { DecisionSnapshot } from './fnf-decision-snapshot';
 
 /** Minimum score for a shubh muhurta window (same threshold as the engine). */
@@ -168,6 +174,8 @@ export class FnfTradingService {
 		@InjectRepository(FnfTradeReport) private readonly tradeReports: Repository<FnfTradeReport>,
 		private readonly optionChain: FnfOptionChainService,
 		private readonly muhurta: AstroMuhurtaService,
+		private readonly unified?: UnifiedMarketDataService,
+		private readonly feedHealth?: FeedHealthService,
 	) {
 		void this.ensureCalibrations().catch((e) => this.logger.warn(`calibration seed failed: ${e.message}`));
 	}
@@ -260,6 +268,37 @@ export class FnfTradingService {
 		const units = Math.round(dto.quantity) * lotSize; // quantity is in LOTS
 		const premium = Number(dto.entryPrice);
 		const outlay = units * premium; // premium outlay = max loss for a long option
+
+		// ── RISK GATE: validate risk budget before capital gate ──────────────
+		{
+			const riskPolicy2 = fnfRiskPolicyFromEnv();
+			const riskSnap2 = fnfRiskSnapshot({
+				capital: Number(portfolio?.capital ?? 10000),
+				deployed: Number(portfolio?.deployed ?? 0),
+				netPnl: Number(portfolio?.netPnl ?? 0),
+				unrealisedPnl: 0,
+				peakEquity: Number(portfolio?.capital ?? 10000),
+				sessionStartEquity: Number(portfolio?.capital ?? 10000),
+				openPositionCount: 0,
+				ceiling: Number(portfolio?.ceiling ?? 10000),
+			}, riskPolicy2);
+			const requestedLots = Math.round(dto.quantity);
+			const stopPrice = premium * 0.75;
+			const stopPerUnit = Math.abs(premium - stopPrice);
+			const sizingCheck = fnfSizeFromRisk({
+				snapshot: riskSnap2,
+				premium,
+				lotSize,
+				stopPerUnit,
+				requestedLots,
+			});
+			if (!sizingCheck.allowed) {
+				throw new BadRequestException(
+					`risk gate rejected: ${sizingCheck.refusals.join('; ')}`,
+				);
+			}
+		}
+
 		const headroom = (Number(portfolio.ceiling) || Number(portfolio.capital)) - Number(portfolio.deployed);
 		if (outlay > headroom) {
 			throw new BadRequestException(
@@ -511,6 +550,66 @@ export class FnfTradingService {
 	/** Latest decision-journal rows for the UI / audit (GATE 1). */
 	async listJournal(limit = 25): Promise<FnfDecisionJournal[]> {
 		return this.journal.find({ order: { ts: 'DESC' }, take: Math.min(limit, 200) });
+	}
+
+	/** Persist a position monitoring decision to the journal.
+	 *  actionFamily = 'MONITOR' for monitoring decisions.
+	 *  Stores health, shadow, exit, MFE/MAE, data source in detailJson. */
+	journalMonitoringDecision(opts: {
+		portfolioId: string;
+		asOf: Date;
+		tradeId: string;
+		instrument: string;
+		healthState: string;
+		shadowAction: string;
+		exitRecommended: boolean;
+		exitReason?: string;
+		currentPremium: number;
+		pnlPct: number;
+		mae: number;
+		mfe: number;
+		thesisValid: boolean;
+		trapScore: number;
+		quoteAgeMin: number;
+		dataSource: string;
+	}): void {
+		void (async () => {
+			try {
+				const phase = this.currentSessionPhase(opts.asOf);
+				await this.journal.save(
+					this.journal.create({
+						ts: opts.asOf,
+						portfolioId: opts.portfolioId,
+						sessionPhase: phase,
+						dataAgeMin: opts.quoteAgeMin,
+						actionFamily: 'MONITOR',
+						winnerSymbol: opts.instrument,
+						algoSource: 'fnf-monitor',
+						detailJson: JSON.stringify({
+							tradeId: opts.tradeId,
+							instrument: opts.instrument,
+							healthState: opts.healthState,
+							shadowAction: opts.shadowAction,
+							exitRecommended: opts.exitRecommended,
+							exitReason: opts.exitReason,
+							currentPremium: opts.currentPremium,
+							pnlPct: opts.pnlPct,
+							mae: opts.mae,
+							mfe: opts.mfe,
+							thesisValid: opts.thesisValid,
+							trapScore: opts.trapScore,
+							quoteAgeMin: opts.quoteAgeMin,
+							dataSource: opts.dataSource,
+						}),
+						onRealData: true,
+						executionProvider: 'FYERS',
+						executionMode: 'PAPER',
+					}),
+				);
+			} catch {
+				// fire-and-forget: never block monitoring path
+			}
+		})();
 	}
 
 	// ── T-07 trade-report outbox ──────────────────────────────────────────
@@ -1471,14 +1570,133 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 			/* reflections unavailable → signal proceeds without lessons */
 		}
 
-		const target = premium * 1.5; // option-buyer premium target
-		const stopLoss = premium * 0.75; // ≈25% premium drop stop
+		const target = premium * 1.5; // option-buyer premium target (informational)
+		const stopLoss = premium * 0.75; // ≈25% premium drop stop (backup guardrail)
 
-		// GATE 1: journal the BUY decision with the winner + all runners-up.
 		const deltaMatch = best.reasons.join(' ').match(/delta (-?[\d.]+)/);
 		const winnerSummary = journalCandidates.map((c) =>
 			c.symbol === best.contract.symbol ? { ...c, delta: deltaMatch ? Number(deltaMatch[1]) : null } : c,
 		);
+		// ── RISK ENGINE: size from risk budget ──────────────────────────────
+		const riskPolicy = fnfRiskPolicyFromEnv();
+		const riskSnapshot = fnfRiskSnapshot({
+			capital: Number(portfolio?.capital ?? 10000),
+			deployed: Number(portfolio?.deployed ?? 0),
+			netPnl: Number(portfolio?.netPnl ?? 0),
+			unrealisedPnl: 0,
+			peakEquity: Number(portfolio?.capital ?? 10000),
+			sessionStartEquity: Number(portfolio?.capital ?? 10000),
+			openPositionCount: 0,
+			ceiling: Number(portfolio?.ceiling ?? 10000),
+		}, riskPolicy);
+
+		// Determine structural stop
+		const stopResult = fnfDetermineStop(premium, null, null, 1.5, riskPolicy);
+		const stopPerUnit = stopResult.stopPerUnit;
+
+		// Risk-based sizing
+		const sizing = fnfSizeFromRisk({
+			snapshot: riskSnapshot,
+			premium,
+			lotSize: Number(best.contract.lotSize) || 1,
+			stopPerUnit,
+		});
+
+		if (!sizing.allowed) {
+			this.journalDecision({
+				portfolioId,
+				asOf,
+				actionFamily: 'NO TRADE',
+				algoSource: 'option-candidate-rank-v1',
+				candidates: winnerSummary,
+				rejected: [...rejected, `RISK GATE: ${sizing.refusals.join('; ')}`],
+				directionSummary,
+				reasons: [...reasons, `RISK GATE FAILED: ${sizing.refusals.join('; ')}`],
+				cycleMs: Date.now() - cycleStartedMs,
+				featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
+				features: [...featureMeta.values()],
+				dataWarnings,
+				decisionId: winnerSnapshot.decisionId,
+				snapshot: winnerSnapshot,
+			});
+			return [];
+		}
+
+		// ── SHADOW ENTRY: compare ENTER_NOW vs WAIT ────────────────────────
+		const trapData: any = {
+			premium,
+			spreadPct: best.spreadPct ?? 0,
+			volume: Number(best.quote.volume ?? 0),
+			openInterest: Number(best.quote.openInterest ?? 0),
+			oiChange: null,
+			iv: best.quote.impliedVolatility ? Number(best.quote.impliedVolatility) : null,
+			ivChange: null,
+			dte,
+			delta: greeks?.delta ? Math.abs(greeks.delta) : null,
+			underlyingSpot: dirInfo.spot,
+			underlyingSma20: null,
+			underlyingSma5: null,
+			futuresBasis: null,
+			isExpiryWeek: dte <= 7,
+			hasMajorEvent: false,
+			quoteAgeMin: 0,
+			maxStaleMin: staleMinutes,
+			greeksConsistent: true,
+			crossAssetDivergence: 0,
+		};
+		const trapAssessment = fnfDetectTraps(trapData);
+
+		const shadowResult = fnfShadowEntry({
+			market: {
+				premium,
+				bid: best.quote.bid ? Number(best.quote.bid) : null,
+				ask: best.quote.ask ? Number(best.quote.ask) : null,
+				spreadPct: best.spreadPct ?? 0,
+				volume: Number(best.quote.volume ?? 0),
+				openInterest: Number(best.quote.openInterest ?? 0),
+				oiChange: null,
+				iv: best.quote.impliedVolatility ? Number(best.quote.impliedVolatility) : null,
+				ivChange: null,
+				dte,
+				delta: greeks?.delta ?? null,
+				gamma: greeks?.gamma ?? null,
+				theta: greeks?.theta ?? null,
+				underlyingSpot: dirInfo.spot,
+				underlyingSma20: null,
+				underlyingSma5: null,
+				quoteAgeMin: 0,
+				maxStaleMin: staleMinutes,
+			},
+			entryPremium: premium,
+			stopPerUnit,
+			targetPerUnit: target - premium,
+			trapScore: trapAssessment.score,
+			regimeConfidence: dirInfo.conf,
+			underlyingConfirmed: true,
+			chainConfirmed: true,
+		});
+
+		if (shadowResult.action === 'WAIT' || shadowResult.action === 'NO_TRADE') {
+			this.journalDecision({
+				portfolioId,
+				asOf,
+				actionFamily: 'NO TRADE',
+				algoSource: 'option-candidate-rank-v1',
+				candidates: winnerSummary,
+				rejected: [...rejected, `SHADOW: ${shadowResult.reasons.join('; ')}`],
+				directionSummary,
+				reasons: [...reasons, `SHADOW ENGINE: ${shadowResult.action} — ${shadowResult.reasons.join('; ')}`],
+				cycleMs: Date.now() - cycleStartedMs,
+				featureCutoffMs: dataCutoffMs > 0 ? dataCutoffMs : null,
+				features: [...featureMeta.values()],
+				dataWarnings,
+				decisionId: winnerSnapshot.decisionId,
+				snapshot: winnerSnapshot,
+			});
+			return [];
+		}
+
+		// ── FINAL: journal the BUY decision with the winner + all runners-up.
 		this.journalDecision({
 			portfolioId,
 			asOf,
@@ -1579,5 +1797,274 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 			this.logger.log(`tick archive @ ${boundaryIst}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) moved to history`);
 		}
 		return moved;
+	}
+
+	// ── CONTINUOUS POSITION MONITORING ────────────────────────────────────────
+
+	/**
+	 * Evaluate all open FNF positions for health, shadow actions, and exit signals.
+	 * Called periodically by the trading orchestrator during market hours.
+	 *
+	 * Uses canonical market data from UnifiedMarketDataService when available.
+	 * Falls back to FNF option chain quotes if unified store is unavailable.
+	 */
+	async evaluateOpenPositions(portfolioId?: string): Promise<Array<{
+		tradeId: string;
+		instrument: string;
+		healthState: string;
+		shadowAction: string;
+		exitRecommended: boolean;
+		exitReason?: string;
+		currentPremium: number;
+		pnlPct: number;
+		mae: number;
+		mfe: number;
+		thesisValid: boolean;
+		trapScore: number;
+		quoteAgeMin: number;
+		dataSource: string;
+	}>> {
+		const pid = portfolioId || process.env.FNF_PORTFOLIO_ID || 'fnf-default';
+		const portfolio = await this.getPortfolio(pid);
+		const openTrades = await this.trades.find({
+			where: { portfolio: { id: portfolio.id }, status: 'OPEN' as any },
+		});
+
+		if (!openTrades.length) return [];
+
+		const riskPolicy = fnfRiskPolicyFromEnv();
+
+		const results: Array<{
+			tradeId: string; instrument: string; healthState: string;
+			shadowAction: string; exitRecommended: boolean; exitReason?: string;
+			currentPremium: number; pnlPct: number; mae: number; mfe: number;
+			thesisValid: boolean; trapScore: number; quoteAgeMin: number;
+			dataSource: string;
+		}> = [];
+
+		for (const trade of openTrades) {
+			try {
+				const entryPremium = Number(trade.entryPrice);
+				const dp = JSON.parse(trade.decisionParams || '{}') as Record<string, any>;
+				const stopPrice = Number(dp.stopLoss) || entryPremium * 0.75;
+				const targetPrice = Number(dp.target) || entryPremium * 1.5;
+				const dte = Number(dp.dte) || 5;
+
+				// ── CANONICAL DATA PATH: unified store first, FNF chain fallback ──
+				let currentPremium = 0;
+				let volume = 0;
+				let openInterest = 0;
+				let iv: number | null = null;
+				let delta: number | null = null;
+				let gamma: number | null = null;
+				let theta: number | null = null;
+				let bid: number | null = null;
+				let ask: number | null = null;
+				let spreadPct = 0;
+				let quoteAgeMin = 0;
+				let underlyingSpot = 0;
+				let dataSource = 'fnf-chain';
+
+				// Try unified store first (canonical data)
+				if (this.unified) {
+					const unifiedQuote = this.unified.latestQuote(trade.instrument);
+					if (unifiedQuote) {
+						currentPremium = Number(unifiedQuote.ltp) || 0;
+						volume = Number(unifiedQuote.volume) || 0;
+						openInterest = Number(unifiedQuote.oi) || 0;
+						iv = unifiedQuote.iv != null ? Number(unifiedQuote.iv) : null;
+						delta = unifiedQuote.delta != null ? Number(unifiedQuote.delta) : null;
+						gamma = unifiedQuote.gamma != null ? Number(unifiedQuote.gamma) : null;
+						theta = unifiedQuote.theta != null ? Number(unifiedQuote.theta) : null;
+						bid = unifiedQuote.bid != null ? Number(unifiedQuote.bid) : null;
+						ask = unifiedQuote.ask != null ? Number(unifiedQuote.ask) : null;
+						quoteAgeMin = unifiedQuote.ts
+							? (Date.now() - new Date(unifiedQuote.ts).getTime()) / 60_000
+							: 0;
+						dataSource = `unified:${unifiedQuote.source || 'unknown'}`;
+					}
+				}
+
+				// Fallback to FNF option chain if unified store has nothing
+				if (!currentPremium) {
+					const quote = await this.optionChain.getLatestQuote(trade.instrument);
+					if (quote) {
+						currentPremium = Number(quote.ltp) || 0;
+						volume = Number(quote.volume) || 0;
+						openInterest = Number(quote.openInterest) || 0;
+						iv = quote.impliedVolatility != null ? Number(quote.impliedVolatility) : null;
+						delta = quote.delta != null ? Number(quote.delta) : null;
+						gamma = quote.gamma != null ? Number(quote.gamma) : null;
+						theta = quote.theta != null ? Number(quote.theta) : null;
+						bid = quote.bid != null ? Number(quote.bid) : null;
+						ask = quote.ask != null ? Number(quote.ask) : null;
+						const quoteTs = quote.ts instanceof Date ? quote.ts.getTime() : new Date(String(quote.ts)).getTime();
+						quoteAgeMin = quoteTs ? (Date.now() - quoteTs) / 60_000 : 0;
+						dataSource = 'fnf-chain';
+					}
+				}
+
+				if (!currentPremium) continue;
+
+				// Calculate spread from bid/ask
+				if (bid && ask && bid > 0 && ask > 0) {
+					spreadPct = ((ask - bid) / ((ask + bid) / 2)) * 100;
+				}
+
+				// Get underlying spot from unified snapshot
+				if (this.unified) {
+					const underlyingMatch = trade.instrument.match(/^(NIFTY|NIFTYBANK|SENSEX|NIFTYFIN)/i);
+					if (underlyingMatch) {
+						const underlyingSymbol = underlyingMatch[0].toUpperCase();
+						const snapshot = this.unified.latestSnapshot(underlyingSymbol);
+						if (snapshot) {
+							underlyingSpot = Number(snapshot.close || snapshot.ltp) || 0;
+						}
+					}
+				}
+
+				// MAE/MFE: absolute price distance from entry
+				const unrealizedPnlPerUnit = currentPremium - entryPremium;
+				const mae = Math.abs(Math.min(0, unrealizedPnlPerUnit));
+				const mfe = Math.max(0, unrealizedPnlPerUnit);
+
+				// Trap detection with canonical data
+				const traps = fnfDetectTraps({
+					premium: currentPremium,
+					spreadPct,
+					volume,
+					openInterest,
+					oiChange: null,
+					iv,
+					ivChange: null,
+					dte,
+					delta,
+					underlyingSpot,
+					underlyingSma20: null,
+					underlyingSma5: null,
+					futuresBasis: null,
+					isExpiryWeek: dte <= 7,
+					hasMajorEvent: false,
+					quoteAgeMin,
+					maxStaleMin: riskPolicy.maxStaleMin,
+					greeksConsistent: true,
+					crossAssetDivergence: 0,
+				} as any);
+
+				// Position health with canonical data
+				const positionHealth = fnfEvaluatePositionHealth({
+					currentPremium,
+					entryPremium,
+					stopPrice,
+					targetPrice,
+					unrealizedPnlPerUnit,
+					maePerUnit: mae,
+					mfePerUnit: mfe,
+					currentRiskPerUnit: Math.max(0, currentPremium - stopPrice),
+					originalRiskPerUnit: Math.max(0, entryPremium - stopPrice),
+					dte,
+					underlyingSpot,
+					underlyingSma20: null,
+					delta,
+					iv,
+					quoteAgeMin,
+					maxStaleMin: riskPolicy.maxStaleMin,
+					traps: traps as any,
+					thesisValid: true,
+					underlyingConfirmed: underlyingSpot > 0,
+					spreadPct: spreadPct > 0 ? spreadPct : null,
+					volume,
+					inProfit: unrealizedPnlPerUnit > 0,
+					profitExceedsThreshold: mfe > (entryPremium - stopPrice) * 1.5,
+				} as any);
+
+				// Shadow monitoring with canonical data
+				const shadow = fnfShadowMonitor({
+					currentPremium,
+					entryPremium,
+					stopPrice,
+					targetPrice,
+					mae,
+					mfe,
+					currentPnlPerUnit: unrealizedPnlPerUnit,
+					unrealizedPnlPerUnit,
+					dte,
+					underlyingSpot,
+					underlyingSma20: null,
+					delta,
+					iv,
+					volume,
+					spreadPct,
+					quoteAgeMin,
+					maxStaleMin: riskPolicy.maxStaleMin,
+					trapScore: traps.score,
+					healthState: positionHealth.state,
+					thesisValid: true,
+					currentEv: 0,
+				} as any);
+
+				// Exit evaluation with canonical data
+				const exitResult = fnfEvaluateExit({
+					currentPremium,
+					entryPremium,
+					stopPrice,
+					targetPrice,
+					healthState: positionHealth.state,
+					thesisValid: true,
+					underlyingConfirmed: underlyingSpot > 0,
+					unrealizedPnlPerUnit,
+					maePerUnit: mae,
+					mfePerUnit: mfe,
+					dte,
+					currentEv: 0,
+					exitEv: 0,
+					nextBestEv: 0,
+					inProfit: unrealizedPnlPerUnit > 0,
+					profitExceedsThreshold: mfe > (entryPremium - stopPrice) * 1.5,
+					spreadPct: spreadPct > 0 ? spreadPct : null,
+				} as any);
+
+				results.push({
+					tradeId: trade.id,
+					instrument: trade.instrument,
+					healthState: positionHealth.state,
+					shadowAction: shadow.action,
+					exitRecommended: exitResult.shouldExit,
+					exitReason: exitResult.shouldExit && exitResult.exitReason ? String(exitResult.exitReason) : undefined,
+					currentPremium,
+					pnlPct: entryPremium > 0 ? ((currentPremium - entryPremium) / entryPremium) * 100 : 0,
+					mae,
+					mfe,
+					thesisValid: true,
+					trapScore: traps.score,
+					quoteAgeMin,
+					dataSource,
+				});
+
+				// Journal monitoring decision (fire-and-forget)
+				this.journalMonitoringDecision({
+					portfolioId: pid,
+					asOf: new Date(),
+					tradeId: trade.id,
+					instrument: trade.instrument,
+					healthState: positionHealth.state,
+					shadowAction: shadow.action,
+					exitRecommended: exitResult.shouldExit,
+					exitReason: exitResult.shouldExit && exitResult.exitReason ? String(exitResult.exitReason) : undefined,
+					currentPremium,
+					pnlPct: entryPremium > 0 ? ((currentPremium - entryPremium) / entryPremium) * 100 : 0,
+					mae,
+					mfe,
+					thesisValid: true,
+					trapScore: traps.score,
+					quoteAgeMin,
+					dataSource,
+				});
+			} catch (err) {
+				this.logger.warn(`evaluateOpenPositions: error for trade ${trade.id}: ${(err as Error).message}`);
+			}
+		}
+
+		return results;
 	}
 }
