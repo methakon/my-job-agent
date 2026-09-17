@@ -125,11 +125,15 @@ export const SKILL_SYNONYM_GROUPS: SynonymGroup[] = [
   },
   {
     label: 'ruby',
-    members: ['ruby', 'ruby on rails', 'rails', 'ror'],
+    members: ['ruby', 'rb'],
+  },
+  {
+    label: 'rails',
+    members: ['rails', 'ruby on rails', 'ror'],
   },
   {
     label: 'php',
-    members: ['php', 'laravel', 'symfony'],
+    members: ['php', 'php3', 'php4', 'php5', 'php7', 'php8'],
   },
   {
     label: 'scala',
