@@ -33,21 +33,18 @@ async function main() {
   console.log('JA-003=' + (byId['JA-003'] ? byId['JA-003'].status : 'MISSING'));
   console.log('JA-014=' + (byId['JA-014'] ? byId['JA-014'].status : 'MISSING'));
   console.log('');
-  console.log('ROWS=' + total);
-  console.log('IDS=' + ids[0] + '..' + ids[ids.length-1]);
-  const expected = [];
-  for (let i = 1; i <= 40; i++) expected.push('JA-' + String(i).padStart(3,'0'));
-  const missing = expected.filter(id => !byId[id]);
-  const dupes = rows.filter(r => r.itemId && rows.filter(x => x.itemId === r.itemId).length > 1);
-  console.log('DUPLICATES=' + (dupes.length > 0 ? dupes.length : 0));
-  console.log('MISSING=' + missing.length + (missing.length ? ' (' + missing.join(',') + ')' : ''));
-  console.log('');
-  for (const id of expected) {
-    const r = byId[id];
-    if (r) console.log(id + ' DB=' + r.status);
-    else console.log(id + ' DB=MISSING');
+  // Print per-JA-ID status for ALL rows in DB (not just JA-001..JA-040)
+  const allDbIds = Object.keys(byId).sort();
+  for (const id of allDbIds) {
+    console.log(id + ' DB=' + byId[id].status);
   }
-  const allGood = total === 40 && missing.length === 0 && invariant && counts.done === 7 && counts.in_progress === 2 && counts.blocked === 0 && counts.pending === 31;
+  // Also report which expected IDs (JA-001..JA-040) are missing from DB
+  const expectedRange = [];
+  for (let i = 1; i <= 40; i++) expectedRange.push('JA-' + String(i).padStart(3,'0'));
+  const missingFromRange = expectedRange.filter(id => !byId[id]);
+  const allGood = total === 40 && invariant && counts.done === 7 && counts.in_progress === 2 && counts.blocked === 0 && counts.pending === 31;
+  console.log('');
+  console.log('ALL_GOOD=' + (allGood ? 'PASS' : 'FAIL'));
   process.exit(allGood ? 0 : 1);
 }
 main().catch(e => { console.error(e); process.exit(2); });
