@@ -357,6 +357,24 @@
       "recorded": "2026-09-17T09:45+05:30",
       "evidence": "git show --name-only e0fb380 lists V3 WS runtime files only; no FYERS, no real trading, no schema change",
       "expires_hint": "Delete once e0fb3802cadb410bb563419600986fb7a378384f leaves the guard commit window (default: last 15 code commits)."
+    },
+    "73601b3": {
+      "short": "73601b3",
+      "reason": "Trading Agent workstream - feat(trading): single paper portfolio — retire Upstox execution, fix 3 data-paths. Trading-agent-dev branch commit for FNF paper desk consolidation.",
+      "workstream": "Trading Agent - FNF paper desk (separate workstream: trading-agent-dev branch)",
+      "authority": "operator instruction for trading-agent-dev branch work (Phase 4A development branch)",
+      "recorded": "2026-09-18T01:45+05:30",
+      "evidence": "git show --name-only 73601b3 lists trading-agent files; first push of trading-agent-dev branch",
+      "expires_hint": "Delete once 73601b3 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "3d693cff0f9053725d89776fe2d8c8b003872f05": {
+      "short": "3d693cf",
+      "reason": "Trading Agent workstream - feat(fnf): add phase 4a position monitoring and exit system. 5-engine monitoring pipeline (risk, trap, health, shadow, exit) + 36 tests + canonical data path.",
+      "workstream": "Trading Agent - Phase 4A position monitoring + exit system (separate workstream: trading-agent-dev branch)",
+      "authority": "operator approval: Phase 4A approved for commit + push on trading-agent-dev",
+      "recorded": "2026-09-18T01:45+05:30",
+      "evidence": "git show --name-only 3d693cf lists 10 trading-agent files (2617 insertions); tsc CLEAN; build CLEAN; 36/36 risk-engine tests pass; first push of trading-agent-dev branch",
+      "expires_hint": "Delete once 3d693cff0f9053725d89776fe2d8c8b003872f05 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
