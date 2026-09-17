@@ -148,11 +148,11 @@
     },
     "77b30513e8baac420780972aa14269c0a11fed0d": {
       "short": "77b3051",
-      "reason": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Touches ONLY Job Agent files: src/app.module.ts (AdaptationMatcherService DI provider), src/applications/apply-engine.service.ts (P5 adaptation blocks in applyToLead/prepareApplication/submitPrepared), src/job-application-roadmap/job-application-roadmap-page.controller.ts (@BypassAuth on GET only; mutations protected), src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts, scripts/ja-roadmap-status.js (new CLI status-sync helper). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. No .env change, no schema change. Reconciliation: JA-012->done, JA-013->done via API; JA-014 stays in_progress (doneWhen requires measured recall improvement, not matcher existence). Public GET /job-application-roadmap now serves 200 without auth; POST/DELETE/align-content mutations require session or x-operator-password (401 without). Login page already has the roadmap tile (no change).",
+      "reason": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Touches ONLY Job Agent files: src/app.module.ts (AdaptationMatcherService DI provider), src/applications/apply-engine.service.ts (P5 adaptation blocks in applyToLead/prepareApplication/submitPrepared), src/job-application-roadmap/job-application-roadmap-page.controller.ts (@BypassAuth on GET only; mutations protected), src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts, scripts/ja-roadmap-status.js (new CLI status-sync helper). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. No .env change, no schema change. Reconciliation: JA-012\u2192done, JA-013\u2192done via API; JA-014 stays in_progress (doneWhen requires measured recall improvement, not matcher existence). Public GET /job-application-roadmap now serves 200 without auth; POST/DELETE/align-content mutations require session or x-operator-password (401 without). Login page already has the roadmap tile (no change).",
       "workstream": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap sync + public roadmap (separate control plane: job_application_roadmap_items)",
-      "authority": "operator approval 2026-09-17 ('This is DEVELOPMENT status. Therefore: commits ARE allowed, pushes ARE allowed... You MAY: stage Job Agent changes, commit, push.'), goodbye directive to commit on dev and push",
-      "recorded": "2026-09-17T17:38+05:30 (this session; cherry-picked onto dev from ja-015-publish)",
-      "evidence": "git show --stat d7898ed lists 7 Job Agent files only (scripts/ja-roadmap-status.js, src/app.module.ts, src/applications/apply-engine.service.ts, src/job-application-roadmap/job-application-roadmap-page.controller.ts, src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts); verification: tsc 0 errors, npm run build 0 errors, tests JA-010 14/0/14 + JA-012 63/0/25 + 6/0/2 + JA-013 120/0/120; public GET /job-application-roadmap 200 no-auth, POST mutations 401 without auth / 204 with auth; trading-agent pid 3271 uptime 2h 0 restarts online untouched.",
+      "authority": "operator approval 2026-09-17 ('This is DEVELOPMENT status. Therefore: commits ARE allowed, pushes ARE allowed... You MAY: stage Job Agent changes, commit, push.')",
+      "recorded": "2026-09-17T00:52+05:30 (this session; commit 77b3051 on ja-015-publish)",
+      "evidence": "git show --stat 77b3051 lists 7 Job Agent files only (scripts/ja-roadmap-status.js, src/app.module.ts, src/applications/apply-engine.service.ts, src/job-application-roadmap/job-application-roadmap-page.controller.ts, src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts); verification: tsc 0 errors, npm run build 0 errors, tests JA-010 14/0/14 + JA-012 63/0/25 + 6/0/2 + JA-013 120/0/120, public GET /job-application-roadmap 200 no-auth, POST mutations 401 without auth / 204 with auth, FYERS callback 302, login page 200, public site 200; trading-agent pid 3271 uptime 4h 0 restarts online untouched.",
       "expires_hint": "Delete once 77b30513e8baac420780972aa14269c0a11fed0d leaves the guard commit window (default: last 15 code commits)."
     },
     "ce519bfe512bc0608230b1a7a65d23aaafe9f1b6": {
@@ -163,6 +163,200 @@
       "recorded": "2026-09-17T17:38+05:30 (this session; cherry-picked onto dev from ja-015-publish)",
       "evidence": "git show --stat ce519bf on dev lists only docs/gate-close-allow.json; allow-list: corrected SHA for cherry-picked 77b30513e8baac420780972aa14269c0a11fed0d; no trading/algo Trading Agent files touched.",
       "expires_hint": "Delete once ce519bfe512bc0608230b1a7a65d23aaafe9f1b6 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "f70e192d61c9d49f87cd20d0e8d90242d3027088": {
+      "short": "f70e192",
+      "reason": "Trading workstream \u2014 GATE 0 row 877: feat(row-877): desk consumes the common store when its own feed is stale. Touches src/trading/upstox-live-paper/* + src/trading/unified-market-data/unified-market-data.service.ts + package.json + scripts/upstox-common-chain.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 GATE 0 row 877 (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-15T11:13+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "17497785627991ece43dd90e1daad22e66b66754": {
+      "sha": "17497785627991ece43dd90e1daad22e66b66754",
+      "reason": "Provider tick compatibility audit fixes: V3 WS mapper, V2 REST greeks, FYERS NULLs, timestamp model",
+      "workstream": "Trading Agent \u2014 Provider Failover Architecture",
+      "authority": "operator-directed compatibility audit"
+    },
+    "fa62e07e06bec14a02cd423e26f3086c07ef8372": {
+      "short": "fa62e07",
+      "reason": "Trading/canonical workstream \u2014 fix(canonical): force-release wedged pool sockets so the tape self-heals. Fixes mysql2 pool exhaustion where abandoned queries permanently consume pool slots. Touches src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-15T12:01+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "f8815f0": {
+      "short": "f8815f0",
+      "reason": "Provider failover architecture: dynamic provider selection with anti-oscillation hysteresis. Equalizes FYERS/Upstox priorities (neither hardcoded primary), adds switchCooldownMs hysteresis to prevent oscillation. Trading/market-data workstream authorized by operator.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: provider failover architecture authorized",
+      "recorded": "2026-09-17T00:30+05:30",
+      "evidence": "git show --name-only f8815f0 lists feed-arbitration.state.ts, feed-arbitration.service.ts, fno-market-data.service.ts, upstox-live-paper-market.service.ts. No FYERS regressions, no real-trading, no schema changes.",
+      "expires_hint": "Entry can be deleted once f8815f0 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "2ce34f5": {
+      "short": "2ce34f5",
+      "reason": "Upstox paper workstream: correct NSE options exchange transaction charge. Part of Upstox V3 implementation work authorized by operator.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only 2ce34f5 lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once 2ce34f5 leaves the guard commit window."
+    },
+    "797327feac16502055decce7c7955a77b4388964": {
+      "short": "797327f",
+      "reason": "Trading workstream \u2014 GATE 0 row 877: fix(row-877): keep the desk's OWN 15s stale rule; give the shared path its own budget. Touches src/trading/upstox-live-paper/upstox-live-paper-autoentry.service.ts only. Separate trading/algo-trading workstream tracked under its own roadmap.",
+      "workstream": "Trading/algo-trading \u2014 GATE 0 row 877 (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; tracked under trading roadmap, not project_checklist_items",
+      "recorded": "2026-09-15T11:17+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "21326c7c57729b29ecd2eec5e5f2826b8d5699da": {
+      "short": "21326c7",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: standalone pure classifier (GapSeverity = NONE/MINOR/MODERATE/MAJOR/BLOCKING/UNKNOWN) derived ONLY from existing signals, wired into qualification, with deterministic trace evidence for failing test cases. Cherry-pick onto ja-015-publish branch (base: origin/dev b914364) for safe JA-only push; no shared dev history rewrite, no force-push. Touches src/job-application/skills/gap-severity.ts (new), src/job-application/qualification.service.ts (+invoke), scripts/ja-015-skill-gap-severity.test.ts (new, 55 cases). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain code touched. Separate JA-roadmap control plane (job_application_roadmap_items id=9).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat 21326c7 on ja-015-publish lists only src/job-application/skills/gap-severity.ts + src/job-application/qualification.service.ts + scripts/ja-015-skill-gap-severity.test.ts; tsc 0 errors, npm run build 0 errors on ja-015-publish branch; no trading/algo Trading Agent/market-data/feed/risk/execution/FNF/option-chain files.",
+      "expires_hint": "Delete once 21326c7c57729b29ecd2eec5e5f2826b8d5699da leaves the guard commit window (default: last 15 code commits)."
+    },
+    "6dc951f": {
+      "short": "6dc951f",
+      "reason": "Upstox paper workstream: PAPER capital continuity + week-start carry-forward positions. Part of Upstox V3 implementation.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only 6dc951f lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once 6dc951f leaves the guard commit window."
+    },
+    "0cd75f586be13c70f3aa2d0876b87bc89e7f433a": {
+      "short": "0cd75f5",
+      "reason": "Trading workstream \u2014 fix(capture): make the option-chain capture absence-preserving (D4 extended to capture tables): NULL-preserving volume/OI/index depth so missing values don't decode as zero. Touches src/trading/fnf-option-quote*.entity.ts + src/trading/upstox-live-paper/* + src/migration/* + package.json + scripts/capture-absence-preserving.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 option-chain capture (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "b8041d4d7271711ffa929215a701be0d9f00a46b": {
+      "short": "b8041d4",
+      "reason": "Research workstream \u2014 feat(research): offline/shadow price-prediction feature formulas + walk-forward evaluation. Pure research/offline: no live data, no real execution, no risk control, no trading decision path. Touches src/trading/research/price-prediction-features.ts + scripts/price-prediction-*.js + package.json. Separate research workstream.",
+      "workstream": "Trading/research \u2014 offline shadow price prediction (separate workstream)",
+      "authority": "Separate research workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "63e497b": {
+      "short": "63e497b",
+      "reason": "Upstox paper workstream: single economic accounting path + current option cost model. Part of Upstox V3 implementation.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only 63e497b lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once 63e497b leaves the guard commit window."
+    },
+    "e28df17": {
+      "short": "e28df17",
+      "reason": "Upstox V3 workstream: V3 WebSocket client, option chain discovery, protobuf decoder, SENSEX-only trading override. Operator authorized commit+push in section 18 of instruction.",
+      "workstream": "upstox-v3-market-data (separate workstream: V3 WebSocket + option chain discovery for NIFTY/BANKNIFTY/SENSEX)",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:45+05:30",
+      "evidence": "git show --name-only e28df17 lists only upstox-live-paper/* + package.json (protobufjs dep). No FYERS, no real-trading, no schema changes.",
+      "expires_hint": "Entry can be deleted once e28df17 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "c8cd44119e21eb5cd418bd4c24ef0dc33b0c41dd": {
+      "short": "c8cd441",
+      "reason": "Trading/canonical workstream \u2014 perf(canonical): batch the live ingest + bound the stream queue. Touches src/trading/fno-market-data.service.ts + src/trading/unified-market-data/* + package.json + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-15T11:28+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "48de27fa55ccdf0a1b627f4f5ea27457acd400cb": {
+      "sha": "48de27fa55ccdf0a1b627f4f5ea27457acd400cb",
+      "reason": "V3 WS data integrity: proto3 optional presence + per-instrument merge cache. Trading Agent workstream.",
+      "approved_by": "user (trading agent worker, inline approval)",
+      "timestamp": "2026-09-16T19:31:27Z",
+      "short": "48de27f",
+      "workstream": "Trading Agent - V3 WebSocket runtime + data integrity (separate workstream)",
+      "authority": "operator instruction 2026-09-16 section 18 CHANGE CONTROL: commit+push authorized for Upstox V3 / trading work",
+      "recorded": "2026-09-16T19:31+05:30",
+      "evidence": "git show --name-only 48de27f lists V3 WS files only; no FYERS, no real trading, no schema change",
+      "expires_hint": "Delete once 48de27fa55ccdf0a1b627f4f5ea27457acd400cb leaves the guard commit window (default: last 15 code commits)."
+    },
+    "e718d7cadf202678f9a117e5ba84f947baaf8402": {
+      "short": "e718d7c",
+      "reason": "Trading/canonical workstream \u2014 perf(canonical): write-behind the streaming ingest (message path does no I/O). Touches src/trading/unified-market-data/canonical/tick-interpreter.service.ts + src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-15T11:33+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "c2260dc1fd5af9fc9bf057b54ebc04cbcddb58d9": {
+      "short": "c2260dc",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: allow-list entry for the JA-015 commit cherry-picked onto ja-015-publish branch (base: origin/dev b914364). Safe non-force JA-only publish; no shared dev history rewrite. Touches docs/gate-close-allow.json only (allow-list update for cherry-picked SHA).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat c2260dc on ja-015-publish lists only docs/gate-close-allow.json; allow-list: single clean entry keyed by full correct SHA 21326c7c57729b29ecd2eec5e5f2826b8d5699da; no trading/algo Trading Agent files touched.",
+      "expires_hint": "Delete once c2260dc1fd5af9fc9bf057b54ebc04cbcddb58d9 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "f3423085cc5fa394cce9c751d555de4fbe24fc61": {
+      "short": "f342308",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: allow-list SHA correction for the cherry-picked JA-015 commit on ja-015-publish branch (base: origin/dev b914364). Safe non-force JA-only publish; no shared dev history rewrite. Touches docs/gate-close-allow.json only (allow-list SHA correction for cherry-picked SHA).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat f342308 on ja-015-publish lists only docs/gate-close-allow.json; allow-list: corrected SHA for cherry-picked 21326c7c57729b29ecd2eec5e5f2826b8d5699da; no trading/algo Trading Agent files touched.",
+      "expires_hint": "Delete once f3423085cc5fa394cce9c751d555de4fbe24fc61 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "b98d9d9": {
+      "short": "b98d9d9",
+      "reason": "Upstox live workstream: measure feed credentials while STANDBY (unblock election + failover). Part of Upstox V3 implementation.",
+      "workstream": "upstox-v3-market-data",
+      "authority": "operator instruction 2026-09-16: section 18 CHANGE CONTROL explicitly authorizes commit+push for Upstox V3 work",
+      "recorded": "2026-09-16T23:50+05:30",
+      "evidence": "git show --name-only b98d9d9 lists Upstox paper/live trading files only.",
+      "expires_hint": "Entry can be deleted once b98d9d9 leaves the guard commit window."
+    },
+    "fc84590267e8ef87276f82eb98a57c57f9125c0f": {
+      "short": "fc84590",
+      "reason": "Job Application roadmap - JA-015 Skill-gap severity: remove duplicate + stale-SHA JA-015 allow-list entries for the cherry-picked JA commits on ja-015-publish branch (base: origin/dev b914364). Safe non-force JA-only publish; no shared dev history rewrite. Touches docs/gate-close-allow.json only (allow-list cleanup for cherry-picked SHAs).",
+      "workstream": "Job Application roadmap - JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-15 ('you can do comit push then continue progressing the roadmap'); cherry-pick onto ja-015-publish branch from origin/dev for safe JA-only publish",
+      "recorded": "2026-09-15T22:49+05:30 (this session; safe JA-only push via ja-015-publish branch)",
+      "evidence": "git show --stat fc84590 on ja-015-publish lists only docs/gate-close-allow.json; allow-list: duplicates collapsed, stale-SHA keys removed; no trading/algo Trading Agent files touched.",
+      "expires_hint": "Delete once fc84590267e8ef87276f82eb98a57c57f9125c0f4 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "163f66cd7d33225eaa9a2bbef0b2516ad17b917b": {
+      "short": "163f66c",
+      "reason": "Trading workstream \u2014 fix(trading): Stage 1 \u2014 D4/D5/D6 absence-is-not-zero correctness fixes. Protobuf3 partial updates: missing fields decode as 0, not null \u2014 need merge logic to prevent field erosion on live feeds. Touches src/trading/pre-open/* + src/trading/unified-market-data/* + src/migration/* + scripts/*.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 pre-open capture + unified market-data correctness (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "bc52c883a4974987b0ca315fdb5b173b6f277908": {
+      "short": "bc52c88",
+      "reason": "Trading workstream \u2014 feat(trading): capture-integrity facts for the Upstox OI archive: adds providerTs, prevOi, payloadHash columns. Additive only: 3 NULLable columns, no row rewritten, no default, no index change, no trading-decision path reads them. Touches src/trading/research/capture-integrity.ts + src/trading/upstox-live-paper/* + src/migration/* + scripts/capture-integrity.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 Upstox OI archive capture integrity (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "d7898ed52099eb39c82275e9900b7e135748313f": {
+      "short": "d7898ed",
+      "reason": "Job Application roadmap \u2014 P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap read. CHERRY-PICKED ONTO DEV from ja-015-publish commit 77b3051. Touches ONLY Job Agent files (7 files: scripts/ja-roadmap-status.js, src/app.module.ts, src/applications/apply-engine.service.ts, src/job-application-roadmap/job-application-roadmap-page.controller.ts, src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Verified this session: tsc 0, build 0, tests ja-010 14/0/14 + ja-012 63/0/25 + 6/0/2 + ja-013 120/0/120; DB = local HTTP = public HTTP = 40/7/2/0/31 CONSISTENT; trading-agent PID 47788 untouched; my-job-agent PID 87653 online.",
+      "workstream": "Job Application roadmap \u2014 P5 apply-engine adaptation integration (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-17 ('This is DEVELOPMENT status. Therefore: commits ARE allowed, pushes ARE allowed'); goodbye directive to commit on dev and push; cherry-picked onto dev from ja-015-publish",
+      "recorded": "2026-09-17T17:34+05:30 (this session; cherry-picked onto dev)"
+    },
+    "9010dd6898b5200800bfa38c4f9c0a05a7ead6ab": {
+      "short": "9010dd6",
+      "reason": "Trading/canonical workstream \u2014 fix(canonical): bound the write-behind flush so a wedged write cannot stop the tape. Touches src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
+      "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
+      "recorded": "2026-09-15T11:56+05:30 (cherry-picked onto dev from ja-015-publish)"
+    },
+    "e0fb3802cadb410bb563419600986fb7a378384f": {
+      "short": "e0fb380",
+      "reason": "Trading Agent workstream - fix(v3-ws): runtime fixes for live deployment (proto asset copy, WS import, reconnect retry).",
+      "workstream": "Trading Agent - V3 WebSocket runtime fixes (separate workstream)",
+      "authority": "operator instruction 2026-09-16 section 18 CHANGE CONTROL: commit+push authorized for Upstox V3 / trading work",
+      "recorded": "2026-09-17T09:45+05:30",
+      "evidence": "git show --name-only e0fb380 lists V3 WS runtime files only; no FYERS, no real trading, no schema change",
+      "expires_hint": "Delete once e0fb3802cadb410bb563419600986fb7a378384f leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
