@@ -376,6 +376,12 @@
       "workstream": "Job Agent — app module fix (src/app.module.ts only; NOT src/trading/*; MarketDataHealthController already exists on dev)",
       "authority": "operator approval 2026-09-17: commits ARE allowed, pushes ARE allowed for Job Agent development status"
     },
+    "0791765": {
+      "short": "0791765",
+      "reason": "Job Application roadmap — JA-014 Semantic skill matching: fix false-positive skill matches by splitting Ruby/Rails synonym groups and removing PHP framework names from the language group. Touches ONLY Job Agent files: src/job-application/skills/synonym-map.ts (Ruby group = [ruby,rb], new Rails group = [rails,ruby on rails,ror], PHP group = [php,php3..php8]) and scripts/ja-014-semantic-skill-matching.test.ts (import from mocha, 4 test fixes). Verified: test 86/86 pass ts-mocha exit 0; DB JA-014 status -> done (commit 4472c897cd); DB == Local == Public: 40/9/0/0 consistent. No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. Separate JA-roadmap control plane (job_application_roadmap_items).",
+      "workstream": "Job Application roadmap — JA-014 Semantic skill matching (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-17: commits ARE allowed, pushes ARE allowed for Job Agent development status; JA-014 doneWhen satisfied (evidence written to DB via POST /job-application-roadmap/item/JA-014/status)"
+    },
     "73601b3": {
       "short": "73601b3",
       "reason": "Trading Agent workstream - feat(trading): single paper portfolio — retire Upstox execution, fix 3 data-paths. Trading-agent-dev branch commit for FNF paper desk consolidation.",
