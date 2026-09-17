@@ -11,7 +11,15 @@ import { RawObservation, TickSourceSemantics } from './canonical-tick';
  * (null) instead of being defaulted.
  */
 
-export type ResolvedInstrument = { symbol: string; exchange?: string | null };
+export type ResolvedInstrument = {
+  symbol: string;
+  exchange?: string | null;
+  /** Contract metadata resolved from the authoritative instrument master (V3 WS tokens). */
+  underlying?: string | null;
+  expiry?: string | null;
+  strike?: number | null;
+  optionType?: string | null;
+};
 
 /**
  * Identity the ADAPTER already knows from the SAME provider response and may
@@ -229,7 +237,7 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
     observation: ({
       providerInstrumentId: rawKey,
       providerSymbol,
-      underlying: (pick(quote, 'underlying', 'underlying_symbol') as string | null) ?? ctx.identity?.underlying ?? null,
+      underlying: (pick(quote, 'underlying', 'underlying_symbol') as string | null) ?? fromMaster?.underlying ?? ctx.identity?.underlying ?? null,
       exchange: exchange as string | null,
       segment: (String(providerInstrumentId).includes('|') ? String(providerInstrumentId).split('|')[0].split('_').pop() : null) as string | null,
       // Upstox declares the contract kind on the instrument (OPT/FUT/INDEX/EQ).
@@ -239,9 +247,10 @@ export const upstoxMapper: ProviderMapper = (payload, ctx) => {
       ltp: pick(quote, 'last_price', 'ltp') ?? pick(quote, 'underlying_spot_price') ?? null,
       // Contract metadata rides on the envelope/request for a chain leg, so the
       // adapter may supply it; the payload always wins when it carries its own.
-      expiry: (pick(quote, 'expiry', 'expiry_date') as string | null) ?? ctx.identity?.expiry ?? null,
-      strike: pick(quote, 'strike_price', 'strike') ?? ctx.identity?.strike ?? null,
-      optionType: (pick(quote, 'option_type', 'instrument_type') as string | null) ?? ctx.identity?.optionType ?? null,
+      // The instrument master provides authoritative metadata for V3 WS numeric tokens.
+      expiry: (pick(quote, 'expiry', 'expiry_date') as string | null) ?? fromMaster?.expiry ?? ctx.identity?.expiry ?? null,
+      strike: pick(quote, 'strike_price', 'strike') ?? fromMaster?.strike ?? ctx.identity?.strike ?? null,
+      optionType: (pick(quote, 'option_type', 'instrument_type') as string | null) ?? fromMaster?.optionType ?? ctx.identity?.optionType ?? null,
       volume: pick(quote, 'volume', 'volume_traded'),
       oi: pick(quote, 'oi', 'open_interest'),
       previousOi: pick(quote, 'prev_oi', 'previous_oi'),

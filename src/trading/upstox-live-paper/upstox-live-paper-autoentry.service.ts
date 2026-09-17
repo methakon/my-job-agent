@@ -346,9 +346,9 @@ export class UpstoxLivePaperAutoEntryService {
     // Latest tick per contract — a stale leg must not masquerade as the chain.
     const latest = new Map<string, UpstoxLivePaperOptionQuote>();
     for (const r of rows) if (!latest.has(r.contractSymbol)) latest.set(r.contractSymbol, r);
-    const ownFresh = [...latest.values()].filter((r) => now - new Date(r.ts).getTime() <= this.config.staleQuoteMaxAgeMs * 4);
+    const ownFresh = [...latest.values()].filter((r) => now - new Date(r.ts).getTime() <= this.config.staleQuoteMaxAgeMs);
 
-    // The common-store read is only paid for when the desk's own chain cannot serve.
+    // The common-store read is paid for when the desk's own chain is stale OR empty.
     let commonRows: CommonChainRow[] = [];
     let producer: string | null = null;
     if (!ownFresh.length) {

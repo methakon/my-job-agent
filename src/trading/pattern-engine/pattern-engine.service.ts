@@ -98,7 +98,7 @@ export class PatternEngineService implements OnModuleInit, OnModuleDestroy {
     if (!this.enabled) { this.logger.warn('[PATTERN] engine DISABLED (PATTERN_ENGINE_ENABLED=off)'); return; }
     this.logger.log(
       `[PATTERN] engine ${STRATEGY_VERSION} · universes=${this.universes().join(',') || 'none'} · bucket=${this.bucketMs / 60_000}m · every ${this.intervalMs}ms · ` +
-      `dispatch fnf=${this.dispatchService.targets().fnf.enabled ? 'ON' : 'off'} upstox=${this.dispatchService.targets().upstox.enabled ? 'ON' : 'off'}`,
+      `dispatch fnf=${this.dispatchService.targets().fnf.enabled ? 'ON' : 'off'}`,
     );
     if (!this.universes().length) { this.logger.warn('[PATTERN] no universes configured — set PATTERN_ENGINE_UNIVERSES or UPSTOX_LIVE_INSTRUMENTS'); return; }
     void this.scanAll().catch((error) => this.recordError(error));
