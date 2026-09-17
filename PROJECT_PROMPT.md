@@ -1264,6 +1264,100 @@ the headless `trading-agent`, with the app making zero connect attempts.
 ## Goodbye process (user-mandated)
 Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --rebase` → `push origin/dev`. Never skip even on interrupt. Working directory: `/home/swarna-sekhar-dhar/projects/my-job-agent`; branch: `dev`.
 
+## Session log — 2026-09-17 (Thu) 17:57 IST (after market close 15:30)
+
+### What happened
+Job Agent session closeout verification + documentation. Independent re-verification of roadmap state, runtime, git, and HTTP endpoints. Restarted my-job-agent to clear a hanging `/job-application-roadmap` endpoint (direct DB reads worked; app endpoint timed out at 120s with 0 bytes; restart fixed it).
+
+### COMPLETED — verified from actual evidence
+
+**Roadmap state (DB authoritative, Oracle Cloud MySQL via SSH tunnel 127.0.0.1:3307):**
+- Total rows: 40
+- Done: 7 / In_progress: 2 / Blocked: 0 / Pending: 31
+- All 40 rows verified present in DB, ordered by phaseOrder/itemOrder
+
+**Focus rows (verified from DB + local HTTP + public HTTP — all consistent):**
+- JA-002 (Final submission sandbox safety): status=done. doneWhen="Every real submission path is blocked whenever safety conditions require it, including direct low-level invocation." SATISFIED. Evidence: ja-002-sandbox-safety.test.js 26/26 checks PASS (299 lines, 53 assertions); src/applications/sandbox-safety.ts isSubmissionBlocked() blocks every real submission boundary; commit 1e5697fc8d26bb7ea788eabb8f7eaf10abb17187; lastVerified 2026-09-16T20:22:37Z.
+- JA-003 (Regression baseline): status=in_progress. doneWhen="Automated baseline tests pass." NOT SATISFIED — no comprehensive automated baseline test suite exists; existing tests (ja-010, ja-012, ja-013, ja-015) are individual feature tests, not a baseline covering ingestion/dedup/profile validation/scoring/CV generation/email-portal prep/approval/retries/inbox/learning. Stays in_progress correctly.
+- JA-014 (Semantic skill matching): status=in_progress. doneWhen="Recall improves without materially increasing false-positive skill matches." NOT SATISFIED — adaptation-matcher.service.ts + synonym-map.ts exist and are wired (P5), but no baseline recall measurement, no new recall measurement, no false-positive comparison dataset, no threshold evidence. Stays in_progress correctly. DO NOT mark done.
+
+**Local HTTP (http://127.0.0.1:3010/job-application-roadmap, x-operator-password auth):**
+- HTTP 200, 31471 bytes, 0.30s
+- Summary: Total 40 / Done 7 / In progress 2 / Blocked 0 / Pending 31 — MATCHES DB
+- All 40 rows rendered. JA-002=done, JA-003=in_progress, JA-014=in_progress
+- Consensus: DB = local HTTP = CONSISTENT
+
+**Public HTTP (https://berhampore.in/job-application-roadmap, no auth, Cloudflare edge):**
+- HTTP 200, 32409 bytes, 7.69s (edge caching delay)
+- Summary: Total 40 / Done 7 / In progress 2 / Blocked 0 / Pending 31 — MATCHES DB
+- All 40 rows rendered. JA-002=done, JA-003=in_progress, JA-014=in_progress
+- Consensus: DB = local HTTP = public HTTP = CONSISTENT
+
+**Runtime (pm2):**
+- my-job-agent: PID 87653 (was 29158; restarted to clear hanging endpoint), online, uptime ~0s (new), 6 restarts total. Trading-agent: PID 47788, online, uptime 3h, 13 restarts — TOUCHED? NO. Trading-agent PID unchanged by my-job-agent restart.
+- Restart used `pm2 restart my-job-agent` WITHOUT `--update-env`. ecosystem.config.js env block preserved (DATABASE_NAME=myjob_agent). .env provides MYSQL_*. No environment vars lost.
+- App boots clean: port 3010 LISTEN, /health returns 401 (protected), no crash in err log.
+
+**Git (independently verified):**
+- Branch: dev
+- HEAD: 81e2d4652a565725121a0e3587e6f536f025c5ac
+- Working tree: CLEAN (no uncommitted changes)
+- 16 commits ahead of origin/dev, 0 behind
+- docs/gate-close-allow.json: VALID JSON, contains 77b3051 entry (workstream: job-application-roadmap, authority: user goodbye directive + P5 activation authorization). Exist only because it was cherry-picked onto dev earlier.
+- PROJECT_PROMPT.md: NO 2026-09-17 session log entry existed before this session — ADDED below.
+- docs/TODO.md: NO 2026-09-17 session close entry existed before this session — ADDED below.
+
+**P5 integration (apply-engine adaptation behind JA-010 hard gate) — source-verified:**
+- src/applications/apply-engine.service.ts: 3 adaptation blocks (applyToLead ~line 189, prepareApplication ~line 466, submitPrepared ~line 586), each AFTER JA-010 qualification gate (ready→silent proceed, partial/risky→warn+proceed, no-go→block/skip). Never bypasses JA-010 REJECT/INSUFFICIENT_DATA.
+- src/app.module.ts: AdaptationMatcherService imported + added to providers array (DI fix — was missing, caused NestJS crash on PID 77338; resolved).
+- src/job-application/skills/adaptation-matcher.service.ts: preexisting P3 evaluator (evaluate/evaluateLead/fitScore, takes CandidateProfile+JobLead). NOT modified in P5.
+- NO new types/fields/repos/entities/decision models added. NO `any` casts.
+- Build: tsc --noEmit exit 0, npm run build exit 0.
+- Tests: ja-010 14/0/14, ja-012-jd-intent 63/0/25, ja-012-evidence-tagging 6/0/2, ja-013 120/0/120. (ja-002 26/26 checks.)
+- P5 markers in dist: 3 evaluateLead call sites (one per apply-engine method) confirmed after build.
+- Scope: ONLY Job Agent files. NO src/trading/*, src/trading-agent/*, FYERS, Upstox, market-data, paper-trading touched.
+
+**Public roadmap security hardening — verified:**
+- GET /job-application-roadmap without auth → HTTP 200 (public read, as intended)
+- GET with x-operator-password → HTTP 200
+- POST /item/:id/status without auth → HTTP 401 (protected)
+- POST /item/:id/status with auth → HTTP 204
+- POST /align-content without auth → HTTP 401 (protected)
+- DELETE without auth → HTTP 401 (protected)
+- @BypassAuth() on GET page() method ONLY (moved from class-level). No OPERATOR_PASSWORD_HEADER references remain in source.
+- No credentials, API keys, OAuth tokens, candidate data, application data, DB creds, or infra secrets exposed in page HTML.
+
+### REMAINING / NOT PROVEN
+- JA-003 in_progress: comprehensive automated baseline test suite still missing (doneWhen not satisfied).
+- JA-014 in_progress: no quantitative recall + false-positive evidence (doneWhen not satisfied by P5 wiring alone).
+- 31 items pending across phases 2-9 (future work, not this session's scope).
+- Notes endpoint /item/:id/notes: returns full HTML dashboard page instead of notes — separate investigation point, NOT blocking (status reconciliation uses POST /item/:id/status instead).
+- PROJECT_PROMPT.md + docs/TODO.md session log/close entry: added by this session, not yet committed/pushed (done below).
+
+### Files modified this session
+- PROJECT_PROMPT.md (session log appended)
+- docs/TODO.md (session close note appended)
+- scripts/_read-roadmap-db.js (diagnostic helper — NOT committed, in scripts/ which is not tracked)
+
+### Committed
+- NOT YET — pending below (commit + pull --rebase + push)
+
+### Verified
+- DB = local HTTP = public HTTP = 40/7/2/0/31 — CONSISTENT
+- my-job-agent online (PID 87653), trading-agent untouched (PID 47788)
+- Git: dev/81e2d46, clean tree, 16 ahead, allow-list valid
+- Every roadmap row verified from 3 independent sources (DB direct, local HTTP, public HTTP)
+
+### Known issues
+- JA-014 stays in_progress correctly (doneWhen requires measured recall improvement)
+- JA-003 stays in_progress correctly (no baseline suite)
+- 31 items pending (phases 2-9)
+- Notes endpoint returns HTML (separate investigation)
+- my-job-agent endpoint `/job-application-roadmap` was hanging pre-restart (cause: TypeORM connection pool wedge in running app; fixed by restart). Direct DB reads always worked.
+
+### Next
+Awaiting user continuation signal. Trading session over — this closeout is the final step.
+
 ## Gotchas / lessons
 - pdfkit must be required (not ES-imported): `const PDFDocument: any = require('pdfkit')`
 - TypeORM can't infer types from `string | null` unions — always set explicit column type
