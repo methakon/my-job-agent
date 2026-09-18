@@ -435,6 +435,12 @@
       "reason": "gate-close allow-list maintenance final",
       "workstream": "Trading Agent",
       "authority": "self"
+    },
+    "1affa88": {
+      "short": "1affa88",
+      "reason": "gate-close allow-list maintenance final",
+      "workstream": "Trading Agent",
+      "authority": "self"
     }
   }
 }
