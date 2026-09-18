@@ -393,6 +393,12 @@
       "recorded": "2026-09-19T00:05:00+05:30",
       "evidence": "git diff shows only 2 files: src/main.ts (port env-config), src/shared/db-health.service.ts (entity class import). tsc + build + 41/41 reliability + 36/36 risk-engine + feed-health + db-pool + unified-market-data all pass.",
       "expires_hint": "Entry can be deleted once 6bc3f20 leaves the guard commit window."
+    },
+    "d4bac168a47ee9f8675908e32fa1cc84b7746547": {
+      "short": "d4bac16",
+      "reason": "Trading Agent roadmap system \u2014 public /trading-status endpoint + 16 TA roadmap items",
+      "workstream": "Trading Agent",
+      "authority": "user directive TA-013"
     }
   }
 }
