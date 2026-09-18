@@ -405,6 +405,12 @@
       "reason": "gate-close allow list update for d4bac16",
       "workstream": "Trading Agent",
       "authority": "self"
+    },
+    "8f1ff63": {
+      "short": "8f1ff63",
+      "reason": "gate-close self-exemption chain",
+      "workstream": "Trading Agent",
+      "authority": "self"
     }
   }
 }
