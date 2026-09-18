@@ -375,6 +375,15 @@
       "recorded": "2026-09-18T01:45+05:30",
       "evidence": "git show --name-only 3d693cf lists 10 trading-agent files (2617 insertions); tsc CLEAN; build CLEAN; 36/36 risk-engine tests pass; first push of trading-agent-dev branch",
       "expires_hint": "Delete once 3d693cff0f9053725d89776fe2d8c8b003872f05 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "6a9c406a6601fe122349fc9c4ccaa06f90511465": {
+      "short": "6a9c406",
+      "reason": "Trading Agent workstream - fix(runtime-reliability): Phase 5 runtime reliability fix. TypeORM startup sync env-gated, persistence health machine, session driver policy, DB health probes. 41/41 reliability tests.",
+      "workstream": "Trading Agent - Runtime Reliability (separate workstream: trading-agent-dev branch)",
+      "authority": "operator instruction: Phase 5 runtime reliability fix for 2026-09-18 failures",
+      "recorded": "2026-09-18T22:06+05:30",
+      "evidence": "git show --name-only 6a9c406 lists 8 trading-agent files (964 insertions); tsc CLEAN; build CLEAN; 41/41 reliability suite; 36/36 risk-engine tests; no job-agent files modified",
+      "expires_hint": "Delete once 6a9c406 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
