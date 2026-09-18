@@ -423,6 +423,12 @@
       "reason": "gate-close self-exemption (f25a3f8)",
       "workstream": "Trading Agent",
       "authority": "self"
+    },
+    "34c87f6": {
+      "short": "34c87f6",
+      "reason": "gate-close allow-list maintenance",
+      "workstream": "Trading Agent",
+      "authority": "self"
     }
   }
 }
