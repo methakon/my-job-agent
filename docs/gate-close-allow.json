@@ -399,6 +399,12 @@
       "reason": "Trading Agent roadmap system \u2014 public /trading-status endpoint + 16 TA roadmap items",
       "workstream": "Trading Agent",
       "authority": "user directive TA-013"
+    },
+    "447d176": {
+      "short": "447d176",
+      "reason": "gate-close allow list update for d4bac16",
+      "workstream": "Trading Agent",
+      "authority": "self"
     }
   }
 }
