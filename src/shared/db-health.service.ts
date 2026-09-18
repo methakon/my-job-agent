@@ -21,6 +21,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PersistenceHealthMachine, PersistenceState } from './persistence-state';
+import { UnifiedOptionQuote } from '../trading/unified-market-data/unified-option-quote.entity';
 
 /** Health state for one probe layer. */
 export type ProbeState = 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
@@ -145,8 +146,8 @@ export class DbHealthService {
   private readonly port: number;
 
   constructor(
-    @InjectRepository('UnifiedOptionQuote' as any)
-    private readonly quotesRepo: Repository<any>,
+    @InjectRepository(UnifiedOptionQuote)
+    private readonly quotesRepo: Repository<UnifiedOptionQuote>,
     private readonly persistenceHealth: PersistenceHealthMachine,
   ) {
     this.host = process.env.MYSQL_HOST || 'localhost';
