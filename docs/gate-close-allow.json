@@ -429,6 +429,12 @@
       "reason": "gate-close allow-list maintenance",
       "workstream": "Trading Agent",
       "authority": "self"
+    },
+    "baeee9d": {
+      "short": "baeee9d",
+      "reason": "gate-close allow-list maintenance final",
+      "workstream": "Trading Agent",
+      "authority": "self"
     }
   }
 }
