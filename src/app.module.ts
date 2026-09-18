@@ -74,6 +74,8 @@ import { ProjectStatusService } from './project-status/project-status.service';
 import { ProjectStatusPageController } from './project-status/project-status-page.controller';
 import { ProjectClarification } from './project-status/project-clarification.entity';
 import { ProjectClarificationService } from './project-status/project-clarification.service';
+import { TradingRoadmapService } from './project-status/trading-roadmap.service';
+import { TradingStatusController } from './project-status/trading-status.controller';
 import { JobApplicationRoadmapModule } from './job-application-roadmap/job-application-roadmap.module';
 import { JobApplicationRoadmapPageController } from './job-application-roadmap/job-application-roadmap-page.controller';
 import { JobApplicationRoadmapItem } from './job-application-roadmap/job-application-roadmap-item.entity';
@@ -191,7 +193,7 @@ import {
     VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController,
     OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController,
     FnfOptionChainController, FailedApplicationsPageController, JobApplicationRoadmapPageController,
-    ProjectStatusPageController, QuickQuestionsController,
+    ProjectStatusPageController, TradingStatusController, QuickQuestionsController,
     CvRegionFormatController, FyersAuthController, FyersOAuthController, UpstoxTradingPageController,
     PatternEngineController,
     AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
@@ -206,7 +208,7 @@ import {
     DailyDigestService, LinkedInProfileService, EmailTrackerService, InterviewPrepService, AstroMuhurtaService,
     AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService, QualificationService,
     FnfTradingService, FnoMarketDataService, FnfOptionChainService, MarketDataInspectionService, FeatureEngineService,
-    UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, FyersTokenService,
+    UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, TradingRoadmapService, FyersTokenService,
     ProjectClarificationService,
     PatternEngineService, PatternSignalDispatchService,
     CandidateEvidenceService,
