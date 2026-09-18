@@ -6,6 +6,7 @@ import { UnifiedOptionQuote } from './unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './unified-market-snapshot.entity';
 import { canonicalInstrumentKey } from './canonical/canonical-tick';
 import { canonicalRowId } from './canonical-row-id';
+import { PersistenceHealthMachine, PersistenceHealthSnapshot } from '../../shared/persistence-state';
 
 /**
  * Normalized feed shape accepted from any broker adapter (brief s5).
@@ -204,6 +205,7 @@ export class UnifiedMarketDataService {
     private readonly quotes: Repository<UnifiedOptionQuote>,
     @InjectRepository(UnifiedMarketSnapshot)
     private readonly snapshots: Repository<UnifiedMarketSnapshot>,
+    private readonly persistenceHealth: PersistenceHealthMachine,
   ) {
     this.dedupeWindowMs = Math.max(0, Number(process.env.UNIFIED_INGEST_DEDUPE_MS ?? 5_000));
   }
@@ -337,7 +339,7 @@ export class UnifiedMarketDataService {
   }
 
   /** Write-behind diagnostics (observability only; never gates, never writes). */
-  writeBehindStats(): { pendingQuotes: number; pendingSnapshots: number; flushedRows: number; droppedRows: number; flushTimeouts: number; poolReleases: number; flushing: boolean } {
+  writeBehindStats(): { pendingQuotes: number; pendingSnapshots: number; flushedRows: number; droppedRows: number; flushTimeouts: number; poolReleases: number; flushing: boolean; persistenceState: PersistenceHealthSnapshot } {
     return {
       pendingQuotes: this.pendingQuoteRows.size,
       pendingSnapshots: this.pendingSnapshotRows.size,
@@ -346,6 +348,7 @@ export class UnifiedMarketDataService {
       flushTimeouts: this.flushTimeouts,
       poolReleases: this.poolReleases,
       flushing: this.flushingQuotes || this.flushingSnapshots,
+      persistenceState: this.persistenceHealth.snapshot(),
     };
   }
 
@@ -421,12 +424,14 @@ export class UnifiedMarketDataService {
           'the rows stay buffered and the next tick retries; check the database path (pool/tunnel)',
       );
     }
+    this.persistenceHealth.recordFailure(`write-behind ${kind} flush timeout (${this.flushTimeoutMs}ms)`);
     if (this.consecutiveFlushTimeouts >= this.recycleAfterTimeouts) this.releasePoolConnections();
   }
 
   /** A completed flush proves the database path is healthy again. */
   private noteFlushSuccess(): void {
     this.consecutiveFlushTimeouts = 0;
+    this.persistenceHealth.recordSuccess();
   }
 
   /**
@@ -498,6 +503,7 @@ export class UnifiedMarketDataService {
   private warnIfDropping(kind: string): void {
     if (!this.droppedRows) return;
     if (this.droppedRows === 1 || this.droppedRows % 500 === 0) {
+      this.persistenceHealth.recordDropped(this.droppedRows);
       this.logger.warn(`unified write-behind buffer at capacity — dropped ${this.droppedRows} ${kind} row(s) (ABSENT in the store, never fabricated)`);
     }
   }

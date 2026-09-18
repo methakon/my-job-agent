@@ -1,10 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FeedHealthService } from '../trading/unified-market-data/feed-health.service';
+import { PersistenceHealthMachine } from '../shared/persistence-state';
 
 type Signal = Awaited<ReturnType<FnfTradingService['generateSignals']>>[number];
 type Portfolio = Awaited<ReturnType<FnfTradingService['listPortfolios']>>[number];
 type Trade = Awaited<ReturnType<FnfTradingService['listTrades']>>[number];
+type PersistencePolicy = 'ALLOW' | 'BLOCK_NEW_ENTRIES';
 
 const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // UTC → IST without tz database
 
@@ -32,10 +34,12 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 	private lastSessionDate = '';
 	private lastSessionArchiveDate = '';
 	private lastDayArchiveDate = '';
+	private persistencePolicy: PersistencePolicy = 'ALLOW';
 
 	constructor(
 		private readonly trading: FnfTradingService,
 		private readonly feedHealth: FeedHealthService,
+		private readonly persistenceHealth: PersistenceHealthMachine,
 	) {
 		this.intervalMs = Math.max(5_000, Number(process.env.FNO_SESSION_DRIVER_MS ?? 10_000));
 		this.paperQty = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
@@ -121,6 +125,19 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 
 	private async runOnce(): Promise<void> {
 		const now = new Date();
+
+		// ── Phase 3: Persistence health gate (separate from market-data freshness) ──
+		// The persistence state machine tracks DB health independently. When
+		// persistence is DEGRADED or DOWN, new position entries are blocked but
+		// existing positions continue monitoring (Phase 4A handles exits).
+		const persistenceSnapshot = this.persistenceHealth.snapshot();
+		this.persistencePolicy = persistenceSnapshot.state === 'HEALTHY' ? 'ALLOW' : 'BLOCK_NEW_ENTRIES';
+		if (this.persistencePolicy === 'BLOCK_NEW_ENTRIES') {
+			this.logger.warn(
+				`[PERSISTENCE-GATE] state=${persistenceSnapshot.state} reason=${persistenceSnapshot.reason} — new entries BLOCKED, monitoring existing positions`,
+			);
+		}
+
 		// Tick archival runs unconditionally (even with no portfolio / out of session).
 		await this.maybeArchiveSessions(now);
 		const portfolios = (await this.trading.listPortfolios()).filter((p) => p.autoTradeEnabled);
@@ -199,7 +216,9 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 					if (!alreadyOpen && await this.maybeOpen(portfolio, signal)) opens += 1;
 				}
 				if (opens || exits) {
-					this.logger.log(`session cycle ${portfolio.label}: ${opens} open(s), ${exits} exit(s) across ${signals.length} signal(s)`);
+					this.logger.log(
+						`session cycle ${portfolio.label}: ${opens} open(s), ${exits} exit(s) across ${signals.length} signal(s) | persistence=${this.persistenceHealth.currentState()}`,
+					);
 				}
 			} catch (error) {
 				this.throttledWarn(`portfolio cycle failed (${portfolio.label}): ${(error as Error).message}`);
@@ -231,6 +250,12 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		const gate = this.feedHealth.gateForFnf();
 		if (!gate.allowNewTrading) {
 			this.throttledWarn(`feed gate paused new opens (${gate.reason}) — holding`);
+			return false;
+		}
+		// Phase 5: Persistence-degraded policy — block new entries when persistence
+		// is DEGRADED or DOWN. Existing positions continue monitoring (Phase 4A).
+		if (this.persistencePolicy === 'BLOCK_NEW_ENTRIES') {
+			this.throttledWarn(`persistence gate paused new opens (state=${this.persistenceHealth.currentState()}) — holding`);
 			return false;
 		}
 		try {

@@ -173,6 +173,16 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     // engine. A disabled feed is reported but never satisfies the new-trading
     // gate (age provider stays null until real ticks arrive).
     if (this.isFeedOwner) {
+      // ── Phase 4: Canonical freshness path ──────────────────────────────────
+      // The feed owner (headless trading-agent) registers ageMs from the local
+      // socket timestamp (lastTickAt). This reads from in-memory state, NOT the
+      // DB — so it's correct even when persistence is broken. The 2026-09-18
+      // failure was that the process was stuck in TypeORM boot and never received
+      // ticks (lastTickAt stayed null → DOWN), not that the ageMs path was wrong.
+      //
+      // The NON-OWNER path (web app) reads commonAgeMs from storeFreshness()
+      // which queries DB — if DB writes fail, this goes null → feed reports DOWN.
+      // This is acceptable for the web app (it's a read-only status viewer).
       this.feedHealth.registerFeed('FYERS_LIVE', 'fnf', {
         enabled: () => this.statusValue.enabled,
         ageMs: () => {
