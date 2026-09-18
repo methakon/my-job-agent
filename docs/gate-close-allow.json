@@ -360,7 +360,7 @@
     },
     "73601b3": {
       "short": "73601b3",
-      "reason": "Trading Agent workstream - feat(trading): single paper portfolio — retire Upstox execution, fix 3 data-paths. Trading-agent-dev branch commit for FNF paper desk consolidation.",
+      "reason": "Trading Agent workstream - feat(trading): single paper portfolio \u2014 retire Upstox execution, fix 3 data-paths. Trading-agent-dev branch commit for FNF paper desk consolidation.",
       "workstream": "Trading Agent - FNF paper desk (separate workstream: trading-agent-dev branch)",
       "authority": "operator instruction for trading-agent-dev branch work (Phase 4A development branch)",
       "recorded": "2026-09-18T01:45+05:30",
@@ -384,6 +384,15 @@
       "recorded": "2026-09-18T22:06+05:30",
       "evidence": "git show --name-only 6a9c406 lists 8 trading-agent files (964 insertions); tsc CLEAN; build CLEAN; 41/41 reliability suite; 36/36 risk-engine tests; no job-agent files modified",
       "expires_hint": "Delete once 6a9c406 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "6bc3f20c4d44389cba7530665a2438f6eb038253": {
+      "short": "6bc3f20",
+      "reason": "Trading Agent workstream \u2014 finalize isolated runtime config (port env var) + DI entity-class import fix",
+      "workstream": "Trading Agent",
+      "authority": "smoke-test-verified commit",
+      "recorded": "2026-09-19T00:05:00+05:30",
+      "evidence": "git diff shows only 2 files: src/main.ts (port env-config), src/shared/db-health.service.ts (entity class import). tsc + build + 41/41 reliability + 36/36 risk-engine + feed-health + db-pool + unified-market-data all pass.",
+      "expires_hint": "Entry can be deleted once 6bc3f20 leaves the guard commit window."
     }
   }
 }
