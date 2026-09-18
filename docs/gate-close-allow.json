@@ -399,6 +399,12 @@
       "recorded": "2026-09-18T01:45+05:30",
       "evidence": "git show --name-only 3d693cf lists 10 trading-agent files (2617 insertions); tsc CLEAN; build CLEAN; 36/36 risk-engine tests pass; first push of trading-agent-dev branch",
       "expires_hint": "Delete once 3d693cff0f9053725d89776fe2d8c8b003872f05 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "df049ffce83c606e440cac027ac5a189cbda5c36": {
+      "short": "df049ff",
+      "reason": "Job Application roadmap — JA-020 Career fit: wire ev.careerFit.aligned into qualification.service.ts decide() as explicit decision gate (not just 20% weight). Touches ONLY Job Agent files: src/job-application/qualification.service.ts (21-line insertion) + scripts/ja-020-career-fit.test.js (new, 394 lines, 7/7 pass). Verified: test 7/7 pass exit 0; build exit 0; tsc 0 errors/0 warnings; DB JA-020 status -> done (commit df049ff via POST /job-application-roadmap/item/JA-020/status); DB == Local == Public: 40/9/0/0 consistent (JA-003, JA-014, JA-020 all done). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. Separate JA-roadmap control plane (job_application_roadmap_items).",
+      "workstream": "Job Application roadmap — JA-020 Career fit (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-19: commits ARE allowed, pushes ARE allowed for Job Agent development status; JA-020 doneWhen satisfied (evidence written to DB via POST /job-application-roadmap/item/JA-020/status)"
     }
   }
 }

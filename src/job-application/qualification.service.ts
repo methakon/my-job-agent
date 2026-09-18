@@ -987,6 +987,27 @@ export class QualificationService {
       };
     }
 
+    // ---- JA-020: career fit explicitly contributes to the decision ----
+    // If career fit is misaligned (careerFit.aligned === false) and the
+    // composite score is high enough (>= 65), downgrade the decision.
+    // This makes career fit an explicit decision input, not just a 20% weight.
+    if (!ev.careerFit.aligned && composite >= 65) {
+      if (composite >= 80) {
+        // Downgrade from QUALIFIED to CONDITIONAL
+        return {
+          decision: 'CONDITIONAL',
+          requiredAction: 'partial',
+          reasons: [...reasons, 'CAREER_FIT_MISMATCH: CONDITIONAL: strong technical match but career-fit misaligned'],
+        };
+      }
+      // Downgrade from CONDITIONAL to NEAR_MISS
+      return {
+        decision: 'NEAR_MISS',
+        requiredAction: 'revisit',
+        reasons: [...reasons, 'CAREER_FIT_MISMATCH: NEAR_MISS: composite borderline and career-fit misaligned'],
+      };
+    }
+
     // Insufficient data: very low evidence + low job quality + no astro
     if (composite < 20 && ev.evidence.skillMatches === 0 && ev.jobQuality.label === 'unknown') {
       reasons.push('INSUFFICIENT: too little signal to qualify');
