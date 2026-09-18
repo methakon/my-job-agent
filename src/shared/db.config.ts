@@ -55,6 +55,8 @@ export function mysqlPoolTuning(): Record<string, number | boolean> {
  * Every service calls this with its own DATABASE_NAME so each service
  * owns exactly one MySQL schema (database-per-service pattern).
  */
+/** Production MUST NOT run synchronize — it ALTERs 4M-row tables.
+ * Set DB_SYNC_ENABLED=true only for intentional dev/schema migration. */
 export function mysqlConfig(databaseName: string): TypeOrmModuleOptions {
 	return {
 		type: 'mysql' as const,
@@ -64,7 +66,17 @@ export function mysqlConfig(databaseName: string): TypeOrmModuleOptions {
 		password: process.env.MYSQL_PASSWORD || 'mylife-secret',
 		database: databaseName,
 		autoLoadEntities: true,
-		synchronize: true, // always auto-sync in dev — user request
+		synchronize: process.env.DB_SYNC_ENABLED === 'true',
+		/** Hard timeout on the initial TCP connect — prevents a dead tunnel from
+		 *  wedging the entire NestJS bootstrap. */
+		connectTimeout: 15_000,
+		/** Hard timeout on acquiring a pool connection — if every pool slot is
+		 *  held by half-dead sockets, the next query fails fast instead of
+		 *  hanging forever. */
+		acquireTimeout: 10_000,
+		/** TypeORM DataSource retry policy for transient connection failures. */
+		retryAttempts: 3,
+		retryDelay: 2_000,
 		// Driver-supported pool/connection reliability (see mysqlPoolTuning).
 		// TypeORM forwards `extra` verbatim into mysql2's createPool.
 		extra: mysqlPoolTuning(),

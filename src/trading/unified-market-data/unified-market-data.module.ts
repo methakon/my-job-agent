@@ -9,6 +9,8 @@ import { FeedArbitrationService } from './feed-arbitration.service';
 import { DedicatedLeaseStore, LEASE_STORE } from './lease-connection.store';
 import { TickInterpreterService } from './canonical/tick-interpreter.service';
 import { MarketDataHealthController } from './market-data-health.controller';
+import { PersistenceHealthMachine } from '../../shared/persistence-state';
+import { DbHealthService } from '../../shared/db-health.service';
 
 /**
  * Broker-independent common live market-data pipeline (brief s4/s5/s7/s8).
@@ -31,6 +33,8 @@ import { MarketDataHealthController } from './market-data-health.controller';
   ],
   controllers: [MarketDataHealthController],
   providers: [
+    PersistenceHealthMachine,
+    DbHealthService,
     UnifiedMarketDataService,
     FeedHealthService,
     FeedArbitrationService,
@@ -39,6 +43,6 @@ import { MarketDataHealthController } from './market-data-health.controller';
     // Deterministic, provider-independent canonical tick interpreter.
     TickInterpreterService,
   ],
-  exports: [UnifiedMarketDataService, FeedHealthService, FeedArbitrationService, TickInterpreterService],
+  exports: [PersistenceHealthMachine, DbHealthService, UnifiedMarketDataService, FeedHealthService, FeedArbitrationService, TickInterpreterService],
 })
 export class UnifiedMarketDataModule {}
