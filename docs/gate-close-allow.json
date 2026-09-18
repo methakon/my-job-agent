@@ -411,6 +411,12 @@
       "reason": "gate-close self-exemption chain",
       "workstream": "Trading Agent",
       "authority": "self"
+    },
+    "e7f05b3": {
+      "short": "e7f05b3",
+      "reason": "gate-close self-exemption chain (final)",
+      "workstream": "Trading Agent",
+      "authority": "self"
     }
   }
 }
