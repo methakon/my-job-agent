@@ -1,20 +1,18 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
- * Common normalized underlying/index market snapshot (brief s5/s7).
+ * Historical copy of unified_market_snapshots.
  *
- * Index-level ticks (NIFTY / BANKNIFTY / SENSEX spot) from any live source.
- * Shares the provenance fields of UnifiedOptionQuote so every observation
- * preserves source, source/receive timestamps, sequence and data quality.
+ * Identical schema to UnifiedMarketSnapshot plus an `archivedAt` timestamp.
  */
-@Entity('unified_market_snapshots')
-@Index('idx_unified_market_snapshots_symbol_ts', ['symbol', 'ts'])
-@Index('idx_unified_market_snapshots_received', ['receivedTimestamp'])
-export class UnifiedMarketSnapshot {
+@Entity('unified_market_snapshots_history')
+@Index('idx_ums_history_symbol_ts', ['symbol', 'ts'])
+@Index('idx_ums_history_received', ['receivedTimestamp'])
+@Index('idx_ums_history_archived', ['archivedAt'])
+export class UnifiedMarketSnapshotHistory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  /** Source instrument key, e.g. NSE:NIFTY50-INDEX. */
   @Column({ type: 'varchar', length: 96 })
   symbol: string;
 
@@ -27,15 +25,9 @@ export class UnifiedMarketSnapshot {
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   ltp: number | null;
 
-  /** NULL means the source did not publish a volume — never coerced to 0. */
   @Column({ type: 'decimal', precision: 18, scale: 2, nullable: true })
   volume: number | null;
 
-  /**
-   * Index/underlying L1 book. The snapshot table had no place to keep the
-   * bid/ask sizes the providers already deliver, so they were dropped on write.
-   * Nullable and additive — no consumer reads them yet.
-   */
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   bid: number | null;
 
@@ -60,11 +52,9 @@ export class UnifiedMarketSnapshot {
   @Column({ type: 'decimal', precision: 14, scale: 4, nullable: true })
   close: number | null;
 
-  /** Optional market-depth snapshot (JSON) — same block shape as UnifiedOptionQuote. */
   @Column({ type: 'json', nullable: true })
   depth: unknown;
 
-  /** Source identity: FYERS_LIVE | UPSTOX_LIVE | … */
   @Column({ type: 'varchar', length: 24 })
   source: string;
 
@@ -77,7 +67,6 @@ export class UnifiedMarketSnapshot {
   @Column({ type: 'int', nullable: true })
   sequenceNumber: number | null;
 
-  /** GOOD | STALE | INVALID | RECOVERING. */
   @Column({ type: 'varchar', length: 12, default: 'GOOD' })
   dataQuality: string;
 
@@ -86,4 +75,7 @@ export class UnifiedMarketSnapshot {
 
   @CreateDateColumn()
   createdAt: Date;
+
+  @Column({ type: 'datetime' })
+  archivedAt: Date;
 }

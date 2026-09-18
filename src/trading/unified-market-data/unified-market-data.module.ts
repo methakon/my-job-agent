@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UnifiedOptionQuote } from './unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './unified-market-snapshot.entity';
+import { UnifiedOptionQuoteHistory } from './unified-option-quote-history.entity';
+import { UnifiedMarketSnapshotHistory } from './unified-market-snapshot-history.entity';
 import { MarketDataFeedLease } from './market-data-feed-lease.entity';
 import { UnifiedMarketDataService } from './unified-market-data.service';
+import { UnifiedArchiveService } from './unified-archive.service';
 import { FeedHealthService } from './feed-health.service';
 import { FeedArbitrationService } from './feed-arbitration.service';
 import { DedicatedLeaseStore, LEASE_STORE } from './lease-connection.store';
@@ -29,13 +32,14 @@ import { DbHealthService } from '../../shared/db-health.service';
  */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([UnifiedOptionQuote, UnifiedMarketSnapshot, MarketDataFeedLease]),
+    TypeOrmModule.forFeature([UnifiedOptionQuote, UnifiedMarketSnapshot, UnifiedOptionQuoteHistory, UnifiedMarketSnapshotHistory, MarketDataFeedLease]),
   ],
   controllers: [MarketDataHealthController],
   providers: [
     PersistenceHealthMachine,
     DbHealthService,
     UnifiedMarketDataService,
+    UnifiedArchiveService,
     FeedHealthService,
     FeedArbitrationService,
     // One dedicated connection for the arbitration control path only.
@@ -43,6 +47,6 @@ import { DbHealthService } from '../../shared/db-health.service';
     // Deterministic, provider-independent canonical tick interpreter.
     TickInterpreterService,
   ],
-  exports: [PersistenceHealthMachine, DbHealthService, UnifiedMarketDataService, FeedHealthService, FeedArbitrationService, TickInterpreterService],
+  exports: [PersistenceHealthMachine, DbHealthService, UnifiedMarketDataService, UnifiedArchiveService, FeedHealthService, FeedArbitrationService, TickInterpreterService],
 })
 export class UnifiedMarketDataModule {}

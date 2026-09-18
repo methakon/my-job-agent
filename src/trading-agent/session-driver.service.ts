@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FeedHealthService } from '../trading/unified-market-data/feed-health.service';
+import { UnifiedArchiveService, ArchiveRunResult } from '../trading/unified-market-data/unified-archive.service';
 import { PersistenceHealthMachine } from '../shared/persistence-state';
 
 type Signal = Awaited<ReturnType<FnfTradingService['generateSignals']>>[number];
@@ -40,6 +41,7 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		private readonly trading: FnfTradingService,
 		private readonly feedHealth: FeedHealthService,
 		private readonly persistenceHealth: PersistenceHealthMachine,
+		private readonly unifiedArchive: UnifiedArchiveService,
 	) {
 		this.intervalMs = Math.max(5_000, Number(process.env.FNO_SESSION_DRIVER_MS ?? 10_000));
 		this.paperQty = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
@@ -66,16 +68,32 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 			const today = this.istDateKey(now);
 			if (dow >= 1 && dow <= 5 && minutes >= this.sessionEndMin && this.lastSessionArchiveDate !== today) {
 				this.lastSessionArchiveDate = today;
+				// FNF archival (existing).
 				const moved = await this.trading.archiveTicksBefore(`${today} 15:30:00`);
 				if (moved.snapshots || moved.quotes) {
 					this.logger.log(`session archive ${today}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) → history`);
 				}
+				// Unified archival (new).
+				const unified = await this.unifiedArchive.archiveTicksBefore(`${today} 15:30:00`);
+				if (unified.snapshots.deleted || unified.quotes.deleted) {
+					this.logger.log(`unified session archive ${today}: ${unified.snapshots.deleted} snapshot(s), ${unified.quotes.deleted} quote(s) → history (${unified.durationMs}ms)`);
+				} else if (unified.error) {
+					this.logger.warn(`unified session archive ${today} error: ${unified.error}`);
+				}
 			}
 			if (this.lastDayArchiveDate !== today) {
 				this.lastDayArchiveDate = today;
+				// FNF day-rollover archival (existing).
 				const moved = await this.trading.archiveTicksBefore(`${today} 00:00:00`);
 				if (moved.snapshots || moved.quotes) {
 					this.logger.log(`day-rollover archive ${today}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) → history`);
+				}
+				// Unified day-rollover archival (new).
+				const unified = await this.unifiedArchive.archiveTicksBefore(`${today} 00:00:00`);
+				if (unified.snapshots.deleted || unified.quotes.deleted) {
+					this.logger.log(`unified day-rollover archive ${today}: ${unified.snapshots.deleted} snapshot(s), ${unified.quotes.deleted} quote(s) → history (${unified.durationMs}ms)`);
+				} else if (unified.error) {
+					this.logger.warn(`unified day-rollover archive ${today} error: ${unified.error}`);
 				}
 			}
 		} catch (error) {
