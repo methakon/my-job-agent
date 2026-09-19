@@ -298,6 +298,7 @@ scripts/
     unified-market-data.test.js                     # Existing (passing)
     historical-analytics.test.js                    # NEW (18/18 passing)
     validation-adaptation.test.js                   # NEW (31/31 passing)
+    integration-research-lifecycle.test.js          # NEW (31/31 passing — A through L)
 
 docs/
     trading-agent-architecture.md                   # This document
@@ -316,15 +317,15 @@ docs/
 | L2 | Research Result Persistence | IMPLEMENTED |
 | L2 | Research Module DI | IMPLEMENTED |
 | L3 | Historical Context Builder | IMPLEMENTED |
-| L3 | Pattern Engine Integration | PLANNED |
+| L3 | Pattern Engine Integration | PLANNED (weights frozen) |
 | L3 | Current+Historical Context | IMPLEMENTED |
 | L4 | Validation Engine | IMPLEMENTED |
 | L4 | Adaptation Engine | IMPLEMENTED |
 | L4 | Approval/Activation Gate | IMPLEMENTED |
-| L5 | DDL for new tables | PENDING |
-| L6 | Historical data migration | MIGRATION_PENDING |
-| L7 | Session driver integration | PLANNED |
-| L8 | Pattern engine integration | PLANNED |
+| L5 | DDL for new tables | **IMPLEMENTED** (research_results, adaptation_candidates, validation_results created) |
+| L6 | Historical data migration | MIGRATION_PENDING (HARD GATE A — 2.49M rows, do NOT execute) |
+| L7 | Session driver integration | **IMPLEMENTED** (off-hours trigger + context loading wired) |
+| L8 | Pattern engine historical read | PLANNED (weights frozen until validation infrastructure complete) |
 
 ---
 
@@ -332,10 +333,34 @@ docs/
 
 - **unified_option_quotes_history**: EXISTS, 0 rows (DDL executed)
 - **unified_market_snapshots_history**: EXISTS, 0 rows (DDL executed)
-- **research_results**: PENDING (DDL not yet created)
-- **adaptation_candidates**: PENDING (DDL not yet created)
-- **validation_results**: PENDING (DDL not yet created)
-- **Historical data migration**: 2.49M rows prepared, NOT executed (HARD GATE)
+- **research_results**: **EXISTS** (DDL executed — `ddl/create_research_tables.sql`)
+- **adaptation_candidates**: **EXISTS** (DDL executed — `ddl/create_research_tables.sql`)
+- **validation_results**: **EXISTS** (DDL executed — `ddl/create_research_tables.sql`)
+- **Historical data migration**: 2.49M rows prepared, NOT executed (HARD GATE A)
+
+### What's IMPLEMENTED
+
+- Historical research service (bounded reads from history tables)
+- Historical analytics (volatility regime, trend, premium, spread, volume, session effects)
+- Historical context builder (current + historical context assembly)
+- Off-hours research orchestrator (post-market pipeline)
+- Research result persistence (research_results table)
+- Adaptation candidate lifecycle (adaptation_candidates table)
+- Validation evidence persistence (validation_results table)
+- Validation engine (holdout, rolling, baseline comparison, deterministic gates)
+- Adaptation engine (PROPOSED→VALIDATING→APPROVED→ACTIVE, rollback)
+- Approval/activation gate (deterministic, auditable, no AI bypass)
+- Session driver integration (off-hours research trigger after 16:00 IST)
+- Session driver context loading (precomputed context at session start)
+- Integration tests (31 tests covering all A-L scenarios)
+- Research tables DDL (3 tables created in myjob_agent)
+
+### NOT YET IMPLEMENTED
+
+- Historical data migration (~2.49M rows) — HARD GATE A
+- Pattern engine weight adaptation (weights frozen)
+- Backtesting framework (future expansion)
+- Full migration validation (requires historical data)
 
 ---
 
