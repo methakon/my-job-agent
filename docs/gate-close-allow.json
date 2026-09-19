@@ -423,6 +423,12 @@
       "reason": "Job Application roadmap — JA-022 Application ROI: add deterministic expected value scoring to qualification.service.ts. Ranking now incorporates EV, not only match score. Touches ONLY Job Agent files: src/job-application/qualification.service.ts + scripts/ja-022-application-roi.test.js. Verified: 7/7 test pass; build clean; tsc 0 errors. No Trading Agent files touched.",
       "workstream": "Job Application roadmap — JA-022 Application ROI (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-19: commits/pushes allowed for Job Agent development; JA-022 doneWhen: ranking incorporates expected value, not only match score"
+    },
+    "d305b0fdfb240a8a5b5ead2521edd9ca62a91819": {
+      "short": "d305b0f",
+      "reason": "Job Application roadmap — JA-023 Explainable decision: add structured explanation with confidence, blockers, CV strategy, and plain-language summary to qualification.service.ts. Touches ONLY Job Agent files: src/job-application/qualification.service.ts + scripts/ja-023-explainable-decision.test.js (new, 214 lines). Verified: TypeScript compiles; no Trading Agent files touched.",
+      "workstream": "Job Application roadmap — JA-023 Explainable decision (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-19: commits/pushes allowed for Job Agent development; JA-023 doneWhen: operator can understand the decision without reading model internals"
     }
   }
 }
