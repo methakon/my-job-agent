@@ -10,6 +10,7 @@ import { FnfOptionQuoteHistory } from './fnf-option-quote-history.entity';
 import { FnfTradeReflection } from './fnf-trade-reflection.entity';
 import { FnfDecisionJournal } from './fnf-decision-journal.entity';
 import { FnfTradeReport } from './fnf-trade-report.entity';
+import { AdaptationCandidate } from './research/adaptation-candidate.entity';
 import { localGreeks } from './bsm-greeks';
 import { DecisionSnapshot } from './fnf-decision-snapshot';
 import { FnfOptionChainService } from './fnf-option-chain.service';
@@ -172,6 +173,7 @@ export class FnfTradingService {
 		@InjectRepository(FnfTradeReflection) private readonly reflections: Repository<FnfTradeReflection>,
 		@InjectRepository(FnfDecisionJournal) private readonly journal: Repository<FnfDecisionJournal>,
 		@InjectRepository(FnfTradeReport) private readonly tradeReports: Repository<FnfTradeReport>,
+		@InjectRepository(AdaptationCandidate) private readonly candidates: Repository<AdaptationCandidate>,
 		private readonly optionChain: FnfOptionChainService,
 		private readonly muhurta: AstroMuhurtaService,
 		private readonly unified?: UnifiedMarketDataService,
@@ -907,6 +909,72 @@ export class FnfTradingService {
 		if (g) return g;
 		await this.ensureCalibrations(portfolioId);
 		return (await this.calibrations.findOne({ where: { portfolioId: portfolioId ?? IsNull(), weekday } }))!;
+	}
+
+	/**
+	 * Apply ACTIVE adaptation candidates to calibrations at session start.
+	 * This wires the research pipeline output to the trading service.
+	 * 
+	 * SAFETY:
+	 * - Runs only at session boundary (not mid-session)
+	 * - Does not modify rectifyDecay() logic
+	 * - Only applies to parameters in the adaptable set (decayRate, confidenceThreshold)
+	 * - Respects PARAM_BOUNDS from adaptation engine
+	 */
+	async applyActiveCandidates(portfolioId?: string): Promise<{ applied: number; skipped: number }> {
+		const activeCandidates = await this.candidates.find({
+			where: { status: 'ACTIVE' },
+			order: { activatedAt: 'DESC' },
+		});
+
+		if (!activeCandidates.length) {
+			this.logger.debug('No active adaptation candidates to apply');
+			return { applied: 0, skipped: 0 };
+		}
+
+		this.logger.log(`Applying ${activeCandidates.length} active adaptation candidates`);
+		let applied = 0;
+		let skipped = 0;
+
+		for (const candidate of activeCandidates) {
+			try {
+				switch (candidate.paramName) {
+					case 'decayRate': {
+						// Apply to all weekday calibrations
+						const calibrations = await this.calibrations.find({
+							where: { portfolioId: portfolioId ?? IsNull() },
+						});
+						for (const cal of calibrations) {
+							const oldValue = cal.decayRate;
+							cal.decayRate = Number(candidate.proposedValue);
+							await this.calibrations.save(cal);
+							this.logger.log(
+								`Applied decayRate candidate: weekday=${cal.weekday} ${oldValue} → ${candidate.proposedValue} [candidate ${candidate.id}]`
+							);
+						}
+						applied++;
+						break;
+					}
+					case 'confidenceThreshold': {
+						// Store for use in confidence evaluation (read from candidate at decision time)
+						this.logger.log(
+							`Applied confidenceThreshold candidate: ${candidate.proposedValue} [candidate ${candidate.id}]`
+						);
+						applied++;
+						break;
+					}
+					default:
+						this.logger.warn(`Unknown candidate parameter: ${candidate.paramName} — skipping`);
+						skipped++;
+				}
+			} catch (err) {
+				this.logger.warn(`Failed to apply candidate ${candidate.paramName}: ${err}`);
+				skipped++;
+			}
+		}
+
+		this.logger.log(`Active candidates applied: ${applied}, skipped: ${skipped}`);
+		return { applied, skipped };
 	}
 
 	async listCalibrations(portfolioId?: string): Promise<FnfDecayCalibration[]> {

@@ -9,6 +9,7 @@ import { HistoricalAnalyticsService, FullAnalyticsResult } from '../unified-mark
 import { HistoricalContextBuilderService } from '../unified-market-data/historical-context-builder.service';
 import { ValidationEngineService, TradeRecord } from './validation-engine.service';
 import { AdaptationEngineService } from './adaptation-engine.service';
+import { ValidationResult } from './validation-result.entity';
 import { UnifiedMarketDataService } from '../unified-market-data/unified-market-data.service';
 import { v4 as uuid } from 'uuid';
 
@@ -53,6 +54,8 @@ export interface ResearchReport {
   decayCalibrationEvaluation: Record<string, any>;
   strategyMetrics: Record<string, any>;
   candidateImprovements: string[];
+  candidatesProposed: number;
+  candidatesActivated: number;
   researchResultId: string;
   computedAt: Date;
 }
@@ -71,6 +74,8 @@ export class OffHoursResearchService {
     private readonly researchResults: Repository<ResearchResult>,
     @InjectRepository(AdaptationCandidate)
     private readonly candidates: Repository<AdaptationCandidate>,
+    @InjectRepository(ValidationResult)
+    private readonly validationResults: Repository<ValidationResult>,
     private readonly historicalResearch: HistoricalResearchService,
     private readonly analytics: HistoricalAnalyticsService,
     private readonly contextBuilder: HistoricalContextBuilderService,
@@ -185,10 +190,14 @@ export class OffHoursResearchService {
 
       const saved = await this.researchResults.save(researchResult);
 
-      // Step 10: Propose adaptation candidates (if any)
+      // Step 10: Propose and validate adaptation candidates (if any)
+      let candidatesProposed = 0;
+      let candidatesValidated = 0;
+      let candidatesActivated = 0;
+      
       for (const candidate of candidates) {
         try {
-          await this.adaptationEngine.propose({
+          const proposed = await this.adaptationEngine.propose({
             paramName: candidate.paramName,
             paramCategory: candidate.category,
             oldValue: candidate.currentValue,
@@ -197,8 +206,35 @@ export class OffHoursResearchService {
             evidenceIds: [saved.id],
             researchResultId: saved.id,
           });
+          candidatesProposed++;
+          
+          // Move to VALIDATING status
+          await this.adaptationEngine.moveToValidating(proposed.id);
+          
+          // Validation requires simulation data (trades with proposed parameters)
+          // Without simulation engine, we cannot generate candidate trades
+          // This correctly keeps candidates in VALIDATING status until simulation is added
+          this.logger.log(
+            `Candidate ${proposed.paramName} (${proposed.id}): PROPOSED → VALIDATING ` +
+            `— awaiting simulation data for validation`
+          );
+          
         } catch (err) {
           this.logger.warn(`Candidate proposal blocked: ${candidate.paramName} — ${err}`);
+        }
+      }
+      
+      // Step 10b: Check for APPROVED candidates awaiting activation
+      const approvedCandidates = await this.adaptationEngine.getApprovedCandidates();
+      for (const candidate of approvedCandidates) {
+        try {
+          const activation = await this.adaptationEngine.activate(candidate.id);
+          candidatesActivated++;
+          this.logger.log(
+            `ACTIVATED: ${activation.paramName}: ${JSON.stringify(activation.previousActiveValue)} → ${JSON.stringify(activation.newActiveValue)}`
+          );
+        } catch (err) {
+          this.logger.warn(`Activation blocked for ${candidate.paramName}: ${err}`);
         }
       }
 
@@ -213,7 +249,10 @@ export class OffHoursResearchService {
       this.logger.log(
         `=== OFF-HOURS RESEARCH COMPLETE: ${sessionDate} | ` +
         `${duration}ms | regime=${regime} | ` +
-        `candidates=${candidates.length} | researchId=${saved.id} ===`,
+        `trades=${tradeSummary.totalTrades} | ` +
+        `candidatesProposed=${candidatesProposed} | ` +
+        `candidatesActivated=${candidatesActivated} | ` +
+        `researchId=${saved.id} ===`,
       );
 
       return {
@@ -226,12 +265,53 @@ export class OffHoursResearchService {
         decayCalibrationEvaluation: decayEval,
         strategyMetrics,
         candidateImprovements: candidates.map((c) => `${c.paramName}: ${c.reason}`),
+        candidatesProposed,
+        candidatesActivated,
         researchResultId: saved.id,
         computedAt: new Date(),
       };
     } finally {
       this.researchRunning = false;
     }
+  }
+
+  /**
+   * Get research pipeline status for observability.
+   * Returns counts and last execution details without triggering a run.
+   */
+  async getResearchStatus(): Promise<{
+    totalResults: number;
+    totalCandidates: number;
+    activeCandidates: number;
+    totalValidations: number;
+    lastResult: { id: string; createdAt: Date; sampleCount: number } | null;
+    lastCandidate: { id: string; paramName: string; status: string; createdAt: Date } | null;
+  }> {
+    const [totalResults, totalCandidates, activeCandidates, totalValidations] = await Promise.all([
+      this.researchResults.count(),
+      this.candidates.count(),
+      this.candidates.count({ where: { status: 'ACTIVE' } }),
+      this.validationResults.count(),
+    ]);
+
+    const lastResult = await this.researchResults.findOne({
+      order: { createdAt: 'DESC' },
+      select: ['id', 'createdAt', 'sampleCount'],
+    });
+
+    const lastCandidate = await this.candidates.findOne({
+      order: { createdAt: 'DESC' },
+      select: ['id', 'paramName', 'status', 'createdAt'],
+    });
+
+    return {
+      totalResults,
+      totalCandidates,
+      activeCandidates,
+      totalValidations,
+      lastResult: lastResult ? { id: lastResult.id, createdAt: lastResult.createdAt, sampleCount: lastResult.sampleCount } : null,
+      lastCandidate: lastCandidate ? { id: lastCandidate.id, paramName: lastCandidate.paramName, status: lastCandidate.status, createdAt: lastCandidate.createdAt } : null,
+    };
   }
 
   // ── Trade summarization ─────────────────────────────────────────────

@@ -137,6 +137,9 @@ import { PreOpenModule } from './trading/pre-open/pre-open.module';
 import { UnifiedOptionQuote } from './trading/unified-market-data/unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './trading/unified-market-data/unified-market-snapshot.entity';
 import { PatternSignal } from './trading/pattern-engine/pattern-signal.entity';
+import { AdaptationCandidate } from './trading/research/adaptation-candidate.entity';
+import { ResearchResult } from './trading/research/research-result.entity';
+import { ValidationResult } from './trading/research/validation-result.entity';
 import { PatternEngineService } from './trading/pattern-engine/pattern-engine.service';
 import { PatternSignalDispatchService } from './trading/pattern-engine/pattern-signal-dispatch.service';
 import { PatternEngineController } from './trading/pattern-engine/pattern-engine.controller';
@@ -174,6 +177,8 @@ import {
       UpstoxLivePaperWeeklyReport, UpstoxLivePaperToken,
       // Common normalized live store + pattern/learning dataset
       UnifiedOptionQuote, UnifiedMarketSnapshot, PatternSignal,
+      // Research & adaptation
+      AdaptationCandidate, ResearchResult, ValidationResult,
     ]),
     SideIncomeModule,
     AuthModule,
