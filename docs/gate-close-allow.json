@@ -64,6 +64,12 @@
       "reason": "gate-close allow-list maintenance",
       "workstream": "cp-plan",
       "authority": "JOB AGENT WORKER"
+    },
+    "0fdd9e60ea3315af912f6a0e574750b919593466": {
+      "short": "0fdd9e6",
+      "reason": "Main worktree commit (MarketDataHealthController import) — NOT job-agent-dev work",
+      "workstream": "separate-worktree",
+      "authority": "JOB AGENT WORKER"
     }
   }
 }
