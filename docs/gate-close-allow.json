@@ -453,6 +453,12 @@
       "reason": "Phase 4: channel learning + ATS question discovery",
       "workstream": "job-application-roadmap",
       "authority": "JOB AGENT WORKER"
+    },
+    "952132db7679e2b535482a50c62c54441e3b2715": {
+      "short": "952132d",
+      "reason": "Phase 5: employer intelligence",
+      "workstream": "job-application-roadmap",
+      "authority": "JOB AGENT WORKER"
     }
   }
 }
