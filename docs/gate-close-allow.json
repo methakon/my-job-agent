@@ -587,6 +587,11 @@
       "reason": "roadmap: final acceleration",
       "workstream": "trading-roadmap",
       "authority": "roadmap-execution"
+    },
+    "f18580ffd5e06f66ab600358cedfa264f0e042d9": {
+      "reason": "holdout-protection false positive fix",
+      "workstream": "trading-agent",
+      "authority": "test regression fix"
     }
   }
 }
