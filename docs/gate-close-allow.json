@@ -592,6 +592,36 @@
       "reason": "holdout-protection false positive fix",
       "workstream": "trading-agent",
       "authority": "test regression fix"
+    },
+    "c1fb337": {
+      "reason": "Pre-Monday hardening: NaN ltp fix, negative testing suite, replay fixtures, perf monitoring, runbook",
+      "workstream": "trading-agent-hardening",
+      "authority": "operator"
+    },
+    "9ac6051": {
+      "reason": "External-data adapters, TA-010 partial-tick test, live-item preparation scripts",
+      "workstream": "trading-agent-hardening",
+      "authority": "operator"
+    },
+    "758efec": {
+      "reason": "Fix gate-474 DB check shell escaping",
+      "workstream": "trading-agent-hardening",
+      "authority": "operator"
+    },
+    "fbe49bc": {
+      "reason": "Fix gate-365 to not fail on pre-existing untracked files",
+      "workstream": "trading-agent-hardening",
+      "authority": "operator"
+    },
+    "91220df": {
+      "reason": "Fix gate-362 vetoReport regex, gate-365 dirty-state check, gate-368 interface pattern",
+      "workstream": "trading-agent-hardening",
+      "authority": "operator"
+    },
+    "a01491a": {
+      "reason": "Add gate-check scripts for items 362,365,368,371,374,474",
+      "workstream": "trading-agent-hardening",
+      "authority": "operator"
     }
   }
 }
