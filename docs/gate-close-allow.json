@@ -550,6 +550,12 @@
       "recorded": "2026-09-19T19:00+05:30 (migration execution complete)",
       "evidence": "2,686,411 rows migrated (2,532,253 quotes + 154,158 snapshots), source tables empty, history tables populated, reconciliation verified",
       "expires_hint": "Delete after b5843f0 leaves guard window."
+    },
+    "0ba4d6fa00f6f3ee0d78ef70b69d84e5860548f9": {
+      "short": "0ba4d6f",
+      "reason": "Trading Agent roadmap: bootstrap retry loop (TA-012), FYERS token lifecycle test (TA-007), option-expression performance report (Item 79). 9 items marked done.",
+      "workstream": "trading-agent-roadmap",
+      "authority": "user-approved autonomous continuation"
     }
   }
 }
