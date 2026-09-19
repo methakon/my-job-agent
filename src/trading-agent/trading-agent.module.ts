@@ -26,6 +26,7 @@ import { UpstoxSandboxProvider } from '../trading/upstox-sandbox.provider';
 import { UpstoxSandboxIngestionService } from '../trading/upstox-sandbox-ingestion.service';
 import { UnifiedMarketDataModule } from '../trading/unified-market-data/unified-market-data.module';
 import { ResearchModule } from '../trading/research/research.module';
+import { AdaptationCandidate } from '../trading/research/adaptation-candidate.entity';
 import { SessionDriverService } from './session-driver.service';
 
 /**
@@ -58,6 +59,7 @@ import { SessionDriverService } from './session-driver.service';
       FnfTradeReport,
       SandboxTick,
       FyersToken,
+      AdaptationCandidate,
     ]),
     UnifiedMarketDataModule,
     ResearchModule,

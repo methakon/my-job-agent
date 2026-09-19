@@ -1,10 +1,15 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FeedHealthService } from '../trading/unified-market-data/feed-health.service';
 import { UnifiedArchiveService, ArchiveRunResult } from '../trading/unified-market-data/unified-archive.service';
 import { PersistenceHealthMachine } from '../shared/persistence-state';
 import { OffHoursResearchService } from '../trading/research/off-hours-research.service';
-import { HistoricalContextBuilderService } from '../trading/unified-market-data/historical-context-builder.service';
+import { HistoricalContextBuilderService, ResearchContext } from '../trading/unified-market-data/historical-context-builder.service';
+import { FnfTrade } from '../trading/fnf-trade.entity';
+import { AdaptationCandidate } from '../trading/research/adaptation-candidate.entity';
+import { TradeRecord } from '../trading/research/validation-engine.service';
 
 type Signal = Awaited<ReturnType<FnfTradingService['generateSignals']>>[number];
 type Portfolio = Awaited<ReturnType<FnfTradingService['listPortfolios']>>[number];
@@ -40,7 +45,15 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 	private lastDayArchiveDate = '';
 	private persistencePolicy: PersistencePolicy = 'ALLOW';
 
+	/** Historical research context loaded once per day at session startup.
+	 *  Accessible by trading services without DB queries (hot-path safe). */
+	activeContext: ResearchContext | null = null;
+
 	constructor(
+		@InjectRepository(FnfTrade)
+		private readonly tradeRepo: Repository<FnfTrade>,
+		@InjectRepository(AdaptationCandidate)
+		private readonly candidateRepo: Repository<AdaptationCandidate>,
 		private readonly trading: FnfTradingService,
 		private readonly feedHealth: FeedHealthService,
 		private readonly persistenceHealth: PersistenceHealthMachine,
@@ -348,16 +361,21 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 
 	/**
 	 * Run off-hours research asynchronously. Fire-and-forget from session close.
-	 * Uses today's session date, NIFTY underlying, and empty trades (research
-	 * loads its own historical data). Errors logged, never crash the agent.
+	 * Loads today's closed trades from DB for the validation pipeline.
+	 * Errors logged, never crash the agent.
 	 */
 	private async runOffHoursResearchSafely(): Promise<void> {
 		try {
 			const today = new Date();
 			const sessionDate = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-			this.logger.log(`[RESEARCH] off-hours research triggered for ${sessionDate}`);
-			// Pass empty trades — the research service loads its own data from history tables
-			const report = await this.offHoursResearch.runDailyResearch('NIFTY', sessionDate, []);
+			// Load ALL closed trades for the validation pipeline (not just today's).
+			// ValidationEngine compares candidate performance against historical trades.
+			const allTrades = await this.tradeRepo.find({
+				where: { status: 'CLOSED' as any },
+				order: { orderedAt: 'ASC' },
+			});
+			this.logger.log(`[RESEARCH] off-hours research triggered for ${sessionDate}, ${allTrades.length} closed trades loaded`);
+			const report = await this.offHoursResearch.runDailyResearch('NIFTY', sessionDate, allTrades as any);
 			this.logger.log(
 				`[RESEARCH] completed: regime=${report.marketRegime}, ${report.candidateImprovements.length} candidates`,
 			);
@@ -374,14 +392,18 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 	 */
 	private async loadHistoricalContext(): Promise<void> {
 		try {
-			const today = new Date().toISOString().slice(0, 10);
-			// assembleContext needs activeCandidates; none at startup (empty = no adaptations yet)
-			const context = await this.contextBuilder.assembleContext('NIFTY', []);
+			// Load ACTIVE adaptation candidates from DB (if any exist).
+			const activeCandidates = await this.candidateRepo.find({
+				where: { status: 'ACTIVE' as any },
+			});
+			const context = await this.contextBuilder.assembleContext('NIFTY', activeCandidates);
+			this.activeContext = context;
 			this.logger.log(
 				`[CONTEXT] loaded: regime=${context.historical.regime}, ` +
 				`vol=${context.historical.volatility.dailyVol ?? 'N/A'}, ` +
 				`trend=${context.historical.trend.direction}, ` +
-				`patterns=${Object.keys(context.patterns.frequency).length}`,
+				`patterns=${Object.keys(context.patterns.frequency).length}, ` +
+				`adaptations=${activeCandidates.length}`,
 			);
 		} catch (error) {
 			this.logger.warn(`[CONTEXT] historical context load failed (non-fatal): ${(error as Error).message}`);
