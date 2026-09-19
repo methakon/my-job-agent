@@ -5,6 +5,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { mysqlConfig } from './shared/db.config';
 import { CandidateProfile } from './profile/candidate-profile.entity';
 import { CandidateEvidenceService } from './job-application/candidate-evidence.service';
+import { CandidateEvidenceLibraryService } from './job-application/candidate-evidence-library.service';
 import { AdaptationMatcherService } from './job-application/skills/adaptation-matcher.service';
 import { JobLead } from './leads/job-lead.entity';
 import { Application } from './applications/application.entity';
@@ -210,6 +211,7 @@ import {
     ProjectClarificationService,
     PatternEngineService, PatternSignalDispatchService,
     CandidateEvidenceService,
+    CandidateEvidenceLibraryService,
     AdaptationMatcherService,
   ],
 })
