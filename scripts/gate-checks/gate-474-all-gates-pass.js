@@ -6,6 +6,7 @@
  */
 const { execSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 const REPO = path.resolve(__dirname, '../..');
 const SUB_GATES = [
@@ -47,11 +48,19 @@ console.log('\nChecking DB for failed items...');
 let dbOk = true;
 try {
   const envPath = path.join(REPO, '.env');
-  const cmd = [
-    'bash -c',
-    `'source "${envPath}" && mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" myjob_agent -N -e "SELECT COUNT(*) FROM project_checklist_items WHERE status=\\'fail\\'"'`,
-  ].join(' ');
-  const envOut = execSync(cmd, { cwd: REPO, encoding: 'utf8', timeout: 15000 }).trim();
+  // Write a temp SQL query to avoid shell escaping issues
+  const sqlQuery = "SELECT COUNT(*) FROM project_checklist_items WHERE status='fail'";
+  const sqlFile = path.join(REPO, '.tmp_gate474_check.sql');
+  fs.writeFileSync(sqlFile, sqlQuery);
+
+  const bashCmd = `source "${envPath}" && mysql -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" myjob_agent -N < "${sqlFile}"`;
+  const envOut = execSync(`bash -c ${JSON.stringify(bashCmd)}`, {
+    cwd: REPO, encoding: 'utf8', timeout: 15000,
+  }).trim();
+
+  // Cleanup temp file
+  try { fs.unlinkSync(sqlFile); } catch {}
+
   const failCount = parseInt(envOut, 10);
   if (failCount > 0) {
     console.log(`  ❌ DB has ${failCount} items with status='fail'`);
@@ -61,7 +70,8 @@ try {
     console.log('  ✅ DB has 0 items with status=fail');
   }
 } catch (e) {
-  console.log(`  ⚠️  DB check skipped (unreachable or error): ${(e.message || '').substring(0, 120)}`);
+  console.log(`  ⚠️  DB check skipped: ${(e.stderr || e.message || '').substring(0, 150)}`);
+  try { fs.unlinkSync(path.join(REPO, '.tmp_gate474_check.sql')); } catch {}
 }
 
 console.log(`\nGATE 474 — Master Gate: ${allPass ? 'PASS' : 'FAIL'}`);
