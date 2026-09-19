@@ -417,6 +417,12 @@
       "reason": "Job Application roadmap — JA-021 Job quality and freshness: implement deterministic assessJobQuality in qualification.service.ts evaluating posting age/freshness from scrapedAt, employer signals (company/URL/description), duplicate/repost detection, closing/deadline signal detection, and stale/closed exclusion. Touches ONLY Job Agent files: src/job-application/qualification.service.ts (151-line replacement of assessJobQuality) + scripts/ja-021-job-quality-freshness.test.js (new, 214 lines, 10/10 pass). Verified: test 10/10 pass exit 0; build exit 0; tsc 0 errors/0 warnings; No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. Separate JA-roadmap control plane (job_application_roadmap_items).",
       "workstream": "Job Application roadmap — JA-021 Job quality and freshness (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-19: commits ARE allowed, pushes ARE allowed for Job Agent development status; JA-021 doneWhen satisfies 'Quality/freshness affects ranking and stale/closed jobs are safely excluded.'"
+    },
+    "30bdcb036ec3af3ed07aa26533c3a8177d2b2581": {
+      "short": "30bdcb0",
+      "reason": "Job Application roadmap — JA-022 Application ROI: add deterministic expected value scoring to qualification.service.ts. Ranking now incorporates EV, not only match score. Touches ONLY Job Agent files: src/job-application/qualification.service.ts + scripts/ja-022-application-roi.test.js. Verified: 7/7 test pass; build clean; tsc 0 errors. No Trading Agent files touched.",
+      "workstream": "Job Application roadmap — JA-022 Application ROI (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-19: commits/pushes allowed for Job Agent development; JA-022 doneWhen: ranking incorporates expected value, not only match score"
     }
   }
 }
