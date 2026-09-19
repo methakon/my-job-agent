@@ -1,4 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { createStructuredLogger } from '../shared/structured-logger';
+import { ErrorClassification } from '../shared/error-classifications';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThanOrEqual, IsNull, DeepPartial } from 'typeorm';
 import { FnfPortfolio } from './fnf-portfolio.entity';
@@ -161,7 +163,7 @@ export const DECAY_DEFAULTS = {
 
 @Injectable()
 export class FnfTradingService {
-	private readonly logger = new Logger(FnfTradingService.name);
+	private readonly logger = createStructuredLogger(FnfTradingService.name);
 
 	constructor(
 		@InjectRepository(FnfPortfolio) private readonly portfolios: Repository<FnfPortfolio>,
@@ -701,7 +703,14 @@ export class FnfTradingService {
 					}),
 				);
 			} catch (e) {
-				this.logger.warn(`decision journal write failed: ${(e as Error).message}`);
+			this.logger.warn(`decision journal write failed: ${(e as Error).message}`);
+			this.logger.errorClassified({
+				classification: ErrorClassification.RECOVERED,
+				component: 'FnfTradingService',
+				operation: 'writeDecisionJournal',
+				message: (e as Error).message,
+				recovered: true,
+			});
 			}
 		})();
 	}
@@ -2129,7 +2138,15 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 					dataSource,
 				});
 			} catch (err) {
-				this.logger.warn(`evaluateOpenPositions: error for trade ${trade.id}: ${(err as Error).message}`);
+			this.logger.warn(`evaluateOpenPositions: error for trade ${trade.id}: ${(err as Error).message}`);
+			this.logger.errorClassified({
+				classification: ErrorClassification.UNHANDLED_EXCEPTION,
+				component: 'FnfTradingService',
+				operation: 'evaluateOpenPositions',
+				message: `trade ${trade.id}: ${(err as Error).message}`,
+				instrument: trade.instrument,
+				recovered: true,
+			});
 			}
 		}
 

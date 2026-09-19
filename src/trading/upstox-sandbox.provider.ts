@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createStructuredLogger } from '../shared/structured-logger';
+import { ErrorClassification } from '../shared/error-classifications';
 import { ExecutionProvider, ExecutionMode, PlaceOrderInput, OrderState, PositionState } from './execution-provider.interface';
 
 /**
@@ -27,7 +29,7 @@ export class UpstoxSandboxProvider implements ExecutionProvider {
 	readonly provider = 'UPSTOX';
 	readonly mode: ExecutionMode = 'SANDBOX';
 	readonly onRealData = false;
-	private readonly logger = new Logger('UpstoxSandboxProvider');
+	private readonly logger = createStructuredLogger('UpstoxSandboxProvider');
 
 	private readonly baseUrl: string;
 	private readonly clientId: string;
@@ -38,6 +40,13 @@ export class UpstoxSandboxProvider implements ExecutionProvider {
 		// Fail closed: a REAL-mode request is a configuration error.
 		const requestedMode = (config.get<string>('UPSTOX_SANDBOX_MODE') || 'SANDBOX').toUpperCase();
 		if (requestedMode !== 'SANDBOX') {
+			this.logger.errorClassified({
+				classification: ErrorClassification.FATAL_STARTUP,
+				component: 'UpstoxSandboxProvider',
+				operation: 'constructor',
+				message: `Refusing to start: UPSTOX_SANDBOX_MODE must be SANDBOX (got ${requestedMode})`,
+				recovered: false,
+			});
 			throw new Error('[UPSTOX][SANDBOX] refusing to start: UPSTOX_SANDBOX_MODE must be SANDBOX (live Upstox is out of scope)');
 		}
 		this.baseUrl = config.get<string>('UPSTOX_SANDBOX_BASE_URL') || 'https://api-sandbox.upstox.com';
