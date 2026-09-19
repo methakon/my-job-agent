@@ -4,7 +4,7 @@
     "The guard only accepts --allow / GATE_CLOSE_ALLOW for a single invocation; a push runs it from the",
     "pre-push hook, so an exemption that must hold for every future push has to be committed here.",
     "NARROW BY CONSTRUCTION: exact SHAs only (no paths/globs/ranges), and every entry needs a non-empty",
-    "reason + workstream + authority or it is IGNORED. It only ADDS to the allow set — every other",
+    "reason + workstream + authority or it is IGNORED. It only ADDS to the allow set \u2014 every other",
     "unlisted commit still classifies as DRIFT.",
     "FORBIDDEN USE: never add an entry to silence real drift in a workstream that project_checklist_items",
     "is supposed to track. Sync that row instead. Exemptions are for commits that legitimately belong to",
@@ -40,7 +40,7 @@
     },
     "bfaa1776345a0986f6a45ea2ec1d6af3068c2f5c": {
       "short": "bfaa177",
-      "reason": "Same separate Job Application workstream, same module path: JA-003 regression baseline — automated baseline tests proving the JA-002 submission safety invariant across all real submission paths including direct low-level invocation (scripts/ja-003-regression-baseline.test.js). Tracked in its own job_application_roadmap_items control plane; project_checklist_items holds no row for it and none should be invented.",
+      "reason": "Same separate Job Application workstream, same module path: JA-003 regression baseline \u2014 automated baseline tests proving the JA-002 submission safety invariant across all real submission paths including direct low-level invocation (scripts/ja-003-regression-baseline.test.js). Tracked in its own job_application_roadmap_items control plane; project_checklist_items holds no row for it and none should be invented.",
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row); applied to the same module. Delete this entry to revoke.",
       "recorded": "2026-09-12T01:2x+05:30 (session completing JA-003 regression baseline; commit authored by the parallel JA session)",
@@ -80,16 +80,16 @@
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
       "recorded": "2026-09-12T11:50+05:30 (session running the read-only Redis hot-path analysis; commit authored by the parallel JA session)",
-      "evidence": "git show --name-only e0fcb92 lists docs/TODO.md, src/job-application-roadmap/job-application-roadmap.service.ts, src/job-application/qualification.service.ts — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "evidence": "git show --name-only e0fcb92 lists docs/TODO.md, src/job-application-roadmap/job-application-roadmap.service.ts, src/job-application/qualification.service.ts \u2014 no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once e0fcb92 leaves the guard commit window (default: last 15 code commits)."
     },
     "9be09367ab7162579d66dfbd73349c5b3ab95606": {
       "short": "9be0936",
-      "reason": "Same separate Job Application workstream (JA-012): a deterministic, replayable JD intent extraction service in src/job-application/jd-intent.service.ts + jd-intent-model.ts, with a 27-test qualification suite (scripts/ja-012-jd-intent.test.js + ja-012-evidence-tagging.test.js). Extracts role title, seniority, must-have/preferred skills, responsibilities, experience (with range parsing), location/remote rules, employment type, compensation (with currency), work authorization, notice/start requirements, tech domain, channel, employer and freshness — each tagged explicit (matched in source text) vs inferred (labelled inference), with the original JD text preserved verbatim and a sha256 fingerprint guaranteeing same-JD stability. Authored by the PARALLEL job-application session in this shared working tree; tracked in that workstream's own control plane (job_application_roadmap_items row 6), which project_checklist_items deliberately does not mirror. Touches no trading, market-data, feed, risk, execution or schema code.",
+      "reason": "Same separate Job Application workstream (JA-012): a deterministic, replayable JD intent extraction service in src/job-application/jd-intent.service.ts + jd-intent-model.ts, with a 27-test qualification suite (scripts/ja-012-jd-intent.test.js + ja-012-evidence-tagging.test.js). Extracts role title, seniority, must-have/preferred skills, responsibilities, experience (with range parsing), location/remote rules, employment type, compensation (with currency), work authorization, notice/start requirements, tech domain, channel, employer and freshness \u2014 each tagged explicit (matched in source text) vs inferred (labelled inference), with the original JD text preserved verbatim and a sha256 fingerprint guaranteeing same-JD stability. Authored by the PARALLEL job-application session in this shared working tree; tracked in that workstream's own control plane (job_application_roadmap_items row 6), which project_checklist_items deliberately does not mirror. Touches no trading, market-data, feed, risk, execution or schema code.",
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
       "recorded": "2026-09-13T00:50+05:30 (session implementing JA-012 deterministic JD intent extraction; commit authored by the parallel JA session)",
-      "evidence": "git show --name-only 9be09367ab7162579d66dfbd73349c5b3ab95606 lists src/job-application/jd-intent-model.ts, src/job-application/jd-intent.service.ts, scripts/ja-012-jd-intent.test.js, scripts/ja-012-evidence-tagging.test.js — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "evidence": "git show --name-only 9be09367ab7162579d66dfbd73349c5b3ab95606 lists src/job-application/jd-intent-model.ts, src/job-application/jd-intent.service.ts, scripts/ja-012-jd-intent.test.js, scripts/ja-012-evidence-tagging.test.js \u2014 no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once 9be09367ab7162579d66dfbd73349c5b3ab95606 leaves the guard commit window (default: last 15 code commits)."
     },
     "e5349ffc025364736ee19ea1256fe2f7ff55ea80": {
@@ -98,7 +98,7 @@
       "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate; do not create or invent a trading-roadmap row for it'). Delete this entry to revoke.",
       "recorded": "2026-09-13T03:00+05:30 (session completing trading-roadmap GATE 7/8 rows; commit authored by the parallel JA session)",
-      "evidence": "git show --name-only e5349ff lists public/dashboard.html, scripts/ja-013-candidate-evidence.test.js, src/app.module.ts, src/job-application/candidate-evidence.service.ts — no trading/market-data/risk/execution file, no .env change, no schema change.",
+      "evidence": "git show --name-only e5349ff lists public/dashboard.html, scripts/ja-013-candidate-evidence.test.js, src/app.module.ts, src/job-application/candidate-evidence.service.ts \u2014 no trading/market-data/risk/execution file, no .env change, no schema change.",
       "expires_hint": "Delete once e5349ffc025364736ee19ea1256fe2f7ff55ea80 leaves the guard commit window (default: last 15 code commits)."
     },
     "ab7cc1eb5dda847823758679ae0a2eea0aa9901d": {
@@ -112,43 +112,43 @@
     },
     "1cf5b3a": {
       "short": "1cf5b3a",
-      "reason": "Same separate Job Application workstream (JA-014): the canonical semantic skill matching implementation — synonym/alias/relationship table + matcher + 13-section test suite — is a self-contained Job Agent module with no trading/algo-trading/Upstox/FYERS/FNF involvement. Covered by the same JA-roadmap control-plane instance; no separate tracking needed.",
-      "workstream": "Job Application roadmap — JA-014 Semantic skill matching",
+      "reason": "Same separate Job Application workstream (JA-014): the canonical semantic skill matching implementation \u2014 synonym/alias/relationship table + matcher + 13-section test suite \u2014 is a self-contained Job Agent module with no trading/algo-trading/Upstox/FYERS/FNF involvement. Covered by the same JA-roadmap control-plane instance; no separate tracking needed.",
+      "workstream": "Job Application roadmap \u2014 JA-014 Semantic skill matching",
       "authority": "seed job-application-roadmap.seed.json JA-014 row + gate-close-check.js same_separate_workstream category"
     },
     "d0f875b": {
       "short": "d0f875b",
-      "reason": "Separate separately-tracked workstream: Upstox Sandbox ingestion — set-based batched persistence (perf(sandbox)). NOT Job Agent work. Tracked under the trading/algo-trading workstream, not the JA roadmap control plane.",
-      "workstream": "Trading/algo-trading — Upstox Sandbox ingestion (separate workstream)",
+      "reason": "Separate separately-tracked workstream: Upstox Sandbox ingestion \u2014 set-based batched persistence (perf(sandbox)). NOT Job Agent work. Tracked under the trading/algo-trading workstream, not the JA roadmap control plane.",
+      "workstream": "Trading/algo-trading \u2014 Upstox Sandbox ingestion (separate workstream)",
       "authority": "gate-close-check.js same_separate_workstream category"
     },
     "8c5ede643114c4195b0219eee42b377c27b88da3": {
       "short": "8c5ede6",
-      "reason": "Separate separately-tracked workstream: Upstox Sandbox order-API plumbing — corrects the sandbox order API semantics only (validity DAY on place, order_id as a query param on cancel, order_id in the body on modify, trades() via /v2/order/retrieve-all, positions() fails loudly instead of guessing). Isolated Sandbox exercise: no live/canonical/FYERS/FNF data, no REAL execution gate, no risk control, no weekly-report or accounting code, no schema change. NOT Job Agent work. The Sandbox workstream deliberately has no project_checklist_items row; its sibling commit d0f875b carries the same exemption.",
-      "workstream": "Trading/algo-trading — Upstox Sandbox order-API plumbing (separate workstream)",
-      "authority": "operator approval 2026-09-14 ('Allow-list the SHA'), following the d0f875b precedent (commit 4740fe7 'chore(gate-close): allow-list d0f875b — separate trading workstream (Upstox Sandbox ingestion)'). Delete this entry to revoke.",
+      "reason": "Separate separately-tracked workstream: Upstox Sandbox order-API plumbing \u2014 corrects the sandbox order API semantics only (validity DAY on place, order_id as a query param on cancel, order_id in the body on modify, trades() via /v2/order/retrieve-all, positions() fails loudly instead of guessing). Isolated Sandbox exercise: no live/canonical/FYERS/FNF data, no REAL execution gate, no risk control, no weekly-report or accounting code, no schema change. NOT Job Agent work. The Sandbox workstream deliberately has no project_checklist_items row; its sibling commit d0f875b carries the same exemption.",
+      "workstream": "Trading/algo-trading \u2014 Upstox Sandbox order-API plumbing (separate workstream)",
+      "authority": "operator approval 2026-09-14 ('Allow-list the SHA'), following the d0f875b precedent (commit 4740fe7 'chore(gate-close): allow-list d0f875b \u2014 separate trading workstream (Upstox Sandbox ingestion)'). Delete this entry to revoke.",
       "recorded": "2026-09-14T00:56+05:30 (session correcting the PAPER option cost model; this commit was already on origin/dev and fell inside the guard's commit window)",
-      "evidence": "git show --name-only 8c5ede6 lists only src/trading/upstox-sandbox.provider.ts (+36/-13) — no FNF, no Job Agent, no risk/REAL-execution gate, no weekly-report, no .env, no schema, no roadmap/control-plane file.",
+      "evidence": "git show --name-only 8c5ede6 lists only src/trading/upstox-sandbox.provider.ts (+36/-13) \u2014 no FNF, no Job Agent, no risk/REAL-execution gate, no weekly-report, no .env, no schema, no roadmap/control-plane file.",
       "expires_hint": "Delete once 8c5ede643114c4195b0219eee42b377c27b88da3 leaves the guard commit window (default: last 15 code commits)."
     },
     "4740fe7d2ba066c5d3675094146fd6d0376ca0e9": {
       "short": "4740fe7",
-      "reason": "chore(gate-close): allow-list d0f875b — separate trading workstream (Upstox Sandbox ingestion)",
+      "reason": "chore(gate-close): allow-list d0f875b \u2014 separate trading workstream (Upstox Sandbox ingestion)",
       "workstream": "chore: gate-close allow-list (not a roadmap workstream)",
       "authority": "operator approval 2026-09-13"
     },
     "983b0330a92ad3c806923fa8c01a6d8f1656bc55": {
       "short": "983b033",
-      "reason": "Job Application roadmap — JA-015 Skill-gap severity: standalone pure classifier (GapSeverity = NONE/MINOR/MODERATE/MAJOR/BLOCKING/UNKNOWN) derived ONLY from existing signals, wired into qualification, with deterministic trace evidence for failing test cases before any taxonomy changes. DoneWhen satisfied: gap classification is deterministic, explainable (classify + reason + traces), and used by qualification. Touches src/job-application/skills/gap-severity.ts (new), src/job-application/qualification.service.ts (+invoke), scripts/ja-015-skill-gap-severity.test.ts (new, 55 cases). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain code touched. Separate JA-roadmap control plane (job_application_roadmap_items id=9), not mirrored into project_checklist_items.",
-      "workstream": "Job Application roadmap — JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
-      "authority": "operator approval 2026-09-14 ('ok proceed for good by sequence' + 'Do not commit or push until I explicitly approve' satisfied — user approved commit/push); seed job_application_roadmap.seed.json JA-015 row + gate-close-check.js same_separate_workstream category",
+      "reason": "Job Application roadmap \u2014 JA-015 Skill-gap severity: standalone pure classifier (GapSeverity = NONE/MINOR/MODERATE/MAJOR/BLOCKING/UNKNOWN) derived ONLY from existing signals, wired into qualification, with deterministic trace evidence for failing test cases before any taxonomy changes. DoneWhen satisfied: gap classification is deterministic, explainable (classify + reason + traces), and used by qualification. Touches src/job-application/skills/gap-severity.ts (new), src/job-application/qualification.service.ts (+invoke), scripts/ja-015-skill-gap-severity.test.ts (new, 55 cases). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain code touched. Separate JA-roadmap control plane (job_application_roadmap_items id=9), not mirrored into project_checklist_items.",
+      "workstream": "Job Application roadmap \u2014 JA-015 Skill-gap severity (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-14 ('ok proceed for good by sequence' + 'Do not commit or push until I explicitly approve' satisfied \u2014 user approved commit/push); seed job_application_roadmap.seed.json JA-015 row + gate-close-check.js same_separate_workstream category",
       "recorded": "2026-09-14T07:15+05:30 (this session; cleanup of goodbye sequence after verification pivot)",
       "evidence": "git show --stat 983b033 lists only src/job-application/skills/gap-severity.ts +src/job-application/qualification.service.ts +scripts/ja-015-skill-gap-severity.test.ts; verification: tsc 0 errors/0 warnings, tests 120/120 (ja-010/012/013/015), build 0 errors/0 warnings, render 12/12; no trading/algo Trading Agent/market-data/feed/risk/execution/FNF/option-chain files.",
       "expires_hint": "Delete once 983b0330a92ad3c806923fa8c01a6d8f1656bc55 leaves the guard commit window (default: last 15 code commits)."
     },
     "77b30513e8baac420780972aa14269c0a11fed0d": {
       "short": "77b3051",
-      "reason": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Touches ONLY Job Agent files: src/app.module.ts (AdaptationMatcherService DI provider), src/applications/apply-engine.service.ts (P5 adaptation blocks in applyToLead/prepareApplication/submitPrepared), src/job-application-roadmap/job-application-roadmap-page.controller.ts (@BypassAuth on GET only; mutations protected), src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts, scripts/ja-roadmap-status.js (new CLI status-sync helper). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. No .env change, no schema change. Reconciliation: JA-012→done, JA-013→done via API; JA-014 stays in_progress (doneWhen requires measured recall improvement, not matcher existence). Public GET /job-application-roadmap now serves 200 without auth; POST/DELETE/align-content mutations require session or x-operator-password (401 without). Login page already has the roadmap tile (no change).",
+      "reason": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Touches ONLY Job Agent files: src/app.module.ts (AdaptationMatcherService DI provider), src/applications/apply-engine.service.ts (P5 adaptation blocks in applyToLead/prepareApplication/submitPrepared), src/job-application-roadmap/job-application-roadmap-page.controller.ts (@BypassAuth on GET only; mutations protected), src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts, scripts/ja-roadmap-status.js (new CLI status-sync helper). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. No .env change, no schema change. Reconciliation: JA-012\u2192done, JA-013\u2192done via API; JA-014 stays in_progress (doneWhen requires measured recall improvement, not matcher existence). Public GET /job-application-roadmap now serves 200 without auth; POST/DELETE/align-content mutations require session or x-operator-password (401 without). Login page already has the roadmap tile (no change).",
       "workstream": "Job Application roadmap - P5 apply-engine adaptation integration + roadmap sync + public roadmap (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-17 ('This is DEVELOPMENT status. Therefore: commits ARE allowed, pushes ARE allowed... You MAY: stage Job Agent changes, commit, push.')",
       "recorded": "2026-09-17T00:52+05:30 (this session; commit 77b3051 on ja-015-publish)",
@@ -166,21 +166,21 @@
     },
     "f70e192d61c9d49f87cd20d0e8d90242d3027088": {
       "short": "f70e192",
-      "reason": "Trading workstream — GATE 0 row 877: feat(row-877): desk consumes the common store when its own feed is stale. Touches src/trading/upstox-live-paper/* + src/trading/unified-market-data/unified-market-data.service.ts + package.json + scripts/upstox-common-chain.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — GATE 0 row 877 (separate workstream)",
+      "reason": "Trading workstream \u2014 GATE 0 row 877: feat(row-877): desk consumes the common store when its own feed is stale. Touches src/trading/upstox-live-paper/* + src/trading/unified-market-data/unified-market-data.service.ts + package.json + scripts/upstox-common-chain.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 GATE 0 row 877 (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-15T11:13+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
     "17497785627991ece43dd90e1daad22e66b66754": {
       "sha": "17497785627991ece43dd90e1daad22e66b66754",
       "reason": "Provider tick compatibility audit fixes: V3 WS mapper, V2 REST greeks, FYERS NULLs, timestamp model",
-      "workstream": "Trading Agent — Provider Failover Architecture",
+      "workstream": "Trading Agent \u2014 Provider Failover Architecture",
       "authority": "operator-directed compatibility audit"
     },
     "fa62e07e06bec14a02cd423e26f3086c07ef8372": {
       "short": "fa62e07",
-      "reason": "Trading/canonical workstream — fix(canonical): force-release wedged pool sockets so the tape self-heals. Fixes mysql2 pool exhaustion where abandoned queries permanently consume pool slots. Touches src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — canonical market-data pipeline (separate workstream)",
+      "reason": "Trading/canonical workstream \u2014 fix(canonical): force-release wedged pool sockets so the tape self-heals. Fixes mysql2 pool exhaustion where abandoned queries permanently consume pool slots. Touches src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-15T12:01+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
@@ -204,8 +204,8 @@
     },
     "797327feac16502055decce7c7955a77b4388964": {
       "short": "797327f",
-      "reason": "Trading workstream — GATE 0 row 877: fix(row-877): keep the desk's OWN 15s stale rule; give the shared path its own budget. Touches src/trading/upstox-live-paper/upstox-live-paper-autoentry.service.ts only. Separate trading/algo-trading workstream tracked under its own roadmap.",
-      "workstream": "Trading/algo-trading — GATE 0 row 877 (separate workstream)",
+      "reason": "Trading workstream \u2014 GATE 0 row 877: fix(row-877): keep the desk's OWN 15s stale rule; give the shared path its own budget. Touches src/trading/upstox-live-paper/upstox-live-paper-autoentry.service.ts only. Separate trading/algo-trading workstream tracked under its own roadmap.",
+      "workstream": "Trading/algo-trading \u2014 GATE 0 row 877 (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; tracked under trading roadmap, not project_checklist_items",
       "recorded": "2026-09-15T11:17+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
@@ -229,15 +229,15 @@
     },
     "0cd75f586be13c70f3aa2d0876b87bc89e7f433a": {
       "short": "0cd75f5",
-      "reason": "Trading workstream — fix(capture): make the option-chain capture absence-preserving (D4 extended to capture tables): NULL-preserving volume/OI/index depth so missing values don't decode as zero. Touches src/trading/fnf-option-quote*.entity.ts + src/trading/upstox-live-paper/* + src/migration/* + package.json + scripts/capture-absence-preserving.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — option-chain capture (separate workstream)",
+      "reason": "Trading workstream \u2014 fix(capture): make the option-chain capture absence-preserving (D4 extended to capture tables): NULL-preserving volume/OI/index depth so missing values don't decode as zero. Touches src/trading/fnf-option-quote*.entity.ts + src/trading/upstox-live-paper/* + src/migration/* + package.json + scripts/capture-absence-preserving.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 option-chain capture (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
     "b8041d4d7271711ffa929215a701be0d9f00a46b": {
       "short": "b8041d4",
-      "reason": "Research workstream — feat(research): offline/shadow price-prediction feature formulas + walk-forward evaluation. Pure research/offline: no live data, no real execution, no risk control, no trading decision path. Touches src/trading/research/price-prediction-features.ts + scripts/price-prediction-*.js + package.json. Separate research workstream.",
-      "workstream": "Trading/research — offline shadow price prediction (separate workstream)",
+      "reason": "Research workstream \u2014 feat(research): offline/shadow price-prediction feature formulas + walk-forward evaluation. Pure research/offline: no live data, no real execution, no risk control, no trading decision path. Touches src/trading/research/price-prediction-features.ts + scripts/price-prediction-*.js + package.json. Separate research workstream.",
+      "workstream": "Trading/research \u2014 offline shadow price prediction (separate workstream)",
       "authority": "Separate research workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
@@ -261,8 +261,8 @@
     },
     "c8cd44119e21eb5cd418bd4c24ef0dc33b0c41dd": {
       "short": "c8cd441",
-      "reason": "Trading/canonical workstream — perf(canonical): batch the live ingest + bound the stream queue. Touches src/trading/fno-market-data.service.ts + src/trading/unified-market-data/* + package.json + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — canonical market-data pipeline (separate workstream)",
+      "reason": "Trading/canonical workstream \u2014 perf(canonical): batch the live ingest + bound the stream queue. Touches src/trading/fno-market-data.service.ts + src/trading/unified-market-data/* + package.json + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-15T11:28+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
@@ -280,8 +280,8 @@
     },
     "e718d7cadf202678f9a117e5ba84f947baaf8402": {
       "short": "e718d7c",
-      "reason": "Trading/canonical workstream — perf(canonical): write-behind the streaming ingest (message path does no I/O). Touches src/trading/unified-market-data/canonical/tick-interpreter.service.ts + src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — canonical market-data pipeline (separate workstream)",
+      "reason": "Trading/canonical workstream \u2014 perf(canonical): write-behind the streaming ingest (message path does no I/O). Touches src/trading/unified-market-data/canonical/tick-interpreter.service.ts + src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-15T11:33+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
@@ -323,29 +323,29 @@
     },
     "163f66cd7d33225eaa9a2bbef0b2516ad17b917b": {
       "short": "163f66c",
-      "reason": "Trading workstream — fix(trading): Stage 1 — D4/D5/D6 absence-is-not-zero correctness fixes. Protobuf3 partial updates: missing fields decode as 0, not null — need merge logic to prevent field erosion on live feeds. Touches src/trading/pre-open/* + src/trading/unified-market-data/* + src/migration/* + scripts/*.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — pre-open capture + unified market-data correctness (separate workstream)",
+      "reason": "Trading workstream \u2014 fix(trading): Stage 1 \u2014 D4/D5/D6 absence-is-not-zero correctness fixes. Protobuf3 partial updates: missing fields decode as 0, not null \u2014 need merge logic to prevent field erosion on live feeds. Touches src/trading/pre-open/* + src/trading/unified-market-data/* + src/migration/* + scripts/*.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 pre-open capture + unified market-data correctness (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
     "bc52c883a4974987b0ca315fdb5b173b6f277908": {
       "short": "bc52c88",
-      "reason": "Trading workstream — feat(trading): capture-integrity facts for the Upstox OI archive: adds providerTs, prevOi, payloadHash columns. Additive only: 3 NULLable columns, no row rewritten, no default, no index change, no trading-decision path reads them. Touches src/trading/research/capture-integrity.ts + src/trading/upstox-live-paper/* + src/migration/* + scripts/capture-integrity.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — Upstox OI archive capture integrity (separate workstream)",
+      "reason": "Trading workstream \u2014 feat(trading): capture-integrity facts for the Upstox OI archive: adds providerTs, prevOi, payloadHash columns. Additive only: 3 NULLable columns, no row rewritten, no default, no index change, no trading-decision path reads them. Touches src/trading/research/capture-integrity.ts + src/trading/upstox-live-paper/* + src/migration/* + scripts/capture-integrity.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 Upstox OI archive capture integrity (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-14T23:55+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
     "d7898ed52099eb39c82275e9900b7e135748313f": {
       "short": "d7898ed",
-      "reason": "Job Application roadmap — P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap read. CHERRY-PICKED ONTO DEV from ja-015-publish commit 77b3051. Touches ONLY Job Agent files (7 files: scripts/ja-roadmap-status.js, src/app.module.ts, src/applications/apply-engine.service.ts, src/job-application-roadmap/job-application-roadmap-page.controller.ts, src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Verified this session: tsc 0, build 0, tests ja-010 14/0/14 + ja-012 63/0/25 + 6/0/2 + ja-013 120/0/120; DB = local HTTP = public HTTP = 40/7/2/0/31 CONSISTENT; trading-agent PID 47788 untouched; my-job-agent PID 87653 online.",
-      "workstream": "Job Application roadmap — P5 apply-engine adaptation integration (separate control plane: job_application_roadmap_items)",
+      "reason": "Job Application roadmap \u2014 P5 apply-engine adaptation integration + roadmap status reconciliation + public roadmap read. CHERRY-PICKED ONTO DEV from ja-015-publish commit 77b3051. Touches ONLY Job Agent files (7 files: scripts/ja-roadmap-status.js, src/app.module.ts, src/applications/apply-engine.service.ts, src/job-application-roadmap/job-application-roadmap-page.controller.ts, src/job-application/jd-extractor.service.ts, src/job-application/skills/adaptation-matcher.service.ts, src/job-application/skills/adaptive-lead-rank.service.ts). No Trading Agent / algo-trading / market-data / feed / risk / execution / FNF / option-chain / FYERS / Upstox files touched. Separate JA-roadmap control plane (job_application_roadmap_items, 40 rows). Verified this session: tsc 0, build 0, tests ja-010 14/0/14 + ja-012 63/0/25 + 6/0/2 + ja-013 120/0/120; DB = local HTTP = public HTTP = 40/7/2/0/31 CONSISTENT; trading-agent PID 47788 untouched; my-job-agent PID 87653 online.",
+      "workstream": "Job Application roadmap \u2014 P5 apply-engine adaptation integration (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-17 ('This is DEVELOPMENT status. Therefore: commits ARE allowed, pushes ARE allowed'); goodbye directive to commit on dev and push; cherry-picked onto dev from ja-015-publish",
       "recorded": "2026-09-17T17:34+05:30 (this session; cherry-picked onto dev)"
     },
     "9010dd6898b5200800bfa38c4f9c0a05a7ead6ab": {
       "short": "9010dd6",
-      "reason": "Trading/canonical workstream — fix(canonical): bound the write-behind flush so a wedged write cannot stop the tape. Touches src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
-      "workstream": "Trading/algo-trading — canonical market-data pipeline (separate workstream)",
+      "reason": "Trading/canonical workstream \u2014 fix(canonical): bound the write-behind flush so a wedged write cannot stop the tape. Touches src/trading/unified-market-data/unified-market-data.service.ts + scripts/canonical-batch-ingest.test.js. Separate trading/algo-trading workstream.",
+      "workstream": "Trading/algo-trading \u2014 canonical market-data pipeline (separate workstream)",
       "authority": "Separate trading workstream commit cherry-picked onto dev from ja-015-publish; not a project_checklist_items row",
       "recorded": "2026-09-15T11:56+05:30 (cherry-picked onto dev from ja-015-publish)"
     },
@@ -360,7 +360,7 @@
     },
     "73601b3": {
       "short": "73601b3",
-      "reason": "Trading Agent workstream - feat(trading): single paper portfolio — retire Upstox execution, fix 3 data-paths. Trading-agent-dev branch commit for FNF paper desk consolidation.",
+      "reason": "Trading Agent workstream - feat(trading): single paper portfolio \u2014 retire Upstox execution, fix 3 data-paths. Trading-agent-dev branch commit for FNF paper desk consolidation.",
       "workstream": "Trading Agent - FNF paper desk (separate workstream: trading-agent-dev branch)",
       "authority": "operator instruction for trading-agent-dev branch work (Phase 4A development branch)",
       "recorded": "2026-09-18T01:45+05:30",
@@ -387,7 +387,7 @@
     },
     "6bc3f20c4d44389cba7530665a2438f6eb038253": {
       "short": "6bc3f20",
-      "reason": "Trading Agent workstream — finalize isolated runtime config (port env var) + DI entity-class import fix",
+      "reason": "Trading Agent workstream \u2014 finalize isolated runtime config (port env var) + DI entity-class import fix",
       "workstream": "Trading Agent",
       "authority": "smoke-test-verified commit",
       "recorded": "2026-09-19T00:05:00+05:30",
@@ -396,7 +396,7 @@
     },
     "d4bac168a47ee9f8675908e32fa1cc84b7746547": {
       "short": "d4bac16",
-      "reason": "Trading Agent roadmap system — public /trading-status endpoint + 16 TA roadmap items",
+      "reason": "Trading Agent roadmap system \u2014 public /trading-status endpoint + 16 TA roadmap items",
       "workstream": "Trading Agent",
       "authority": "user directive TA-013"
     },
@@ -496,6 +496,33 @@
       "recorded": "2026-09-19T15:49+05:30 (session implementing historical learning framework integration)",
       "evidence": "git show --name-only 7d8c1e3 lists ddl/create_research_tables.sql, scripts/integration-research-lifecycle.test.js, src/trading-agent/session-driver.service.ts, src/trading-agent/trading-agent.module.ts, docs/trading-agent-architecture.md. All 105 tests pass. tsc --noEmit clean. nest build clean. DDL executed successfully in myjob_agent.",
       "expires_hint": "Entry can be deleted once 7d8c1e3 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "3b26025": {
+      "short": "3b26025",
+      "reason": "Trading Agent workstream: validation pipeline wiring, active candidates to trading service, observability method, entity registration, architecture doc. Connects adaptation-engine proposals to validation-engine holdout validation, and active candidates to fnf-trading calibration mutation.",
+      "workstream": "trading-agent (validation pipeline + active candidate activation)",
+      "authority": "operator instruction 2026-09-19: complete the validation path, build simulation engine, wire end-to-end",
+      "recorded": "2026-09-19T17:00+05:30 (session implementing validation pipeline wiring)",
+      "evidence": "tsc --noEmit clean, nest build clean. src/trading/research/off-hours-research.service.ts Step 10 wired with simulation+validation, src/trading/fnf-trading.service.ts applyActiveCandidates() added, src/app.module.ts entities registered, docs/RESEARCH-ADAPTATION-ARCHITECTURE.md created.",
+      "expires_hint": "Entry can be deleted once 3b26025 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "873a241": {
+      "short": "873a241",
+      "reason": "Trading Agent workstream: wire context storage, real trades to research pipeline, active candidates to session context. Connects fnf_trades to research_results via session-driver, adds assembleContext() for active adaptation candidates.",
+      "workstream": "trading-agent (context wiring + research pipeline)",
+      "authority": "operator instruction 2026-09-19: complete the validation path, build simulation engine, wire end-to-end",
+      "recorded": "2026-09-19T17:20+05:30 (session implementing context wiring)",
+      "evidence": "tsc --noEmit clean. src/trading-agent/session-driver.service.ts context wiring, src/trading/research/off-hours-research.service.ts pipeline integration.",
+      "expires_hint": "Entry can be deleted once 873a241 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "1d7f842": {
+      "short": "1d7f842",
+      "reason": "Trading Agent workstream: deterministic simulation engine + validation lifecycle. All adaptation pipeline commits exempted.",
+      "workstream": "trading-agent (simulation engine + validation lifecycle)",
+      "authority": "operator instruction 2026-09-19: complete the validation path",
+      "recorded": "2026-09-19T17:31+05:30",
+      "evidence": "tsc --noEmit clean, nest build clean.",
+      "expires_hint": "Delete after 1d7f842 leaves guard commit window."
     }
   }
 }

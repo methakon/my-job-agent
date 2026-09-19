@@ -9,6 +9,7 @@ import { HistoricalAnalyticsService, FullAnalyticsResult } from '../unified-mark
 import { HistoricalContextBuilderService } from '../unified-market-data/historical-context-builder.service';
 import { ValidationEngineService, TradeRecord } from './validation-engine.service';
 import { AdaptationEngineService } from './adaptation-engine.service';
+import { SimulationEngineService } from './simulation-engine.service';
 import { ValidationResult } from './validation-result.entity';
 import { UnifiedMarketDataService } from '../unified-market-data/unified-market-data.service';
 import { v4 as uuid } from 'uuid';
@@ -81,6 +82,7 @@ export class OffHoursResearchService {
     private readonly contextBuilder: HistoricalContextBuilderService,
     private readonly validationEngine: ValidationEngineService,
     private readonly adaptationEngine: AdaptationEngineService,
+    private readonly simulationEngine: SimulationEngineService,
     private readonly unifiedData: UnifiedMarketDataService,
   ) {}
 
@@ -211,13 +213,61 @@ export class OffHoursResearchService {
           // Move to VALIDATING status
           await this.adaptationEngine.moveToValidating(proposed.id);
           
-          // Validation requires simulation data (trades with proposed parameters)
-          // Without simulation engine, we cannot generate candidate trades
-          // This correctly keeps candidates in VALIDATING status until simulation is added
-          this.logger.log(
-            `Candidate ${proposed.paramName} (${proposed.id}): PROPOSED → VALIDATING ` +
-            `— awaiting simulation data for validation`
+          // Load baseline trades for simulation
+          const baselineTrades = await this.simulationEngine.loadBaseline();
+          
+          // Simulate candidate trades with proposed parameter
+          const candidateTrades = this.simulationEngine.simulateCandidateTrades(
+            baselineTrades,
+            proposed,
           );
+          
+          if (candidateTrades.length === 0) {
+            // No trades survive under proposed parameter — reject
+            this.logger.log(
+              `Candidate ${proposed.paramName} (${proposed.id}): VALIDATING → REJECTED ` +
+              `— 0 candidate trades (parameter too restrictive)`
+            );
+            proposed.status = 'REJECTED';
+            proposed.reason += ' | Rejected: 0 candidate trades (parameter too restrictive)';
+            await this.candidates.save(proposed);
+            candidatesValidated++;
+            continue;
+          }
+          
+          if (baselineTrades.length < 10 || candidateTrades.length < 5) {
+            // Insufficient data for validation — reject
+            this.logger.log(
+              `Candidate ${proposed.paramName} (${proposed.id}): VALIDATING → REJECTED ` +
+              `— insufficient data (baseline=${baselineTrades.length}, candidate=${candidateTrades.length})`
+            );
+            proposed.status = 'REJECTED';
+            proposed.reason += ` | Rejected: insufficient data (baseline=${baselineTrades.length}, candidate=${candidateTrades.length})`;
+            await this.candidates.save(proposed);
+            candidatesValidated++;
+            continue;
+          }
+          
+          // Run deterministic validation
+          const result = await this.validationEngine.validateCandidate(
+            proposed.id,
+            baselineTrades,
+            candidateTrades,
+          );
+          
+          candidatesValidated++;
+          
+          if (result.passed) {
+            this.logger.log(
+              `Candidate ${proposed.paramName} (${proposed.id}): VALIDATING → APPROVED ` +
+              `— validation passed (winRate improvement: ${(result.candidate.winRate - result.baseline.winRate).toFixed(1)}pp)`
+            );
+          } else {
+            this.logger.log(
+              `Candidate ${proposed.paramName} (${proposed.id}): VALIDATING → REJECTED ` +
+              `— ${result.rejectionReasons.join('; ')}`
+            );
+          }
           
         } catch (err) {
           this.logger.warn(`Candidate proposal blocked: ${candidate.paramName} — ${err}`);

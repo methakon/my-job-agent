@@ -4,9 +4,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ResearchResult } from './research-result.entity';
 import { AdaptationCandidate } from './adaptation-candidate.entity';
 import { ValidationResult } from './validation-result.entity';
+import { FnfTrade } from '../fnf-trade.entity';
 import { OffHoursResearchService } from './off-hours-research.service';
 import { ValidationEngineService } from './validation-engine.service';
 import { AdaptationEngineService } from './adaptation-engine.service';
+import { SimulationEngineService } from './simulation-engine.service';
 import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-data.module';
 
 /**
@@ -24,6 +26,7 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
       ResearchResult,
       AdaptationCandidate,
       ValidationResult,
+      FnfTrade,
     ]),
     UnifiedMarketDataModule,
   ],
@@ -31,11 +34,13 @@ import { UnifiedMarketDataModule } from '../unified-market-data/unified-market-d
     OffHoursResearchService,
     ValidationEngineService,
     AdaptationEngineService,
+    SimulationEngineService,
   ],
   exports: [
     OffHoursResearchService,
     ValidationEngineService,
     AdaptationEngineService,
+    SimulationEngineService,
   ],
 })
 export class ResearchModule {}
