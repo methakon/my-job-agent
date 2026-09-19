@@ -191,6 +191,9 @@ export class UnifiedArchiveService {
       await queryRunner.startTransaction();
 
       // Step 2: INSERT IGNORE into history (idempotent — PK duplicates are skipped).
+      // MAINTENANCE: This column list is intentionally explicit, NOT derived
+      // from entity metadata. Live and history schema changes MUST update this
+      // column list together. Any schema change requires review before deployment.
       const insertCols =
         'id, instrumentKey, underlying, exchange, segment, instrumentType, expiry, strike, optionType, ' +
         'ltp, bid, ask, bidQty, askQty, volume, oi, previousOi, changeOi, iv, delta, gamma, theta, vega, ' +
