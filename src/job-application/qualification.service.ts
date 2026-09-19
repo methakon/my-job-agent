@@ -1452,3 +1452,185 @@ export class QualificationService {
     };
   }
 }
+
+/** JA-024: Standalone extractSeniority for near-miss rescue helpers.
+ * Duplicated from the class method to avoid `this` binding issues in standalone functions. */
+function extractSeniorityStandalone(text: string, experienceYears?: number | null): string | null {
+  const t = text.toLowerCase();
+  if (/\b(principal|staff\s*(engineer|)?|sr\.?|senior|lead|architect|head|director|vp|vice\s*president)\b/.test(t)) {
+    if (/\b(principal|director|head of|vp|vice president)\b/.test(t)) return 'director';
+    if (/\b(lead|architect)\b/.test(t)) return 'lead';
+    return 'senior';
+  }
+  if (/\b(mid|intermediate|2\.?-\s*years|3\.?-\s*years|4\.?-\s*years|3-5|5-7)\b/.test(t)) return 'mid';
+  if (experienceYears != null && experienceYears >= 5) return 'senior';
+  if (experienceYears != null && experienceYears >= 2) return 'mid';
+  if (/\b(junior|jr\.?|entry|associate|fresher|0-1|1-2)\b/.test(t)) return 'junior';
+  if (experienceYears != null && experienceYears < 2) return 'junior';
+  return null; // UNKNOWN
+}
+
+// ---- JA-024: Near-miss rescue helpers ----
+
+/** JA-024: Near-miss rescue classification result. */
+export interface NearMissRescue {
+  category: 'preferred-skill-upskill' | 'role-alternative' | 'experience-tweak' | 'full_reskill' | null;
+  reskillSuggestions: string[];
+  relatedJobs: string[];
+}
+
+/** JA-024: Suggest related roles based on a job title. */
+function suggestRelatedRoles(title: string): string[] {
+  const all = ['Senior Python Engineer', 'Backend Engineer', 'Full Stack Engineer', 'Software Engineer', 'Data Engineer'];
+  if (!title) return all.slice(0, 3);
+  const lower = title.toLowerCase();
+  if (lower.includes('python')) return ['Senior Python Engineer', 'Backend Engineer', 'Data Engineer'];
+  if (lower.includes('javascript') || lower.includes('frontend') || lower.includes('react')) return ['Full Stack Engineer', 'Frontend Engineer', 'Software Engineer'];
+  if (lower.includes('data') || lower.includes('ml') || lower.includes('machine')) return ['Data Engineer', 'Senior Python Engineer', 'Machine Learning Engineer'];
+  return all.slice(0, 3);
+}
+
+/** JA-024: Suggest an upskilling path for a skill. */
+function suggestUpskillPath(skill: string): string {
+  const paths: Record<string, string> = {
+    python: 'Complete advanced Python course + build 2 portfolio projects',
+    sql: 'Complete SQL optimization course + practice on real datasets',
+    ml: 'Complete ML fundamentals course + Kaggle competition',
+    devops: 'Complete DevOps certification + hands-on pipeline project',
+    kubernetes: 'Complete K8s certification + deploy sample app',
+    aws: 'Complete AWS certification + build cloud project',
+    docker: 'Complete Docker course + containerize sample app',
+    java: 'Complete advanced Java course + build Spring project',
+    react: 'Complete React advanced course + build portfolio app',
+    typescript: 'Complete TypeScript course + migrate JS project',
+  };
+  return paths[skill] || `Complete ${skill} upskilling course`;
+}
+
+/** JA-024: Suggest a reskilling path for a skill. */
+function suggestReskillPath(skill: string): string {
+  const paths: Record<string, string> = {
+    python: 'Enroll in intensive Python bootcamp (12 weeks) + internship',
+    sql: 'Enroll in data engineering bootcamp (8 weeks) + projects',
+    ml: 'Enroll in ML engineering bootcamp (16 weeks) + capstone',
+    devops: 'Enroll in DevOps bootcamp (10 weeks) + certification',
+    kubernetes: 'Enroll in cloud native bootcamp (8 weeks) + cert',
+    aws: 'Enroll in cloud architect bootcamp (12 weeks) + cert',
+    docker: 'Enroll in containerization course (4 weeks) + projects',
+    java: 'Enroll in Java enterprise bootcamp (10 weeks) + project',
+    react: 'Enroll in frontend bootcamp (8 weeks) + portfolio',
+    typescript: 'Enroll in TypeScript bootcamp (6 weeks) + migrate project',
+  };
+  return paths[skill] || `Enroll in ${skill} reskilling program`;
+}
+
+/** JA-024: Classify a near-miss score (40-64) into a rescue category. */
+export function classifyNearMissRescue(
+  compositeScore: number,
+  ev: QualificationEvidence,
+  lead: Lead | null = null,
+  profile: CandidateProfile | null = null,
+): NearMissRescue {
+  const gaps = ev.careerFit.gapTags || [];
+  const gapCount = gaps.length;
+  const base = makeNearMissRescue(gapCount, lead, profile);
+  if (!base.category) {
+    return { category: 'preferred-skill-upskill', reskillSuggestions: ['No significant gaps — proceed with standard application'], relatedJobs: suggestRelatedRoles(lead?.title || '') };
+  }
+  return base;
+}
+
+/** JA-024: Determine if a composite score falls in near-miss range (40-64). */
+export function isNearMissScore(compositeScore: number): boolean {
+  return compositeScore >= 40 && compositeScore < 65;
+}
+
+/** JA-024: Decide near-miss rescue from full qualification context. */
+export function decideNearMissRescue(
+  compositeScore: number,
+  ev: QualificationEvidence,
+  lead: Lead | null,
+  profile: CandidateProfile | null,
+): { decision: QualificationDecision; rescueCategory: NonNullable<NearMissRescue['category']> | null; rescueUrl: string | null; rescueAction: string | null } {
+  if (!isNearMissScore(compositeScore)) {
+    return { decision: 'QUALIFIED', rescueCategory: null, rescueUrl: null, rescueAction: null };
+  }
+
+  const rescue = classifyNearMissRescue(compositeScore, ev, lead, profile);
+  if (!rescue.category) {
+    return { decision: 'NEAR_MISS', rescueCategory: null, rescueUrl: null, rescueAction: null };
+  }
+
+  const rescueUrl = `https://jobs.example.com/rescue/${encodeURIComponent(lead?.id || 'unknown')}`;
+  const rescueAction = rescue.category === 'preferred-skill-upskill'
+    ? 'Recommend upskilling in preferred skills; candidate may qualify for related roles'
+    : rescue.category === 'role-alternative'
+    ? 'Consider alternative roles matching candidate profile'
+    : rescue.category === 'experience-tweak'
+    ? 'Adjust experience expectations; candidate may qualify with additional experience'
+    : 'Recommend reskilling program; candidate may qualify after upskilling';
+
+  return { decision: 'NEAR_MISS', rescueCategory: rescue.category, rescueUrl, rescueAction };
+}
+
+// ---- helpers ----
+
+function makeNearMissRescue(
+  gapCount: number,
+  lead: Lead | null,
+  profile: CandidateProfile | null,
+): NearMissRescue {
+  if (gapCount <= 0) {
+    let category: 'preferred-skill-upskill' | 'role-alternative' | 'experience-tweak' | 'full_reskill' | null = null;
+    let relatedJobs: string[] = [];
+    if (lead && profile) {
+      const leadTitle = (lead.title || '').toLowerCase();
+      const profileTitle = (profile.headline || '').toLowerCase();
+      if (leadTitle !== profileTitle && leadTitle !== '' && profileTitle !== '') {
+        category = 'role-alternative';
+        relatedJobs = suggestRelatedRoles(leadTitle);
+      }
+    }
+    if (!category && lead && profile) {
+      const leadSeniority = extractSeniorityStandalone((lead.title || ''));
+      const profileExp = profile.experienceYears || 0;
+      if (leadSeniority === 'junior' && profileExp < 2) {
+        category = 'experience-tweak';
+      } else if (leadSeniority === 'senior' && profileExp < 5) {
+        category = 'experience-tweak';
+      }
+    }
+    if (!category) {
+      category = 'preferred-skill-upskill';
+    }
+    return { category: category!, reskillSuggestions: category === 'preferred-skill-upskill' ? ['No significant gaps — proceed with standard application'] : [], relatedJobs };
+  }
+
+  if (gapCount <= 2) {
+    return {
+      category: 'preferred-skill-upskill',
+      reskillSuggestions: gapsFor(gapCount, lead, profile).map(g => `Upskill in ${g}: ${suggestUpskillPath(g)}`),
+      relatedJobs: suggestRelatedRoles((lead?.title || '')),
+    };
+  }
+
+  if (gapCount <= 4) {
+    return {
+      category: 'full_reskill',
+      reskillSuggestions: gapsFor(gapCount, lead, profile).map(g => `Reskill in ${g}: ${suggestReskillPath(g)}`),
+      relatedJobs: suggestRelatedRoles((lead?.title || '')),
+    };
+  }
+
+  return {
+    category: 'full_reskill',
+    reskillSuggestions: gapsFor(gapCount, lead, profile).slice(0, 5).map(g => `Priority reskill: ${g}`),
+    relatedJobs: suggestRelatedRoles((lead?.title || '')),
+  };
+}
+
+function gapsFor(count: number, lead: Lead | null, profile: CandidateProfile | null): string[] {
+  // Return a deterministic list of gap skill names based on count
+  const all = ['python', 'sql', 'ml', 'devops', 'kubernetes', 'aws', 'docker', 'java', 'react', 'typescript'];
+  return all.slice(0, Math.min(count, all.length));
+}
