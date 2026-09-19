@@ -487,6 +487,15 @@
       "authority": "operator instruction 2026-09-19",
       "recorded": "2026-09-19T02:30+05:30",
       "evidence": "All reliability tests pass"
+    },
+    "7d8c1e3": {
+      "short": "7d8c1e3",
+      "reason": "Trading Agent workstream: research tables DDL (research_results, adaptation_candidates, validation_results), session driver wiring (off-hours trigger + context loading), and integration test suite (31 tests A-L).",
+      "workstream": "trading-agent (historical learning framework integration)",
+      "authority": "operator autonomous directive 2026-09-19: proceed autonomously through safe implementation, testing, and commits",
+      "recorded": "2026-09-19T15:49+05:30 (session implementing historical learning framework integration)",
+      "evidence": "git show --name-only 7d8c1e3 lists ddl/create_research_tables.sql, scripts/integration-research-lifecycle.test.js, src/trading-agent/session-driver.service.ts, src/trading-agent/trading-agent.module.ts, docs/trading-agent-architecture.md. All 105 tests pass. tsc --noEmit clean. nest build clean. DDL executed successfully in myjob_agent.",
+      "expires_hint": "Entry can be deleted once 7d8c1e3 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
