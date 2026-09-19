@@ -77,6 +77,7 @@
     "verify:vanna-charm": "node scripts/vanna-charm-replay.js",
     "test:selection-brief": "npm run build && node scripts/selection-brief.test.js",
     "test:iv-rule-guard": "npm run build && node scripts/iv-rule-guard.test.js",
+    "report:option-performance": "node scripts/item79-option-expression-performance.js",
     "test:gap-dataset": "npm run build && node scripts/gap-dataset.test.js",
     "verify:gap-dataset": "node scripts/gap-dataset-replay.js",
     "test:gap-labels": "npm run build && node scripts/gap-labels.test.js",

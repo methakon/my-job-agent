@@ -47,6 +47,7 @@ export function mysqlPoolTuning(): Record<string, number | boolean> {
 		...mysqlKeepAliveOptions(),
 		maxIdle: 2,
 		idleTimeout: 30_000,
+		acquireTimeout: 10_000,
 	};
 }
 
@@ -70,10 +71,7 @@ export function mysqlConfig(databaseName: string): TypeOrmModuleOptions {
 		/** Hard timeout on the initial TCP connect — prevents a dead tunnel from
 		 *  wedging the entire NestJS bootstrap. */
 		connectTimeout: 15_000,
-		/** Hard timeout on acquiring a pool connection — if every pool slot is
-		 *  held by half-dead sockets, the next query fails fast instead of
-		 *  hanging forever. */
-		acquireTimeout: 10_000,
+		// acquireTimeout is a pool-only option — see mysqlPoolTuning()
 		/** TypeORM DataSource retry policy for transient connection failures. */
 		retryAttempts: 3,
 		retryDelay: 2_000,
