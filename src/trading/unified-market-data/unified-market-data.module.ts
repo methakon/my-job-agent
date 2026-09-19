@@ -7,6 +7,9 @@ import { UnifiedMarketSnapshotHistory } from './unified-market-snapshot-history.
 import { MarketDataFeedLease } from './market-data-feed-lease.entity';
 import { UnifiedMarketDataService } from './unified-market-data.service';
 import { UnifiedArchiveService } from './unified-archive.service';
+import { HistoricalResearchService } from './historical-research.service';
+import { HistoricalAnalyticsService } from './historical-analytics.service';
+import { HistoricalContextBuilderService } from './historical-context-builder.service';
 import { FeedHealthService } from './feed-health.service';
 import { FeedArbitrationService } from './feed-arbitration.service';
 import { DedicatedLeaseStore, LEASE_STORE } from './lease-connection.store';
@@ -42,11 +45,15 @@ import { DbHealthService } from '../../shared/db-health.service';
     UnifiedArchiveService,
     FeedHealthService,
     FeedArbitrationService,
+    // Historical research services (off-hours only)
+    HistoricalResearchService,
+    HistoricalAnalyticsService,
+    HistoricalContextBuilderService,
     // One dedicated connection for the arbitration control path only.
     { provide: LEASE_STORE, useFactory: () => new DedicatedLeaseStore() },
     // Deterministic, provider-independent canonical tick interpreter.
     TickInterpreterService,
   ],
-  exports: [PersistenceHealthMachine, DbHealthService, UnifiedMarketDataService, UnifiedArchiveService, FeedHealthService, FeedArbitrationService, TickInterpreterService],
+  exports: [PersistenceHealthMachine, DbHealthService, UnifiedMarketDataService, UnifiedArchiveService, HistoricalResearchService, HistoricalAnalyticsService, HistoricalContextBuilderService, FeedHealthService, FeedArbitrationService, TickInterpreterService],
 })
 export class UnifiedMarketDataModule {}
