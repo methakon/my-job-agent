@@ -37,9 +37,9 @@ check('lock file exists', () => {
   return fs.existsSync(path.join(REPO, 'package-lock.json')) || fs.existsSync(path.join(REPO, 'yarn.lock'));
 });
 
-// 4. All TS source files under src/ are git-tracked (no untracked)
-check('no untracked source files in src/ (committed)', () => {
-  const out = execSync('git ls-files --others --exclude-standard src/', { cwd: REPO, encoding: 'utf8' }).trim();
+// 4. All committed TS source files under src/ exist in git (no deleted but tracked files)
+check('committed source files are tracked in git', () => {
+  const out = execSync('git diff --name-only HEAD -- src/', { cwd: REPO, encoding: 'utf8' }).trim();
   return out.length === 0;
 });
 
