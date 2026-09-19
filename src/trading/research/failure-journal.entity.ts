@@ -99,6 +99,34 @@ export class FailureJournal {
   @Column({ type: 'varchar', length: 48 })
   buildSha!: string;
 
+  /**
+   * ITEM 210 — Retrieve lessons using relevance + measured evidence.
+   *
+   * Relevance score: 0..1 indicating how relevant this failure is to a given query context.
+   * Measured evidence: structured JSON with quantitative metrics backing the failure diagnosis.
+   */
+  /** Relevance score for retrieval (0..1, computed at query time). */
+  @Column({ type: 'decimal', precision: 5, scale: 4, nullable: true })
+  relevanceScore!: number | null;
+
+  /** Tags for search/relevance indexing (e.g., ['gap', 'slippage', 'cost']). */
+  @Column({ type: 'simple-json', nullable: true })
+  tags!: string[] | null;
+
+  /** Measured evidence: quantitative metrics backing the failure (sample size, p-value, effect size). */
+  @Column({ type: 'json', nullable: true })
+  measuredEvidence!: {
+    sampleSize?: number;
+    pValue?: number;
+    effectSize?: number;
+    confidenceInterval?: [number, number];
+    baselineComparison?: string;
+  } | null;
+
+  /** Human-readable lesson learned from this failure. */
+  @Column({ type: 'text', nullable: true })
+  lessonLearned!: string | null;
+
   /** Schema version. */
   @Column({ type: 'int', default: 1 })
   schemaVersion!: number;

@@ -547,3 +547,92 @@ export function checkScenarioRisk(input: ScenarioRiskInput): ScenarioRiskResult 
     reason: `Scenario P&L ${estimatedPnl.toFixed(2)} within limits for ${input.symbol}`,
   };
 }
+
+// ── ITEM 272: Emergency Kill Switch / Flatten Path ─────────────────────────
+
+export type FlattenPriority = 'IMMEDIATE' | 'NEXT_CANDLE' | 'END_OF_SESSION';
+
+export interface FlattenCommand {
+  readonly targetSymbol: string;
+  readonly priority: FlattenPriority;
+  readonly reason: string;
+  readonly triggeredAtMs: number;
+  /** If true, cancel all pending orders for this symbol first. */
+  readonly cancelPendingOrders: boolean;
+}
+
+export interface FlattenResult {
+  readonly allowed: boolean;
+  readonly symbol: string;
+  readonly reason: string;
+  readonly positionQuantity: number;
+  readonly estimatedExitPrice: number | null;
+  readonly estimatedSlippage: number;
+}
+
+/**
+ * Emergency flatten: determine if a position can be flattened and estimate exit cost.
+ * This is a PURE function — it does NOT place orders, it only computes the flatten plan.
+ */
+export function planEmergencyFlatten(
+  command: FlattenCommand,
+  currentPositions: readonly PositionRecord[],
+  currentQuotes: Map<string, { bid: number | null; ask: number | null; ltp: number }>,
+): FlattenResult {
+  const pos = currentPositions.find((p) => p.symbol === command.targetSymbol);
+  if (!pos) {
+    return {
+      allowed: false,
+      symbol: command.targetSymbol,
+      reason: `No position found for ${command.targetSymbol}`,
+      positionQuantity: 0,
+      estimatedExitPrice: null,
+      estimatedSlippage: 0,
+    };
+  }
+
+  const quote = currentQuotes.get(command.targetSymbol);
+  if (!quote) {
+    return {
+      allowed: true,
+      symbol: command.targetSymbol,
+      reason: `Position exists but no quote available — must flatten at market`,
+      positionQuantity: Math.abs(pos.pnl) > 0 ? 1 : 0, // simplified
+      estimatedExitPrice: null,
+      estimatedSlippage: 0,
+    };
+  }
+
+  // Flatten: sell at bid (aggressive sell to exit a long) or buy at ask (exit a short)
+  const exitPrice = pos.pnl >= 0 ? (quote.bid ?? quote.ltp) : (quote.ask ?? quote.ltp);
+  const slippage = Math.abs(exitPrice - quote.ltp);
+
+  return {
+    allowed: true,
+    symbol: command.targetSymbol,
+    reason: `Emergency flatten: ${command.reason} at priority ${command.priority}`,
+    positionQuantity: 1, // simplified for risk engine
+    estimatedExitPrice: exitPrice,
+    estimatedSlippage: slippage,
+  };
+}
+
+/**
+ * Evaluate whether the kill switch should trigger an emergency flatten.
+ * Returns flatten commands for all positions if triggered.
+ */
+export function evaluateEmergencyFlatten(
+  killSwitch: KillSwitchState,
+  currentPositions: readonly PositionRecord[],
+  nowMs: number,
+): readonly FlattenCommand[] {
+  if (!killSwitch.active) return [];
+
+  return currentPositions.map((pos) => ({
+    targetSymbol: pos.symbol,
+    priority: 'IMMEDIATE' as FlattenPriority,
+    reason: `Kill switch active: ${killSwitch.reason}`,
+    triggeredAtMs: nowMs,
+    cancelPendingOrders: true,
+  }));
+}
