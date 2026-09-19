@@ -80,6 +80,15 @@ export interface JobQualityResult extends EvaluatorResult {
   ageDays?: number | null;
 }
 
+export interface ApplicationRoiResult extends EvaluatorResult {
+  expectedValue: number;       // 0-100 composite expected value
+  effortEstimate: number;      // 1-5 effort scale (1=easy, 5=hard)
+  channelSuccessProb: number;  // 0-100 estimated channel success probability
+  responseLikelihood: number;  // 0-100 estimated response likelihood
+  tailoringCost: number;       // 1-5 tailoring effort scale
+  valueBreakdown: string[];    // human-readable breakdown
+}
+
 export interface CareerFitResult extends EvaluatorResult {
   overlapTags: string[];
   gapTags: string[];
@@ -99,6 +108,7 @@ export interface QualificationEvidence {
   jobQuality: JobQualityResult;
   careerFit: CareerFitResult;
   channelReady: ChannelReadyResult;
+  applicationRoi?: ApplicationRoiResult;
 }
 
 export interface QualificationResult {
@@ -218,6 +228,10 @@ export class QualificationService {
     const jobQuality = this.assessJobQuality(lead, params.channelInfo?.source ?? 'scout');
     const careerFit = this.assessCareerFit(profile, lead);
     const channelReady = this.assessChannelReady(lead, params.channelInfo);
+    const applicationRoi = this.assessApplicationRoi(
+      { eligibility, evidence, jobQuality, careerFit, channelReady },
+      lead,
+    );
 
     const evidenceRecord: QualificationEvidence = {
       eligibility,
@@ -225,6 +239,7 @@ export class QualificationService {
       jobQuality,
       careerFit,
       channelReady,
+      applicationRoi,
     };
 
     const compositeScore = this.computeComposite(evidenceRecord);
@@ -1024,6 +1039,95 @@ export class QualificationService {
       hasAnswerBank,
       hasCv,
       hasAdapter,
+    };
+  }
+
+  // ---- JA-022: Application ROI ----------------------------------------------
+  // Expected value scoring: ranks jobs by expected return, not just match score.
+  // Considers qualification probability, job quality, channel success probability,
+  // effort, response likelihood and tailoring cost.
+  private assessApplicationRoi(ev: QualificationEvidence, lead: Lead): ApplicationRoiResult {
+    const reasons: string[] = [];
+    const valueBreakdown: string[] = [];
+
+    // ---- qualification probability (from composite components) ----
+    // Derived from evidence + career fit quality
+    const qualProb = Math.min(100,
+      (ev.evidence.score * 0.5) +          // skill match weight
+      (ev.careerFit.score * 0.3) +         // career alignment weight
+      (ev.jobQuality.score * 0.2)          // job quality weight
+    );
+    reasons.push(`qualification probability: ${Math.round(qualProb)}%`);
+
+    // ---- job quality contribution ----
+    const jqWeight = ev.jobQuality.label === 'high' ? 1.0 :
+                     ev.jobQuality.label === 'medium' ? 0.7 :
+                     ev.jobQuality.label === 'low' ? 0.4 : 0.2;
+    valueBreakdown.push(`job quality factor: ${(jqWeight * 100).toFixed(0)}%`);
+
+    // ---- channel success probability ----
+    // Based on channel readiness and source
+    const channelProb = ev.channelReady.passed ? 65 :
+                        ev.channelReady.hasAnswerBank ? 45 :
+                        ev.channelReady.hasCv ? 30 : 15;
+    reasons.push(`channel success probability: ${channelProb}%`);
+
+    // ---- response likelihood ----
+    // Based on job quality + career fit
+    const responseLikely = Math.round(
+      (ev.jobQuality.score * 0.4) +
+      (ev.careerFit.score * 0.4) +
+      (qualProb * 0.2)
+    );
+    reasons.push(`response likelihood: ${responseLikely}%`);
+
+    // ---- effort estimate (1-5 scale) ----
+    // Higher effort for: missing data, low job quality, poor channel readiness
+    let effort = 2; // baseline
+    if (!ev.channelReady.hasAnswerBank) effort += 1;
+    if (!ev.channelReady.hasCv) effort += 1;
+    if (ev.jobQuality.label === 'unknown') effort += 1;
+    if (ev.evidence.gapSeverity === 'MAJOR' || ev.evidence.gapSeverity === 'BLOCKING') effort += 1;
+    effort = Math.max(1, Math.min(5, effort));
+    reasons.push(`effort estimate: ${effort}/5`);
+
+    // ---- tailoring cost (1-5 scale) ----
+    // Higher cost for: many gap skills, low career fit, stale job
+    let tailoringCost = 2;
+    if (ev.careerFit.gapTags.length > 3) tailoringCost += 1;
+    if (!ev.careerFit.aligned) tailoringCost += 1;
+    if (ev.jobQuality.flags?.includes('stale') || ev.jobQuality.flags?.includes('very_stale')) tailoringCost += 1;
+    tailoringCost = Math.max(1, Math.min(5, tailoringCost));
+    reasons.push(`tailoring cost: ${tailoringCost}/5`);
+
+    // ---- expected value (0-100) ----
+    // EV = qualProb * channelProb/100 * responseLikely/100 * qualityFactor * effortInverse
+    // Normalized to 0-100 scale
+    const qualityFactor = jqWeight;
+    const effortInverse = (6 - effort) / 5;  // 1→1.0, 5→0.2
+    const tailoringInverse = (6 - tailoringCost) / 5;
+    const expectedValue = Math.round(
+      qualProb *
+      (channelProb / 100) *
+      (responseLikely / 100) *
+      qualityFactor *
+      effortInverse *
+      tailoringInverse *
+      100
+    );
+
+    valueBreakdown.push(`expected value: ${expectedValue} (qual=${Math.round(qualProb)}% × channel=${channelProb}% × response=${responseLikely}% × quality=${Math.round(qualityFactor*100)}% × effort=${(effortInverse*100).toFixed(0)}% × tailoring=${(tailoringInverse*100).toFixed(0)}%)`);
+
+    return {
+      passed: expectedValue >= 10,
+      score: expectedValue,
+      reasons,
+      expectedValue,
+      effortEstimate: effort,
+      channelSuccessProb: channelProb,
+      responseLikelihood: responseLikely,
+      tailoringCost,
+      valueBreakdown,
     };
   }
 
