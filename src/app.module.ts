@@ -6,6 +6,8 @@ import { mysqlConfig } from './shared/db.config';
 import { CandidateProfile } from './profile/candidate-profile.entity';
 import { CandidateEvidenceService } from './job-application/candidate-evidence.service';
 import { CandidateEvidenceLibraryService } from './job-application/candidate-evidence-library.service';
+import { ChannelLearningService } from './job-application/channel-learning.service';
+import { ATSQuestionDiscoveryService } from './job-application/ats-question-discovery.service';
 import { CVStrategyService } from './job-application/cv-strategy.service';
 import { CVCustomizationService } from './job-application/cv-customization.service';
 import { CVDriftProtectionService } from './job-application/cv-drift-protection.service';
@@ -216,6 +218,8 @@ import {
     PatternEngineService, PatternSignalDispatchService,
     CandidateEvidenceService,
     CandidateEvidenceLibraryService,
+    ChannelLearningService,
+    ATSQuestionDiscoveryService,
     CVStrategyService,
     CVCustomizationService,
     CVDriftProtectionService,
