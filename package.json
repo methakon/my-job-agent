@@ -101,7 +101,12 @@
     "test:entry-policy": "node scripts/entry-policy.test.js",
     "gate:status": "node scripts/gate-status.js",
     "gate:check": "node scripts/gate-close-check.js",
-    "gate:hooks:install": "chmod +x scripts/hooks/pre-push && git config core.hooksPath scripts/hooks && echo 'gate-close pre-push guard installed (core.hooksPath=scripts/hooks)'"
+    "gate:hooks:install": "chmod +x scripts/hooks/pre-push && git config core.hooksPath scripts/hooks && echo 'gate-close pre-push guard installed (core.hooksPath=scripts/hooks)'",
+    "test:negative-indefinite-hold": "node scripts/negative-test-indefinite-hold.js",
+    "test:negative-market-making": "node scripts/negative-test-market-making-excluded.js",
+    "test:negative-execution-adjusted": "node scripts/negative-test-execution-adjusted-labels.js",
+    "test:negative-holdout": "node scripts/negative-test-holdout-protection.js",
+    "test:negative-all": "node scripts/negative-test-indefinite-hold.js && node scripts/negative-test-market-making-excluded.js && node scripts/negative-test-execution-adjusted-labels.js && node scripts/negative-test-holdout-protection.js"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1127.0",
