@@ -46,8 +46,8 @@ import { OptionTradingPageController } from './trading/option-trading-page.contr
 import { TradeBookModule } from './trading/trade-book.module';
 import { FnoMarketDataService } from './trading/fno-market-data.service';
 import { FnoMarketDataController } from './trading/fno-market-data.controller';
-import { FyersToken } from './trading/fyers-token.entity';
-import { FyersTokenService } from './trading/fyers-token.service';
+import { ProviderToken } from './trading/provider-token.entity';
+import { ProviderTokenService } from './trading/provider-token.service';
 import { FyersOAuthController } from './trading/fyers-oauth.controller';
 import { FyersAuthController } from './trading/fyers-auth.controller';
 import { MarketDataInspectionController } from './trading/market-data-inspection.controller';
@@ -168,7 +168,7 @@ import {
       InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem,
       FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote,
       FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport,
-      SandboxTick, JobApplicationRoadmapItem, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session,
+      SandboxTick, JobApplicationRoadmapItem, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, ProviderToken, AgentTodoLog, Session,
       ProjectClarification,
       SideIncomeOpportunity, DatabaseSyncAudit, UpstoxPortfolio, UpstoxTrade,
       // Upstox LIVE paper entities (isolated)
@@ -213,7 +213,7 @@ import {
     DailyDigestService, LinkedInProfileService, EmailTrackerService, InterviewPrepService, AstroMuhurtaService,
     AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService, QualificationService,
     FnfTradingService, FnoMarketDataService, FnfOptionChainService, MarketDataInspectionService, FeatureEngineService,
-    UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, TradingRoadmapService, FyersTokenService,
+    UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, TradingRoadmapService, ProviderTokenService,
     ProjectClarificationService,
     PatternEngineService, PatternSignalDispatchService,
     CandidateEvidenceService,

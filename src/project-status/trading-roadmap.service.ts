@@ -255,7 +255,7 @@ export class TradingRoadmapService {
         item_order: 7,
         item: 'TA-007 FYERS token lifecycle finalisation',
         status: 'in_progress',
-        note: 'FyersTokenService exists with refresh/rotate. FYERS received 146K+ ticks in production. Auto-refresh on expiry needs verification.',
+        note: 'ProviderTokenService (unified provider_tokens table) with refresh/rotate. FYERS received 146K+ ticks in production. Auto-refresh on expiry needs verification.',
         instr: 'Verify: auto-refresh, expiry handling, DB persistence, reconnection after token failure.',
         doneWhen: 'Token refresh tested end-to-end, expiry handled, DB persistence proven',
       },

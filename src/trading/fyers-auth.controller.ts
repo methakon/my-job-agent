@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { BypassAuth } from '../auth/bypass-auth.decorator';
-import { FyersTokenService } from './fyers-token.service';
+import { ProviderTokenService } from './provider-token.service';
 import * as querystring from 'querystring';
 
 /**
@@ -18,7 +18,7 @@ import * as querystring from 'querystring';
  * 1. GET /trading/fyers/auth-url → returns authorization URL
  * 2. User opens URL, authorizes, gets redirected with auth_code
  * 3. The callback (or this exchange-token endpoint) exchanges the auth_code
- *    and STORES the resulting tokens encrypted in fyers_tokens (single active
+ *    and STORES the resulting tokens encrypted in provider_tokens (single active
  *    row, updated in place — never a new row).
  * 4. Runtime consumers (market data, history scripts) read the token from the
  *    DATABASE; nothing is written to .env.
@@ -29,7 +29,7 @@ import * as querystring from 'querystring';
 export class FyersAuthController {
   private readonly FYERS_API_BASE = 'https://api-t1.fyers.in/api/v3';
 
-  constructor(private readonly fyersTokenService: FyersTokenService) {}
+  constructor(private readonly fyersTokenService: ProviderTokenService) {}
 
   // Compute SHA-256 hex of APP_ID:SECRET for validate-authcode
   private computeAppIdHash(appId: string, appSecret: string): string {
@@ -161,7 +161,7 @@ export class FyersAuthController {
       return res.json({
         success: true,
         message:
-          'FYERS token exchanged and stored securely in the database (fyers_tokens, encrypted, single active row). Runtime reads the token from the DB — no .env update needed.',
+          'FYERS token exchanged and stored securely in the database (provider_tokens, encrypted, single active row). Runtime reads the token from the DB — no .env update needed.',
       });
     } catch (error) {
       throw new HttpException(

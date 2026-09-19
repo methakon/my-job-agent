@@ -16,7 +16,7 @@ export const TABLE_OWNERSHIP: Record<string, 'ORACLE_AUTHORITATIVE' | 'LOCAL_AUT
 	fnf_portfolios: 'ORACLE_AUTHORITATIVE',
 	fnf_trade_reflections: 'ORACLE_AUTHORITATIVE',
 	fnf_trade_reports: 'ORACLE_AUTHORITATIVE',
-	fyers_tokens: 'ORACLE_AUTHORITATIVE',
+	provider_tokens: 'ORACLE_AUTHORITATIVE',
 	sandbox_ticks: 'ORACLE_AUTHORITATIVE',
 	trade_book_imports: 'LOCAL_AUTHORITATIVE',
 	trade_book_import_log: 'LOCAL_AUTHORITATIVE',

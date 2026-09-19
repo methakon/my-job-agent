@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { BypassAuth } from '../auth/bypass-auth.decorator';
-import { FyersTokenService } from './fyers-token.service';
+import { ProviderTokenService } from './provider-token.service';
 import * as crypto from 'crypto';
 import * as querystring from 'querystring';
 
@@ -32,7 +32,7 @@ import * as querystring from 'querystring';
 export class FyersOAuthController {
   private readonly FYERS_API_BASE = 'https://api-t1.fyers.in/api/v3';
 
-  constructor(private readonly fyersTokenService: FyersTokenService) {}
+  constructor(private readonly fyersTokenService: ProviderTokenService) {}
 
   /**
    * Step 1: Generate FYERS login URL and redirect browser.
@@ -189,7 +189,9 @@ export class FyersOAuthController {
       await this.fyersTokenService.storeTokens(
         exchangeResult.access_token,
         exchangeResult.refresh_token || null,
-        exchangeResult.fyId || null,
+        exchangeResult.fyId || 'unknown',
+        'fyers',
+        'live',
         authCodeValue,
       );
 
