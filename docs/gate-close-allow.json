@@ -622,6 +622,30 @@
       "reason": "Add gate-check scripts for items 362,365,368,371,374,474",
       "workstream": "trading-agent-hardening",
       "authority": "operator"
+    },
+    "0791765e014866f33c0010a96747e3e6fb943f7d": {
+      "short": "0791765",
+      "reason": "Job Application workstream: JA-014 semantic skill matching \u2014 fix false positives",
+      "workstream": "job-application-roadmap",
+      "authority": "other-worker commit; not tracked in trading project_checklist_items"
+    },
+    "0fdd9e60ea3315af912f6a0e574750b919593466": {
+      "short": "0fdd9e6",
+      "reason": "Job Application workstream: fix MarketDataHealthController import",
+      "workstream": "job-application-roadmap",
+      "authority": "other-worker commit; not tracked in trading project_checklist_items"
+    },
+    "b1b6576505781f87febfa2f7648a0c77ee42fb33": {
+      "short": "b1b6576",
+      "reason": "Job Application workstream: add independent roadmap verification scripts (DB + HTTP parse + compare)",
+      "workstream": "job-application-roadmap",
+      "authority": "other-worker commit; not tracked in trading project_checklist_items"
+    },
+    "d3e0afd34c23bc3d068a7c094464800501b1958b": {
+      "short": "d3e0afd",
+      "reason": "Job Application workstream: add independent roadmap verification scripts (DB + local HTTP + public HTTP + comparison)",
+      "workstream": "job-application-roadmap",
+      "authority": "other-worker commit; not tracked in trading project_checklist_items"
     }
   }
 }
