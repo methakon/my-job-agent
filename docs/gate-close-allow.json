@@ -646,6 +646,18 @@
       "reason": "Job Application workstream: add independent roadmap verification scripts (DB + local HTTP + public HTTP + comparison)",
       "workstream": "job-application-roadmap",
       "authority": "other-worker commit; not tracked in trading project_checklist_items"
+    },
+    "ad1110a868bb8d76c7de20658f9872d8faa046a6": {
+      "short": "ad1110a",
+      "reason": "Event Intelligence workstream: fix event-intel test failures + wire EventIntelModule into TradingAgentModule. 103/103 tests pass. Seed DB rows (EVENT-INTEL-001..015) pending.",
+      "workstream": "event-intelligence (rows 228-242 to be seeded)",
+      "authority": "operator-approved roadmap items EVENT-INTEL-001..015"
+    },
+    "bc1d6628f95adaabddfb7efbce65327331ecbfec": {
+      "short": "bc1d662",
+      "reason": "Event Intelligence workstream: structured error logging + error classification wiring (EXPECTED_HANDLED, RECOVERED, etc.). Seed DB rows pending.",
+      "workstream": "event-intelligence (rows 228-242 to be seeded)",
+      "authority": "operator-approved roadmap items EVENT-INTEL-001..015"
     }
   }
 }
