@@ -576,6 +576,12 @@
       "workstream": "trading-agent",
       "authority": "roadmap-execution",
       "added": "2026-09-19T16:40:44.557Z"
+    },
+    "5af632a861bd32af8d0346bf8a852edefc20da55": {
+      "reason": "gate-close: allow 6bec56e",
+      "workstream": "trading-agent",
+      "authority": "roadmap-execution",
+      "added": "2026-09-19T16:40:49.374Z"
     }
   }
 }
