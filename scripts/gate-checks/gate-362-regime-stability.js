@@ -46,7 +46,7 @@ check('8 family tags present (trend,range,volatility,liquidity,openingState,even
 // 5. vetoReport is actually populated (not just empty object)
 check('vetoReport populated with wouldBlock entries', () => {
   const src = fs.readFileSync(path.join(REPO, 'src/trading/regime/regime-tags.ts'), 'utf8');
-  return /vetoReport\[/.test(src) && /wouldBlock/.test(src);
+  return /vetoReport\.\w+\s*=\s*\{/.test(src) && /wouldBlock/.test(src);
 });
 
 // 6. Regime tags version string exists

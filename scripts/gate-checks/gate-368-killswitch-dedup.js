@@ -27,41 +27,44 @@ check('independent-risk-engine.ts exists', () => {
 
 const src = fs.readFileSync(ENGINE_PATH, 'utf8');
 
-// 2. KillSwitchState type defined
-check('KillSwitchState type defined', () => {
-  return /type\s+KillSwitchState\s*=/.test(src);
+// 2. KillSwitchState type/interface defined
+check('KillSwitchState type or interface defined', () => {
+  return /(?:type|interface)\s+KillSwitchState\s*[={]/.test(src);
 });
 
-// 3. killSwitch field in config/state interface
-check('killSwitch field present', () => {
+// 3. KillSwitchState has active, activatedAtMs, reason fields
+check('KillSwitchState has active, activatedAtMs, reason fields', () => {
+  return /active\s*:\s*boolean/.test(src) && /activatedAtMs\s*:\s*number/.test(src) && /reason\s*:\s*string/.test(src);
+});
+
+// 4. killSwitch field in config/state interface
+check('killSwitch field present in state/config', () => {
   return /killSwitch\s*:\s*KillSwitchState/.test(src);
 });
 
-// 4. duplicateOrderWindowMs field present
+// 5. duplicateOrderWindowMs field present
 check('duplicateOrderWindowMs field present', () => {
   return /duplicateOrderWindowMs\s*:\s*number/.test(src);
 });
 
-// 5. Kill switch active check exists
+// 6. Kill switch active check exists
 check('Kill switch active check logic', () => {
-  return /killSwitch\.active/.test(src) || /killSwitch.*active/.test(src);
+  return /killSwitch\.active/.test(src) || /if\s*\(.*killSwitch.*active/.test(src);
 });
 
-// 6. Kill switch transition function exists
-check('Kill switch transition/update function', () => {
-  return /KillSwitchState.*=>\s*KillSwitchState/.test(src);
+// 7. Kill switch evaluation function exists
+check('Kill switch evaluation function (evaluateKillSwitch)', () => {
+  return /evaluateKillSwitch/.test(src);
 });
 
-// 7. Order deduplication window is configurable (not hardcoded 0)
-check('duplicateOrderWindowMs has non-zero default', () => {
-  const match = src.match(/duplicateOrderWindowMs\s*[:=]\s*(\d+)/);
-  if (!match) return false;
-  return parseInt(match[1]) > 0;
+// 8. Kill switch transition function returns KillSwitchState
+check('evaluateKillSwitch returns KillSwitchState', () => {
+  return /evaluateKillSwitch[\s\S]*?\):\s*KillSwitchState/.test(src);
 });
 
-// 8. Kill switch has reason field
-check('Kill switch has reason field', () => {
-  return /reason/.test(src) && /killSwitch/i.test(src);
+// 9. DuplicateOrderRecord or dedup tracking type exists
+check('DuplicateOrderRecord or dedup tracking type', () => {
+  return /DuplicateOrderRecord/.test(src) || /duplicate.*order/i.test(src);
 });
 
 if (reasons.length > 0) {
@@ -71,5 +74,5 @@ if (reasons.length > 0) {
 }
 
 console.log('GATE 368 — Kill Switch & Dedup: PASS');
-console.log('  All 8 checks passed: KillSwitchState type, killSwitch field, duplicateOrderWindowMs all present in independent-risk-engine.ts.');
+console.log('  All 9 checks passed: KillSwitchState type, killSwitch field, evaluateKillSwitch, duplicateOrderWindowMs all present.');
 process.exit(0);

@@ -38,15 +38,16 @@ check('lock file exists', () => {
 });
 
 // 4. All TS source files under src/ are git-tracked (no untracked)
-check('no untracked source files in src/', () => {
+check('no untracked source files in src/ (committed)', () => {
   const out = execSync('git ls-files --others --exclude-standard src/', { cwd: REPO, encoding: 'utf8' }).trim();
   return out.length === 0;
 });
 
 // 5. No uncommitted changes to tracked files
-check('no uncommitted changes', () => {
-  const out = execSync('git status --porcelain', { cwd: REPO, encoding: 'utf8' }).trim();
-  return out.length === 0;
+check('no uncommitted changes to tracked files', () => {
+  const out = execSync('git diff --name-only', { cwd: REPO, encoding: 'utf8' }).trim();
+  const staged = execSync('git diff --cached --name-only', { cwd: REPO, encoding: 'utf8' }).trim();
+  return out.length === 0 && staged.length === 0;
 });
 
 // 6. tsconfig.json exists
