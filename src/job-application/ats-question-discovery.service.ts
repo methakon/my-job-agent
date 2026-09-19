@@ -102,6 +102,11 @@ export class ATSQuestionDiscoveryService {
       }
     }
 
+    // After options loop: if no match found for a field with options, flag it
+    if (field.options && field.options.length > 0) {
+      return { canAnswer: false, answer: null, source: 'flagged', reason: 'Options present but no evidence match — flagged for review' };
+    }
+
     if (field.type === 'dropdown' && !field.options) {
       return { canAnswer: false, answer: null, source: 'flagged', reason: 'Dropdown without known options — flagged for review' };
     }
