@@ -541,6 +541,15 @@
       "recorded": "2026-09-19T17:40+05:30",
       "evidence": "docs/RESEARCH-ADAPTATION-ARCHITECTURE.md updated, stale entries removed",
       "expires_hint": "Delete after ff6826a leaves guard window."
+    },
+    "b5843f06e850d7131d2f8b60d8f08af49e18c353": {
+      "short": "b5843f0",
+      "reason": "Historical migration: unified live→history tables (2.69M rows). Migration script added to scripts/migrate-unified-history.ts.",
+      "workstream": "trading-agent-dev (migration infrastructure)",
+      "authority": "operator approved --exec migration 2026-09-19",
+      "recorded": "2026-09-19T19:00+05:30 (migration execution complete)",
+      "evidence": "2,686,411 rows migrated (2,532,253 quotes + 154,158 snapshots), source tables empty, history tables populated, reconciliation verified",
+      "expires_hint": "Delete after b5843f0 leaves guard window."
     }
   }
 }
