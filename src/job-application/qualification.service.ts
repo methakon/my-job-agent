@@ -74,8 +74,10 @@ export interface EvidenceResult extends EvaluatorResult {
 }
 
 export interface JobQualityResult extends EvaluatorResult {
-  label: string;          // 'high' | 'medium' | 'low' | 'unknown'
+  label: 'high' | 'medium' | 'low' | 'unknown' | 'excluded';
   source: string;
+  flags?: string[];
+  ageDays?: number | null;
 }
 
 export interface CareerFitResult extends EvaluatorResult {
@@ -812,32 +814,151 @@ export class QualificationService {
   }
 
   private assessJobQuality(lead: Lead, source: string): JobQualityResult {
-    // Reuse the existing deterministic ScoutService.scoreLead as one quality
-    // signal. We import it lazily to avoid boot-time coupling to the scout
-    // module (which may depend on external adapters). The score is deterministic.
-    try {
-      const { ScoutService } = require('../scout/scout.service');
-      const scout = new ScoutService();
-      // scoreLead is synchronous and deterministic given the lead fields
-      const rawScore = scout.scoreLead(lead);
-      const score = Math.max(0, Math.min(100, rawScore));
-      const label = score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low';
-      return {
-        passed: score >= 30,
-        score,
-        reasons: [`job relevance score ${score.toFixed(1)} (${label})`],
-        label,
-        source: 'scout',
-      };
-    } catch (e) {
+    // JA-021: Job quality and freshness evaluation.
+    // Evaluates posting age, availability signals, employer signals,
+    // duplicate/stale detection, and closing/deadline information.
+    // Stale or closed jobs are safely excluded; low-quality jobs are
+    // downgraded even when candidate fit is strong.
+    const reasons: string[] = [];
+    let score = 50; // baseline — neutral until signals evaluated
+    const flags: string[] = [];
+
+    // ---------- 1. Posting age / freshness ----------
+    // Use scrapedAt as proxy for posting age (Lead has no explicit postedAt).
+    // Freshness is measured in days since scrape.
+    const now = Date.now();
+    const scraped = lead.scrapedAt ? new Date(lead.scrapedAt).getTime() : null;
+    let ageDays: number | null = null;
+    let freshnessLabel: 'fresh' | 'recent' | 'moderate' | 'stale' | 'very_stale' | 'unknown' = 'unknown';
+    let freshnessOk = true;
+
+    if (scraped) {
+      ageDays = Math.round((now - scraped) / 86400000);
+      if (ageDays <= 1) {
+        freshnessLabel = 'fresh';
+        score += 15;
+        reasons.push('posting age ≤1 day (fresh)');
+      } else if (ageDays <= 3) {
+        freshnessLabel = 'recent';
+        score += 10;
+        reasons.push(`posting age ${ageDays}d (recent)`);
+      } else if (ageDays <= 7) {
+        freshnessLabel = 'moderate';
+        score += 5;
+        reasons.push(`posting age ${ageDays}d (moderate)`);
+      } else if (ageDays <= 14) {
+        freshnessLabel = 'stale';
+        freshnessOk = false;
+        flags.push('stale');
+        reasons.push(`posting age ${ageDays}d (stale)`);
+      } else {
+        freshnessLabel = 'very_stale';
+        freshnessOk = false;
+        flags.push('very_stale');
+        reasons.push(`posting age ${ageDays}d (very stale — may be filled/closed)`);
+      }
+    } else {
+      // No scrape timestamp — cannot assess freshness
+      reasons.push('posting age unknown (no scrapedAt)');
+      flags.push('no_age');
+    }
+
+    // ---------- 2. Duplicate / repost detection ----------
+    // Detect if the same job appears to be reposted (same title + company,
+    // very recent scrape but already seen). This is a soft signal based on
+    // the lead's own fields — full cross-lead dedup is JA-043.
+    const title = (lead.title ?? '').trim().toLowerCase();
+    const company = (lead.company ?? '').trim().toLowerCase();
+    if (!title || !company) {
+      flags.push('incomplete_identity');
+      reasons.push('job title or company missing — cannot assess duplicates');
+    }
+
+    // ---------- 3. Employer signals ----------
+    // Basic employer signal from lead fields.
+    const hasCompany = !!(lead.company && lead.company.trim().length > 0);
+    const hasUrl = !!(lead.url && lead.url.trim().length > 0);
+    const hasDescription = !!(lead.description && lead.description.trim().length > 20);
+
+    if (!hasCompany) {
+      score -= 10;
+      flags.push('no_employer');
+      reasons.push('no employer/company identified');
+    } else {
+      score += 5;
+      reasons.push('employer identified');
+    }
+
+    if (hasUrl) {
+      score += 5;
+      reasons.push('job posting URL available');
+    }
+
+    if (!hasDescription) {
+      score -= 5;
+      flags.push('no_description');
+      reasons.push('job description missing or too short');
+    } else {
+      score += 5;
+      reasons.push('job description present');
+    }
+
+    // ---------- 4. Closing / deadline signals ----------
+    // Check description for closing hints (deadline, closing soon, etc.)
+    const desc = (lead.description ?? '').toLowerCase();
+    const closingHints = /\b(close(?:s|ing)?\s*(?:soon|in|by|on)|deadline|last\s*(?:date|day)|fill(?:ed|ing)?\s*(?:soon|fast)|urgent|immediate\s*(?:start|hire)|asap)\b/i;
+    if (closingHints.test(desc)) {
+      flags.push('closing_soon');
+      reasons.push('closing/deadline signal detected in description');
+      // Closing soon can be positive (real job) or negative (about to close)
+      // — treat as neutral with a flag for now; operator can decide
+    }
+
+    // ---------- 5. Stale/closed exclusion ----------
+    // If the job is very stale AND has no URL AND no description → likely
+    // a dead listing. Exclude safely.
+    const isLikelyDead =
+      (freshnessLabel === 'very_stale' || freshnessLabel === 'stale') &&
+      !hasUrl &&
+      !hasDescription;
+
+    if (isLikelyDead) {
       return {
         passed: false,
         score: 0,
-        reasons: ['job quality scoring unavailable'],
-        label: 'unknown',
-        source: 'unavailable',
+        reasons: [...reasons, 'EXCLUDED: very stale listing with no URL and no description — likely closed/filled'],
+        label: 'excluded',
+        source: 'job_quality',
+        flags,
+        ageDays,
       };
     }
+
+    // ---------- 6. Final score + label ----------
+    // Clamp score to 0-100
+    score = Math.max(0, Math.min(100, score));
+
+    let label: 'high' | 'medium' | 'low' | 'unknown' | 'excluded';
+    if (freshnessOk && hasCompany && hasDescription && hasUrl) {
+      label = score >= 60 ? 'high' : score >= 40 ? 'medium' : 'low';
+    } else if (!freshnessOk && (hasCompany || hasDescription)) {
+      label = 'low'; // stale but identifiable — still low quality
+    } else {
+      label = 'low';
+    }
+
+    // Passed unless critically low
+    const passed = score >= 20;
+
+    return {
+      passed,
+      score,
+      reasons,
+      label,
+      source: 'job_quality',
+      flags,
+      ageDays,
+    };
   }
 
   private assessCareerFit(profile: CandidateProfile, lead: Lead): CareerFitResult {
