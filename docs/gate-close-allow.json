@@ -429,6 +429,12 @@
       "reason": "Job Application roadmap — JA-023 Explainable decision: add structured explanation with confidence, blockers, CV strategy, and plain-language summary to qualification.service.ts. Touches ONLY Job Agent files: src/job-application/qualification.service.ts + scripts/ja-023-explainable-decision.test.js (new, 214 lines). Verified: TypeScript compiles; no Trading Agent files touched.",
       "workstream": "Job Application roadmap — JA-023 Explainable decision (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-19: commits/pushes allowed for Job Agent development; JA-023 doneWhen: operator can understand the decision without reading model internals"
+    },
+    "57ca44414b74801f1f4c45081651fd8d56adabb9": {
+      "short": "57ca444",
+      "reason": "Job Application roadmap — JA-024 Near-miss rescue: add structured near-miss rescue classification with categories (preferred-skill-upskill, role-alternative, experience-tweak, full_reskill) and rescue URLs/actions. Touches ONLY Job Agent files: src/job-application/qualification.service.ts + scripts/ja-024-near-miss-rescue.test.js. Verified: 9/9 test pass; build clean; tsc 0 errors. No Trading Agent files touched.",
+      "workstream": "Job Application roadmap — JA-024 Near-miss rescue (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-19: commits/pushes allowed for Job Agent development; JA-024 doneWhen: near misses are separately identified and never silently treated as fully qualified"
     }
   }
 }
