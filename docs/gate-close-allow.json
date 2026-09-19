@@ -542,9 +542,9 @@
       "evidence": "docs/RESEARCH-ADAPTATION-ARCHITECTURE.md updated, stale entries removed",
       "expires_hint": "Delete after ff6826a leaves guard window."
     },
-    "b5843f06e850d7131d2f8b60d8f08af49e18c353": {
+    "b5843f0279dac94e0f1128eba09f3df22032b989": {
       "short": "b5843f0",
-      "reason": "Historical migration: unified live→history tables (2.69M rows). Migration script added to scripts/migrate-unified-history.ts.",
+      "reason": "Historical migration: unified live\u2192history tables (2.69M rows). Migration script added to scripts/migrate-unified-history.ts.",
       "workstream": "trading-agent-dev (migration infrastructure)",
       "authority": "operator approved --exec migration 2026-09-19",
       "recorded": "2026-09-19T19:00+05:30 (migration execution complete)",
