@@ -564,6 +564,12 @@
       "authority": "hermes-agent session 20260916_024418_e2da9c",
       "recorded": "2026-09-19T20:40:00+05:30",
       "evidence": "131 done, 7 in_progress, 105 pending. Build clean. 4 negative tests (221 checks), 22 historical reports, 11 research modules, 31 tests pass."
+    },
+    "c5dbf92a3b7189632526cbae049c585176a931cc": {
+      "reason": "roadmap: dependency audit — 77 items done, 68 pending remaining",
+      "workstream": "trading-agent",
+      "authority": "roadmap-execution",
+      "added": "2026-09-19T16:40:39.596Z"
     }
   }
 }
