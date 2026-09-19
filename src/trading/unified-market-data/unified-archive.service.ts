@@ -164,6 +164,37 @@ export class UnifiedArchiveService {
     return cumulative;
   }
 
+  /**
+   * Column mappings for archive INSERT, per table type.
+   *
+   * MAINTENANCE: These lists are intentionally explicit, NOT derived from
+   * entity metadata. Live and history schema changes MUST update these
+   * column lists together. Any schema change requires review before deployment.
+   *
+   * Column names are identical between live and history (history adds only
+   * `archivedAt` which is generated via NOW()).
+   */
+  public static readonly COLUMN_MAP: Record<string, { insertCols: string; selectCols: string }> = {
+    unified_option_quotes: {
+      insertCols:
+        'id, instrumentKey, underlying, exchange, segment, instrumentType, expiry, strike, optionType, ' +
+        'ltp, bid, ask, bidQty, askQty, volume, oi, previousOi, changeOi, iv, delta, gamma, theta, vega, ' +
+        'depth, source, sourceTimestamp, receivedTimestamp, sequenceNumber, dataQuality, ts, createdAt, archivedAt',
+      selectCols:
+        'id, instrumentKey, underlying, exchange, segment, instrumentType, expiry, strike, optionType, ' +
+        'ltp, bid, ask, bidQty, askQty, volume, oi, previousOi, changeOi, iv, delta, gamma, theta, vega, ' +
+        'depth, source, sourceTimestamp, receivedTimestamp, sequenceNumber, dataQuality, ts, createdAt, NOW() as archivedAt',
+    },
+    unified_market_snapshots: {
+      insertCols:
+        'id, symbol, underlying, exchange, ltp, volume, bid, ask, bidQty, askQty, open, high, low, close, ' +
+        'depth, source, sourceTimestamp, receivedTimestamp, sequenceNumber, dataQuality, ts, createdAt, archivedAt',
+      selectCols:
+        'id, symbol, underlying, exchange, ltp, volume, bid, ask, bidQty, askQty, open, high, low, close, ' +
+        'depth, source, sourceTimestamp, receivedTimestamp, sequenceNumber, dataQuality, ts, createdAt, NOW() as archivedAt',
+    },
+  };
+
   private async archiveChunk(
     liveTable: string,
     historyTable: string,
@@ -191,16 +222,13 @@ export class UnifiedArchiveService {
       await queryRunner.startTransaction();
 
       // Step 2: INSERT IGNORE into history (idempotent — PK duplicates are skipped).
-      // MAINTENANCE: This column list is intentionally explicit, NOT derived
-      // from entity metadata. Live and history schema changes MUST update this
-      // column list together. Any schema change requires review before deployment.
-      const insertCols =
-        'id, instrumentKey, underlying, exchange, segment, instrumentType, expiry, strike, optionType, ' +
-        'ltp, bid, ask, bidQty, askQty, volume, oi, previousOi, changeOi, iv, delta, gamma, theta, vega, ' +
-        'depth, source, sourceTimestamp, receivedTimestamp, sequenceNumber, dataQuality, ts, createdAt, archivedAt';
-
-      // NOW() as archivedAt is the same for both tables.
-      const selectCols = insertCols.replace('archivedAt', 'NOW() as archivedAt');
+      const mapping = UnifiedArchiveService.COLUMN_MAP[liveTable];
+      if (!mapping) {
+        await queryRunner.release();
+        result.error = `unknown_live_table: ${liveTable}`;
+        return result;
+      }
+      const { insertCols, selectCols } = mapping;
 
       const insertResult = (await queryRunner.query(
         `INSERT IGNORE INTO \`${historyTable}\` (${insertCols})

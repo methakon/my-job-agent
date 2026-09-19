@@ -501,6 +501,129 @@ async function testSnapshotsArchivedFirst() {
   console.log('  ✓ extra. snapshots archived before quotes');
 }
 
+/* ── Column-mapping validation (BLOCKER-1 regression) ───────────────── */
+
+/**
+ * Parse a SQL column list string into an array of column names.
+ * e.g. "id, name, ts" → ["id", "name", "ts"]
+ */
+function parseCols(s) {
+  return s.split(',').map((c) => c.trim().split(' ').pop()).filter(Boolean);
+}
+
+/**
+ * Expected column sets (from DDL review, matching entity definitions).
+ */
+const QUOTE_HISTORY_COLS = [
+  'id', 'instrumentKey', 'underlying', 'exchange', 'segment', 'instrumentType',
+  'expiry', 'strike', 'optionType', 'ltp', 'bid', 'ask', 'bidQty', 'askQty',
+  'volume', 'oi', 'previousOi', 'changeOi', 'iv', 'delta', 'gamma', 'theta',
+  'vega', 'depth', 'source', 'sourceTimestamp', 'receivedTimestamp',
+  'sequenceNumber', 'dataQuality', 'ts', 'createdAt', 'archivedAt',
+];
+
+const SNAPSHOT_HISTORY_COLS = [
+  'id', 'symbol', 'underlying', 'exchange', 'ltp', 'volume', 'bid', 'ask',
+  'bidQty', 'askQty', 'open', 'high', 'low', 'close', 'depth', 'source',
+  'sourceTimestamp', 'receivedTimestamp', 'sequenceNumber', 'dataQuality',
+  'ts', 'createdAt', 'archivedAt',
+];
+
+async function testQuoteColumnListContainsInstrumentKey() {
+  const mapping = UnifiedArchiveService.COLUMN_MAP.unified_option_quotes;
+  assert.ok(mapping, 'quote mapping exists');
+  const cols = parseCols(mapping.insertCols);
+  assert.ok(cols.includes('instrumentKey'), 'quote insertCols must contain instrumentKey');
+  assert.ok(cols.includes('expiry'), 'quote insertCols must contain expiry');
+  assert.ok(cols.includes('strike'), 'quote insertCols must contain strike');
+  assert.ok(cols.includes('oi'), 'quote insertCols must contain oi');
+  console.log('  ✓ BLOCKER-1.1. quote insertCols contains quote-specific fields');
+}
+
+async function testSnapshotColumnListContainsSymbol() {
+  const mapping = UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots;
+  assert.ok(mapping, 'snapshot mapping exists');
+  const cols = parseCols(mapping.insertCols);
+  assert.ok(cols.includes('symbol'), 'snapshot insertCols must contain symbol');
+  assert.ok(cols.includes('open'), 'snapshot insertCols must contain open');
+  assert.ok(cols.includes('high'), 'snapshot insertCols must contain high');
+  assert.ok(cols.includes('low'), 'snapshot insertCols must contain low');
+  assert.ok(cols.includes('close'), 'snapshot insertCols must contain close');
+  console.log('  ✓ BLOCKER-1.2. snapshot insertCols contains symbol + OHLC');
+}
+
+async function testSnapshotColumnListExcludesInstrumentKey() {
+  const mapping = UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots;
+  const cols = parseCols(mapping.insertCols);
+  assert.ok(!cols.includes('instrumentKey'), 'snapshot insertCols must NOT contain instrumentKey');
+  assert.ok(!cols.includes('segment'), 'snapshot insertCols must NOT contain segment');
+  assert.ok(!cols.includes('instrumentType'), 'snapshot insertCols must NOT contain instrumentType');
+  assert.ok(!cols.includes('expiry'), 'snapshot insertCols must NOT contain expiry');
+  assert.ok(!cols.includes('strike'), 'snapshot insertCols must NOT contain strike');
+  assert.ok(!cols.includes('optionType'), 'snapshot insertCols must NOT contain optionType');
+  assert.ok(!cols.includes('oi'), 'snapshot insertCols must NOT contain oi');
+  assert.ok(!cols.includes('previousOi'), 'snapshot insertCols must NOT contain previousOi');
+  assert.ok(!cols.includes('changeOi'), 'snapshot insertCols must NOT contain changeOi');
+  assert.ok(!cols.includes('iv'), 'snapshot insertCols must NOT contain iv');
+  assert.ok(!cols.includes('delta'), 'snapshot insertCols must NOT contain delta');
+  assert.ok(!cols.includes('gamma'), 'snapshot insertCols must NOT contain gamma');
+  assert.ok(!cols.includes('theta'), 'snapshot insertCols must NOT contain theta');
+  assert.ok(!cols.includes('vega'), 'snapshot insertCols must NOT contain vega');
+  console.log('  ✓ BLOCKER-1.3. snapshot insertCols excludes all quote-specific fields');
+}
+
+async function testQuoteColumnListExcludesSymbol() {
+  const mapping = UnifiedArchiveService.COLUMN_MAP.unified_option_quotes;
+  const cols = parseCols(mapping.insertCols);
+  assert.ok(!cols.includes('symbol'), 'quote insertCols must NOT contain symbol');
+  assert.ok(!cols.includes('open'), 'quote insertCols must NOT contain open');
+  assert.ok(!cols.includes('high'), 'quote insertCols must NOT contain high');
+  assert.ok(!cols.includes('low'), 'quote insertCols must NOT contain low');
+  assert.ok(!cols.includes('close'), 'quote insertCols must NOT contain close');
+  console.log('  ✓ BLOCKER-1.4. quote insertCols excludes snapshot-specific fields');
+}
+
+async function testColumnListMatchesExpectedSchema() {
+  const qCols = parseCols(UnifiedArchiveService.COLUMN_MAP.unified_option_quotes.insertCols);
+  const sCols = parseCols(UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots.insertCols);
+  assert.deepEqual(qCols, QUOTE_HISTORY_COLS, 'quote column list matches expected schema');
+  assert.deepEqual(sCols, SNAPSHOT_HISTORY_COLS, 'snapshot column list matches expected schema');
+  console.log('  ✓ BLOCKER-1.5. column lists match expected schema definitions');
+}
+
+async function testSelectColsMapArchivedAtCorrectly() {
+  const qSelect = UnifiedArchiveService.COLUMN_MAP.unified_option_quotes.selectCols;
+  const sSelect = UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots.selectCols;
+  assert.ok(qSelect.includes('NOW() as archivedAt'), 'quote selectCols must have NOW() as archivedAt');
+  assert.ok(sSelect.includes('NOW() as archivedAt'), 'snapshot selectCols must have NOW() as archivedAt');
+  // SELECT must NOT end with bare 'archivedAt' (i.e. without NOW())
+  assert.ok(!qSelect.trim().endsWith(', archivedAt'), 'quote selectCols must not end with bare archivedAt');
+  assert.ok(!sSelect.trim().endsWith(', archivedAt'), 'snapshot selectCols must not end with bare archivedAt');
+  // INSERT must end with bare 'archivedAt' (not NOW())
+  const qInsert = UnifiedArchiveService.COLUMN_MAP.unified_option_quotes.insertCols;
+  const sInsert = UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots.insertCols;
+  assert.ok(qInsert.trim().endsWith('archivedAt'), 'quote insertCols ends with bare archivedAt');
+  assert.ok(!qInsert.includes('NOW()'), 'quote insertCols must not contain NOW()');
+  assert.ok(sInsert.trim().endsWith('archivedAt'), 'snapshot insertCols ends with bare archivedAt');
+  assert.ok(!sInsert.includes('NOW()'), 'snapshot insertCols must not contain NOW()');
+  console.log('  ✓ BLOCKER-1.6. SELECT maps archivedAt → NOW() correctly');
+}
+
+async function testBothMappingsExistForAllTables() {
+  assert.ok(UnifiedArchiveService.COLUMN_MAP.unified_option_quotes, 'quotes mapping defined');
+  assert.ok(UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots, 'snapshots mapping defined');
+  const qInsertCols = parseCols(UnifiedArchiveService.COLUMN_MAP.unified_option_quotes.insertCols);
+  const qSelectCols = parseCols(UnifiedArchiveService.COLUMN_MAP.unified_option_quotes.selectCols);
+  assert.equal(qInsertCols.length, qSelectCols.length, 'quote insert/select column count match');
+  const sInsertCols = parseCols(UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots.insertCols);
+  const sSelectCols = parseCols(UnifiedArchiveService.COLUMN_MAP.unified_market_snapshots.selectCols);
+  assert.equal(sInsertCols.length, sSelectCols.length, 'snapshot insert/select column count match');
+  // INSERT has archivedAt; SELECT has NOW() as archivedAt — same count
+  assert.equal(qInsertCols.length, QUOTE_HISTORY_COLS.length, `quote cols: ${qInsertCols.length} (expected ${QUOTE_HISTORY_COLS.length})`);
+  assert.equal(sInsertCols.length, SNAPSHOT_HISTORY_COLS.length, `snapshot cols: ${sInsertCols.length} (expected ${SNAPSHOT_HISTORY_COLS.length})`);
+  console.log('  ✓ BLOCKER-1.7. both mappings complete, insert/select counts aligned');
+}
+
 /* ── Main ───────────────────────────────────────────────────────────── */
 
 async function main() {
@@ -522,7 +645,17 @@ async function main() {
   await testHistoryTableQueryable();
   await testMetricsReporting();
   await testSnapshotsArchivedFirst();
-  console.log('\nAll 17 tests passed.');
+
+  console.log('\nColumn-mapping validation (BLOCKER-1 regression):');
+  await testQuoteColumnListContainsInstrumentKey();
+  await testSnapshotColumnListContainsSymbol();
+  await testSnapshotColumnListExcludesInstrumentKey();
+  await testQuoteColumnListExcludesSymbol();
+  await testColumnListMatchesExpectedSchema();
+  await testSelectColsMapArchivedAtCorrectly();
+  await testBothMappingsExistForAllTables();
+
+  console.log('\nAll 24 tests passed.');
 }
 
 main().catch((err) => {
