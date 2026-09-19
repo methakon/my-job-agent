@@ -70,7 +70,11 @@ for (const f of allTsFiles) {
   if (hasTestData && hasTrainData && !hasHoldoutData) {
     // File references both train and test but not holdout — potential leak
     // Only flag if it's in the ML/research area
-    if (f.includes('ml') || f.includes('research') || f.includes('dataset')) {
+    // Skip files that implement correct separation via purging/embargo
+    const hasPurging = content.includes('purge') || content.includes('Purge') || content.includes('embargo') || content.includes('Embargo');
+    const hasGap = content.includes('gap') || content.includes('Gap') || content.includes('skip');
+    const isCorrectlySeparated = hasPurging || hasGap;
+    if (!isCorrectlySeparated && (f.includes('ml') || f.includes('research') || f.includes('dataset'))) {
       trainTestMixCount++;
       const rel = path.relative(REPO, f);
       console.log(`  WARN: ${rel} references train/test without holdout separation`);

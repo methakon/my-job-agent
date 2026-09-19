@@ -37,7 +37,7 @@ const rising = (n = 40, volume = (i) => 100000 + i * 1000) =>
   });
 
 // \u2500\u2500 [A] contract \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[A] contract');
+console.log('[A] contract');
 eq('A1 version pinned', M.REGIME_TAGS_VERSION, 'regimetag-v2');
 eq('A2 eight tag families exist', Object.keys(M.REGIME_THRESHOLDS).some((k) => k === 'atrPeriod'), true);
 eq('A3 trend vocabulary', M.TREND_TAGS, ['TREND_UP', 'TREND_DOWN', 'RANGE', 'UNKNOWN']);
@@ -53,7 +53,7 @@ ok('A12 volTransition thresholds present', M.REGIME_THRESHOLDS.volTransitionSpik
 eq('A13 all 8 families share the RegimeFamily union', M.REGIME_REFUSALS.length, 9);
 
 // \u2500\u2500 [B] exact tag math \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[B] exact tag math (hand-computed fixture)');
+console.log('[B] exact tag math (hand-computed fixture)');
 const bars = rising(40);
 const r = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40 });
 eq('B1 ATR-14 = 120 (TR is 120 on every session)', r.context.atr14, 120);
@@ -80,7 +80,7 @@ const smallGap = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 
 eq('B16 a 0.008 ATR gap is FLAT', smallGap.openingState, 'FLAT');
 
 // \u2500\u2500 [C] explicit UNKNOWN states \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[C] unresolvable tags are UNKNOWN with the exact reason');
+console.log('[C] unresolvable tags are UNKNOWN with the exact reason');
 const allFamilies = ['trend', 'range', 'volatility', 'liquidity', 'openingState', 'eventCatalyst', 'gapAcceptance', 'volatilityTransition'];
 const unknownAll = (res, reason) => allFamilies.every((k) => res[k] === 'UNKNOWN') && JSON.stringify(res.reasons) === JSON.stringify(Object.fromEntries(allFamilies.map((k) => [k, reason])));
 ok('C1 no prior sessions', unknownAll(M.regimeEntering({ priorSessions: [], open: 100 }), 'NO_SESSIONS'), JSON.stringify(M.regimeEntering({ priorSessions: [], open: 100 }).reasons));
@@ -108,7 +108,7 @@ const shortTrend = M.regimeEntering({ priorSessions: bars.slice(0, 18), open: ba
 ok('C10 <20 sessions \u21d2 trend UNKNOWN (INSufficient history) while others resolve', shortTrend.trend === 'UNKNOWN' && shortTrend.reasons.trend === 'INSUFFICIENT_HISTORY' && shortTrend.openingState !== 'UNKNOWN');
 
 // \u2500\u2500 [D] boundaries \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[D] pinned boundaries');
+console.log('[D] pinned boundaries');
 const at = (gap) => M.regimeEntering({ priorSessions: bars, open: bars[39].close + gap }).openingState;
 eq('D1 gap exactly 0.1 ATR is FLAT (inclusive)', at(0.1 * 120), 'FLAT');
 eq('D2 gap just over 0.1 ATR is SMALL', at(0.1 * 120 + 0.001), 'GAP_UP_SMALL');
@@ -117,7 +117,7 @@ eq('D4 gap just under 0.5 ATR is SMALL', at(0.5 * 120 - 0.001), 'GAP_UP_SMALL');
 eq('D5 a gap down past 0.5 ATR is GAP_DOWN_LARGE', at(-0.6 * 120), 'GAP_DOWN_LARGE');
 
 // \u2500\u2500 [E] determinism + no look-ahead \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[E] determinism + no look-ahead');
+console.log('[E] determinism + no look-ahead');
 const det = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40 });
 ok('E1 five identical calls agree exactly', [0, 1, 2, 3, 4].every(() => JSON.stringify(M.regimeEntering({ priorSessions: rising(40), open: 24780 + 40 })) === JSON.stringify(det)));
 
@@ -139,19 +139,19 @@ ok('E6 output does not depend on object identity (fresh bars each call)', JSON.s
 void reversed;
 
 // \u2500\u2500 [F] no fabricated values \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[F] no fabricated values');
+console.log('[F] no fabricated values');
 const everyTag = [det, rf, rv, rv0, rv2, noOpen, zeroOpen, shortTrend, bigGap, smallGap];
 ok('F1 every tag is always a member of its vocabulary', everyTag.every((t) =>
   M.TREND_TAGS.includes(t.trend) && M.RANGE_TAGS.includes(t.range) && M.VOLATILITY_TAGS.includes(t.volatility) &&
   M.LIQUIDITY_TAGS.includes(t.liquidity) && M.OPENING_STATE_TAGS.includes(t.openingState) &&
   M.EVENT_CATALYST_TAGS.includes(t.eventCatalyst) && M.GAP_ACCEPTANCE_TAGS.includes(t.gapAcceptance) &&
-  M.VOL_TRANSITION_TAGS.includes(t.volatilityTransition)));\nok('F2 every reason is a member of the closed vocabulary', everyTag.every((t) => Object.values(t.reasons).every((x) => M.REGIME_REFUSALS.includes(x))));
+  M.VOL_TRANSITION_TAGS.includes(t.volatilityTransition)));ok('F2 every reason is a member of the closed vocabulary', everyTag.every((t) => Object.values(t.reasons).every((x) => M.REGIME_REFUSALS.includes(x))));
 ok('F3 UNKNOWN always carries a reason, and a resolved tag never does', everyTag.every((t) =>
   allFamilies.every((k) => (t[k] === 'UNKNOWN') === (t.reasons[k] !== undefined))));
 ok('F4 no numeric context field is NaN/Infinity', everyTag.every((t) => [t.context.atr14, t.context.priorClose, t.context.sma, t.context.gapAtr, t.context.percentiles.volatility, t.context.volTransition.currentAtr, t.context.volTransition.medianAtr, t.context.volTransition.ratio].every((v) => v === null || Number.isFinite(v))));
 
 // \u2500\u2500 [G] purity \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[G] purity');
+console.log('[G] purity');
 const body = SRC.slice(SRC.indexOf('export function regimeEntering'));
 const noCode = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 ok('G1 no clock in the implementation', !/Date\.now|new Date\(/.test(noCode(body)));
@@ -159,40 +159,46 @@ ok('G2 no randomness', !/Math\.random/.test(noCode(body)));
 ok('G3 no IO / network / DB / Nest', !/await|fetch\(|Repository|InjectRepository|@Injectable/.test(noCode(body)));
 ok('G4 no AI/model call', !/openai|anthropic|llm|model\b/i.test(noCode(body)));
 ok('G5 the module imports nothing at runtime', !/^import /m.test(SRC));
-ok('G6 exports exactly the intended surface', ['REGIME_TAGS_VERSION', 'REGIME_THRESHOLDS', 'REGIME_REFUSALS', 'regimeEntering', 'EVENT_CATALYST_TAGS', 'GAP_ACCEPTANCE_TAGS', 'VOLATILITY_TRANSITION_TAGS'].every((k) => k in M));
+ok('G6 exports exactly the intended surface', ['REGIME_TAGS_VERSION', 'REGIME_THRESHOLDS', 'REGIME_REFUSALS', 'regimeEntering', 'EVENT_CATALYST_TAGS', 'GAP_ACCEPTANCE_TAGS', 'VOL_TRANSITION_TAGS'].every((k) => k in M));
 
 // \u2500\u2500 [H] ROW 125-129: extended families \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-console.log('\n[H] ROW 125-129 \u2014 eventCatalyst, gapAcceptance, volatilityTransition');
+console.log('[H] ROW 125-129 \u2014 eventCatalyst, gapAcceptance, volatilityTransition');
 
 // H1: without optional inputs \u2192 all 3 new families are UNKNOWN with their own refusal
 const h1 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40 });
 ok('H1a eventCatalyst UNKNOWN/NO_EVENT_DATA when not provided', h1.eventCatalyst === 'UNKNOWN' && h1.reasons.eventCatalyst === 'NO_EVENT_DATA');
-ok('H1b gapAcceptance UNKNOWN/NO_GAP_DATA when not provided', h1.gapAcceptance === 'UNKNOWN' && h1.reasons.gapAcceptance === 'NO_GAP_DATA');
+ok('H1b gapAcceptance UNTESTED when prev gap is flat/tiny (computed from session data)', h1.gapAcceptance === 'UNTESTED' && h1.reasons.gapAcceptance === undefined);
 ok('H1c volatilityTransition STABLE on rising fixture (ATR history sufficient)', h1.volatilityTransition === 'STABLE' && h1.reasons.volatilityTransition === undefined);
 
-// H2: passing eventCatalyst = PRESENT
-const h2 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'PRESENT' });
-ok('H2 eventCatalyst = PRESENT when supplied', h2.eventCatalyst === 'PRESENT' && h2.reasons.eventCatalyst === undefined);
+// H2: passing eventCatalyst = MEDIUM
+const h2 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'MEDIUM' });
+ok('H2 eventCatalyst = MEDIUM when supplied', h2.eventCatalyst === 'MEDIUM' && h2.reasons.eventCatalyst === undefined);
 
-// H3: passing eventCatalyst = ABSENT
-const h3 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'ABSENT' });
-ok('H3 eventCatalyst = ABSENT when supplied', h3.eventCatalyst === 'ABSENT');
+// H3: passing eventCatalyst = NONE
+const h3 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'NONE' });
+ok('H3 eventCatalyst = NONE when supplied', h3.eventCatalyst === 'NONE');
 
-// H4: passing gapAcceptance = ACCEPTED
-const h4 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, gapAcceptance: 'ACCEPTED' });
-ok('H4 gapAcceptance = ACCEPTED when supplied', h4.gapAcceptance === 'ACCEPTED' && h4.reasons.gapAcceptance === undefined);
+// H4: gapAcceptance computed as ACCEPTED when prev session has gap-up and current fills it
+const h4bars = [...bars];
+h4bars[38] = {...h4bars[37], open: h4bars[37].close + 120, high: h4bars[37].close + 200, low: h4bars[37].close + 80};
+h4bars[39] = {...h4bars[39], low: h4bars[37].close + 40}; // low goes below gapFillTarget (prev.low)
+const h4 = M.regimeEntering({ priorSessions: h4bars, open: h4bars[39].close + 10 });
+ok('H4 gapAcceptance ACCEPTED when prev gap-up fills', h4.gapAcceptance === 'ACCEPTED' && h4.reasons.gapAcceptance === undefined);
 
-// H5: passing gapAcceptance = REJECTED
-const h5 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, gapAcceptance: 'REJECTED' });
-ok('H5 gapAcceptance = REJECTED when supplied', h5.gapAcceptance === 'REJECTED');
+// H5: gapAcceptance computed as REJECTED when prev session has gap-down and current does NOT fill
+const h5bars = [...bars];
+h5bars[38] = {...h5bars[37], open: h5bars[37].close - 120, high: h5bars[37].close - 80, low: h5bars[37].close - 200};
+h5bars[39] = {...h5bars[39], high: h5bars[37].close - 100}; // high stays below gapFillTarget (prev.high)
+const h5 = M.regimeEntering({ priorSessions: h5bars, open: h5bars[39].close + 10 });
+ok('H5 gapAcceptance REJECTED when prev gap-down does not fill', h5.gapAcceptance === 'REJECTED');
 
-// H6: passing gapAcceptance = PENDING
-const h6 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, gapAcceptance: 'PENDING' });
-ok('H6 gapAcceptance = PENDING when supplied', h6.gapAcceptance === 'PENDING');
+// H6: gapAcceptance computed as UNTESTED when prev gap is tiny/flat
+const h6 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40 });
+ok('H6 gapAcceptance UNTESTED when prev gap is flat/tiny', h6.gapAcceptance === 'UNTESTED');
 
 // H7: both eventCatalyst and gapAcceptance supplied
-const h7 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'ABSENT', gapAcceptance: 'ACCEPTED' });
-ok('H7 both eventCatalyst and gapAcceptance supplied', h7.eventCatalyst === 'ABSENT' && h7.gapAcceptance === 'ACCEPTED' && Object.keys(h7.reasons).filter((k) => ['eventCatalyst', 'gapAcceptance'].includes(k)).length === 0);
+const h7 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'HIGH' });
+ok('H7 eventCatalyst supplied and gapAcceptance computed from data', h7.eventCatalyst === 'HIGH' && h7.gapAcceptance === 'UNTESTED' && h7.reasons.eventCatalyst === undefined && h7.reasons.gapAcceptance === undefined);
 
 // H8: volatilityTransition requires 3+ ATR history points
 const h8two = M.regimeEntering({ priorSessions: rising(2), open: 24020 });
@@ -201,12 +207,12 @@ const h8flat = M.regimeEntering({ priorSessions: flat, open: 100 });
 ok('H8b volatilityTransition UNKNOWN/NO_ATR with all-flat sessions', h8flat.volatilityTransition === 'UNKNOWN' && h8flat.reasons.volatilityTransition === 'NO_ATR');
 
 // H9: all families still resolve independently
-const h9 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'PRESENT', gapAcceptance: 'REJECTED' });
+const h9 = M.regimeEntering({ priorSessions: bars, open: bars[39].close + 40, eventCatalyst: 'MEDIUM', gapAcceptance: 'REJECTED' });
 ok('H9 trend/range/volatility/liquidity still resolve when extended families are provided', h9.trend === 'TREND_UP' && h9.range === 'WIDE' && h9.volatility === 'LOW' && h9.liquidity === 'THICK');
 
 // H10: new families do not interfere with existing UNKNOWN reasons
 const h10 = M.regimeEntering({ priorSessions: bars, open: null });
-ok('H10 openingState UNKNOWN does not spill into eventCatalyst/gapAcceptance/volTransition', h10.eventCatalyst === 'UNKNOWN' && h10.gapAcceptance === 'UNKNOWN' && h10.volatilityTransition === 'STABLE' && h10.reasons.eventCatalyst === 'NO_EVENT_DATA' && h10.reasons.gapAcceptance === 'NO_GAP_DATA' && h10.reasons.volatilityTransition === undefined && h10.reasons.openingState === 'NO_OPEN');
+ok('H10 openingState UNKNOWN does not spill into eventCatalyst/gapAcceptance/volTransition', h10.eventCatalyst === 'UNKNOWN' && h10.gapAcceptance === 'UNTESTED' && h10.volatilityTransition === 'STABLE' && h10.reasons.eventCatalyst === 'NO_EVENT_DATA' && h10.reasons.gapAcceptance === undefined && h10.reasons.volatilityTransition === undefined && h10.reasons.openingState === 'NO_OPEN');
 
-console.log(`\nREGIME TAGS (row 123, rows 125/127/129): ${pass} passed, ${failures.length} failed`);
+console.log(`REGIME TAGS (row 123, rows 125/127/129): ${pass} passed, ${failures.length} failed`);
 if (failures.length) { console.log('FAILED: ' + failures.join(', ')); process.exit(1); }
