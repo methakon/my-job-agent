@@ -43,18 +43,24 @@
     },
     "fd531dafbbf8664c006d7a9b8d13aabca13a7282": {
       "short": "fd531da",
-      "reason": "Job Application Agent roadmap item",
+      "reason": "Phase 5: employer intelligence",
       "workstream": "job-application-roadmap",
       "authority": "JOB AGENT WORKER"
     },
     "50987a1b88d3fa7f13e9570a96d58a32ff79bdad": {
       "short": "50987a1",
-      "reason": "Job Application Agent roadmap item",
+      "reason": "JA-041 fix: flag dropdowns with options but no evidence match",
       "workstream": "job-application-roadmap",
       "authority": "JOB AGENT WORKER"
     },
     "43057c44749a255247a95f64299b9e87db8f5001": {
       "short": "43057c4",
+      "reason": "gate-close allow-list maintenance",
+      "workstream": "cp-plan",
+      "authority": "JOB AGENT WORKER"
+    },
+    "a2891582733ba19d38abfa2296a6c9654f68188b": {
+      "short": "a289158",
       "reason": "gate-close allow-list maintenance",
       "workstream": "cp-plan",
       "authority": "JOB AGENT WORKER"
