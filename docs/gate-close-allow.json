@@ -435,6 +435,12 @@
       "reason": "Job Application roadmap — JA-024 Near-miss rescue: add structured near-miss rescue classification with categories (preferred-skill-upskill, role-alternative, experience-tweak, full_reskill) and rescue URLs/actions. Touches ONLY Job Agent files: src/job-application/qualification.service.ts + scripts/ja-024-near-miss-rescue.test.js. Verified: 9/9 test pass; build clean; tsc 0 errors. No Trading Agent files touched.",
       "workstream": "Job Application roadmap — JA-024 Near-miss rescue (separate control plane: job_application_roadmap_items)",
       "authority": "operator approval 2026-09-19: commits/pushes allowed for Job Agent development; JA-024 doneWhen: near misses are separately identified and never silently treated as fully qualified"
+    },
+    "098bc1661e9657e69e596669985178a7b11142b6": {
+      "short": "098bc16",
+      "reason": "Job Application roadmap — JA-030 Master candidate evidence library: structured evidence retrieval service extracting skills, employment, projects, education, links from CandidateProfile. Touches ONLY Job Agent files: src/job-application/candidate-evidence-library.service.ts + scripts/ja-030-evidence-library.test.js + src/app.module.ts. Verified: 9/9 test pass; build clean; tsc 0 errors. No Trading Agent files touched.",
+      "workstream": "Job Application roadmap — JA-030 Master candidate evidence library (separate control plane: job_application_roadmap_items)",
+      "authority": "operator approval 2026-09-19: commits/pushes allowed for Job Agent development; JA-030 doneWhen: tailoring retrieves facts from the evidence layer"
     }
   }
 }
