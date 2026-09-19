@@ -139,11 +139,23 @@ await offHoursResearchService.getResearchStatus()
 4. If all checks pass → APPROVED
 5. If any check fails → REJECTED with reasons
 
-### Simulation Gap
-Currently, validation uses the same trades for both baseline and candidate (no simulation engine). This means:
-- Candidates will be REJECTED due to insufficient simulation data
-- This is **correct behavior** — we don't activate candidates without proper validation
-- When simulation engine is added, pipeline will work without changes
+### Simulation Engine (Implemented)
+The `SimulationEngineService` replays historical trades through candidate parameter changes:
+
+1. **confidenceThreshold** — Filters baseline trades by `decayedConfidence >= threshold` (parsed from `decisionParams`). Trades below the proposed threshold are excluded from candidate results.
+
+2. **decayRate** — Adjusts signal decay calculation using the proposed rate. Determines whether each trade would still trigger entry under the new decay curve.
+
+**Input**: Baseline `TradeRecord[]` from `fnf_trades` + candidate `paramName`/`proposedValue`
+**Output**: Filtered `TradeRecord[]` representing trades that would occur under proposed parameters
+
+The simulation is:
+- **Deterministic**: same inputs → same outputs
+- **Auditable**: all candidate trades carry the source trade ID and simulation metadata
+- **Bounded**: operates on existing `fnf_trades` data only
+- **Safe**: no broker calls, no live state modification
+
+When 0 candidate trades survive filtering, the candidate is immediately REJECTED (parameter too restrictive).
 
 ## Hot Path Safety
 
@@ -161,7 +173,7 @@ Currently, validation uses the same trades for both baseline and candidate (no s
 
 ## Future Enhancements
 
-1. **Simulation Engine** — Generate synthetic trades with proposed parameters
+1. ~~**Simulation Engine**~~ — ✅ Built (`SimulationEngineService`). Currently supports confidenceThreshold and decayRate. Extend for additional parameter types as needed.
 2. **A/B Testing** — Run multiple parameter sets simultaneously
 3. **Rollback Automation** — Auto-rollback on performance degradation
 4. **Pattern Engine Integration** — Apply pattern-based parameter adjustments (weights remain frozen)

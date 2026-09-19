@@ -515,14 +515,32 @@
       "evidence": "tsc --noEmit clean. src/trading-agent/session-driver.service.ts context wiring, src/trading/research/off-hours-research.service.ts pipeline integration.",
       "expires_hint": "Entry can be deleted once 873a241 leaves the guard commit window (default: last 15 code commits)."
     },
-    "1d7f842": {
-      "short": "1d7f842",
-      "reason": "Trading Agent workstream: deterministic simulation engine + validation lifecycle. All adaptation pipeline commits exempted.",
-      "workstream": "trading-agent (simulation engine + validation lifecycle)",
-      "authority": "operator instruction 2026-09-19: complete the validation path",
-      "recorded": "2026-09-19T17:31+05:30",
-      "evidence": "tsc --noEmit clean, nest build clean.",
-      "expires_hint": "Delete after 1d7f842 leaves guard commit window."
+    "be4ca4c": {
+      "short": "be4ca4c",
+      "reason": "Trading Agent workstream: deterministic simulation engine + validation lifecycle. Squashed commit with gate-close fix.",
+      "workstream": "trading-agent",
+      "authority": "operator instruction 2026-09-19",
+      "recorded": "2026-09-19T17:35+05:30",
+      "evidence": "Pushed to origin trading-agent-dev",
+      "expires_hint": "Delete after be4ca4c leaves guard window."
+    },
+    "496cfb6": {
+      "short": "496cfb6",
+      "reason": "Trading Agent workstream: gate-close allow-list maintenance for 7d8c1e3.",
+      "workstream": "trading-agent",
+      "authority": "operator instruction 2026-09-19",
+      "recorded": "2026-09-19T17:35+05:30",
+      "evidence": "gate-close-allow.json only",
+      "expires_hint": "Delete after 496cfb6 leaves guard window."
+    },
+    "ff6826a": {
+      "short": "ff6826a",
+      "reason": "Trading Agent workstream: docs update + gate-close cleanup for simulation engine.",
+      "workstream": "trading-agent",
+      "authority": "operator instruction 2026-09-19",
+      "recorded": "2026-09-19T17:40+05:30",
+      "evidence": "docs/RESEARCH-ADAPTATION-ARCHITECTURE.md updated, stale entries removed",
+      "expires_hint": "Delete after ff6826a leaves guard window."
     }
   }
 }
