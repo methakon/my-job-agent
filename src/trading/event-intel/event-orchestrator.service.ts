@@ -20,6 +20,8 @@
  */
 
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 import {
   Event,
@@ -66,6 +68,13 @@ import {
 } from './event-types';
 
 import type { MarketDataSnapshot as _MDS } from './event-types';
+
+// ── Entity imports for DB persistence ────────────────────────────────────────
+import { EventIntelEvent } from './entities/event.entity';
+import { EventIntelVersion } from './entities/event-version.entity';
+import { EventIntelPrediction } from './entities/event-prediction.entity';
+import { EventIntelOutcome } from './entities/event-outcome.entity';
+import { EventIntelSourceObservation } from './entities/event-source-observation.entity';
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -289,6 +298,19 @@ function rawPayloadHash(title: string, source: string): string {
 export class EventOrchestratorService implements OnModuleDestroy {
   private readonly logger = new Logger(EventOrchestratorService.name);
 
+  constructor(
+    @InjectRepository(EventIntelEvent)
+    private readonly eventRepo: Repository<EventIntelEvent>,
+    @InjectRepository(EventIntelVersion)
+    private readonly versionRepo: Repository<EventIntelVersion>,
+    @InjectRepository(EventIntelPrediction)
+    private readonly predictionRepo: Repository<EventIntelPrediction>,
+    @InjectRepository(EventIntelOutcome)
+    private readonly outcomeRepo: Repository<EventIntelOutcome>,
+    @InjectRepository(EventIntelSourceObservation)
+    private readonly sourceObsRepo: Repository<EventIntelSourceObservation>,
+  ) {}
+
   // ── Polling timers (cleaned up on destroy) ─────────────────────────────────
   private offHoursTimer: ReturnType<typeof setInterval> | null = null;
   private marketHoursTimer: ReturnType<typeof setInterval> | null = null;
@@ -324,13 +346,301 @@ export class EventOrchestratorService implements OnModuleDestroy {
   /** Last-poll timestamps per source adapter. */
   private readonly lastPollMs = new Map<string, number>();
 
+  // ── DB Hydration & Persistence ────────────────────────────────────────────
+
+  /**
+   * Hydrate in-memory caches from the database on startup.
+   * DB is authoritative — in-memory caches are a hot-path optimization.
+   */
+  private async hydrateFromDatabase(): Promise<void> {
+    try {
+      // Load all events with their versions
+      const dbEvents = await this.eventRepo.find();
+      let hydratedCount = 0;
+      for (const dbEvt of dbEvents) {
+        const versions = await this.versionRepo.find({
+          where: { eventId: dbEvt.id },
+          order: { versionNumber: 'ASC' },
+        });
+        const event = this.dbEventToDomain(dbEvt, versions);
+        this.eventStore.set(event.id, event);
+        this.fingerprintIndex.set(event.id, event.id);
+        hydratedCount++;
+      }
+
+      // Load outcomes
+      const dbOutcomes = await this.outcomeRepo.find();
+      for (const dbOut of dbOutcomes) {
+        const outcome = this.dbOutcomeToDomain(dbOut);
+        this.outcomeSnapshots.set(dbOut.eventId, outcome);
+      }
+
+      // Load predictions
+      const dbPredictions = await this.predictionRepo.find({
+        order: { createdAt: 'ASC' },
+      });
+      const predictionsByEvent = new Map<string, PredictionRecord[]>();
+      for (const dbPred of dbPredictions) {
+        const pred = this.dbPredictionToDomain(dbPred);
+        const list = predictionsByEvent.get(dbPred.eventId) ?? [];
+        list.push(pred);
+        predictionsByEvent.set(dbPred.eventId, list);
+      }
+      for (const [eventId, preds] of predictionsByEvent) {
+        this.predictionHistory.set(eventId, preds);
+      }
+
+      this.logger.log(
+        `Hydrated from DB: ${hydratedCount} events, ${dbOutcomes.length} outcomes, ${dbPredictions.length} predictions`,
+      );
+    } catch (err) {
+      // DB hydration failure is non-fatal — in-memory state starts empty.
+      // This allows the service to function even if the DB is temporarily
+      // unavailable at startup.
+      this.logger.warn(`DB hydration failed (non-fatal): ${err}`);
+    }
+  }
+
+  /**
+   * Convert a DB event row + versions to the domain Event model.
+   */
+  private dbEventToDomain(
+    dbEvt: EventIntelEvent,
+    dbVersions: EventIntelVersion[],
+  ): Event {
+    const versions: EventVersion[] = dbVersions.map((v) => ({
+      version: v.versionNumber,
+      evidence: this.parseJsonSafe<EventEvidence[]>(v.evidenceBody, []),
+      createdAtMs: v.receivedAt.getTime(),
+      lifecycle: (v.stateBefore ?? dbEvt.lifecycle) as EventLifecycle,
+      reasonCode: v.stateTransitionReasonCode ?? 'initial_discovery',
+    }));
+
+    return {
+      id: dbEvt.canonicalEventId,
+      ontology: dbEvt.ontology as EventOntology,
+      lifecycle: dbEvt.lifecycle as EventLifecycle,
+      versions,
+      currentState: dbEvt.currentState as EventStateMachineState,
+      detectedAtMs: dbEvt.receivedAt.getTime(),
+      lastUpdatedAtMs: dbEvt.updatedAt.getTime(),
+    };
+  }
+
+  /**
+   * Convert a DB prediction row to the domain PredictionRecord model.
+   */
+  private dbPredictionToDomain(dbPred: EventIntelPrediction): PredictionRecord {
+    return {
+      predictionId: dbPred.id,
+      eventId: dbPred.eventId,
+      evidenceVersion: dbPred.versionNumber,
+      forecastDistribution: this.parseJsonSafe<ForecastDistribution>(
+        dbPred.moveQuantiles,
+        {
+          pUp: dbPred.pUp ?? 0.33,
+          pDown: dbPred.pDown ?? 0.33,
+          pFlat: dbPred.pFlat ?? 0.34,
+          moveQuantiles: [0, 0, 0, 0, 0],
+          timeToPeakQuantiles: [0, 0, 0],
+          persistenceProbability: 0,
+          ivChangeQuantiles: [0, 0, 0, 0, 0],
+          ivCrushProbability: dbPred.ivCrushProbability ?? 0,
+          skewChange: 0,
+          termStructureChange: 0,
+          liquidityStressProbability: dbPred.liquidityStressProbability ?? 0,
+          abstainProbability: dbPred.abstainProbability ?? 0.5,
+        },
+      ),
+      eventState: '' as EventStateMachineState,
+      optionFeatures: {} as OptionChainFeatures,
+      transmissionGraph: {} as TransmissionGraph,
+      predictedAtMs: dbPred.decisionAt.getTime(),
+      decision: (dbPred.paperCandidateType === 'ABSTAIN' || !dbPred.paperCandidateType)
+        ? 'ABSTAIN'
+        : 'PAPER_CANDIDATE',
+      confidence: dbPred.paperCandidateConfidence ?? dbPred.abstainProbability ?? 0,
+      paperCandidate: dbPred.paperCandidateType
+        ? {
+            strategy: dbPred.paperCandidateType,
+            underlying: 'NIFTY',
+            contracts: [],
+            entryTiming: 'PRE_EVENT',
+            maxHoldMinutes: 120,
+            riskParams: { maxLoss: 5000, targetProfit: 10000, stopLoss: 3000 },
+          }
+        : undefined,
+      abstainReason: dbPred.abstainReasons?.join('; '),
+      featureHash: dbPred.featureHash,
+    };
+  }
+
+  /**
+   * Convert a DB outcome row to the domain EventOutcome model.
+   */
+  private dbOutcomeToDomain(dbOut: EventIntelOutcome): EventOutcome {
+    return {
+      eventId: dbOut.eventId,
+      recordedAtMs: dbOut.createdAt.getTime(),
+      actualSpotMove: dbOut.actualSpotMove ?? 0,
+      actualIVChange: dbOut.actualIVMove ?? 0,
+      retracted: dbOut.wasRetracted,
+      lifecycleAtResolution: dbOut.finalLifecycle as EventLifecycle,
+      outcomeSource: dbOut.errorAttribution ?? 'database',
+      postEventState: dbOut.finalState,
+    };
+  }
+
+  /**
+   * Convert a DB source observation row to the domain EventRawRecord model.
+   */
+  private dbSourceObsToDomain(dbObs: EventIntelSourceObservation): EventRawRecord {
+    return {
+      title: dbObs.title,
+      body: dbObs.body ?? '',
+      sourceId: dbObs.sourceId,
+      sourceName: dbObs.sourceName,
+      sourceTier: (dbObs.sourceTier as SourceTier) ?? 'TIER_3',
+      sourceUrl: dbObs.sourceUrl ?? '',
+      sourcePublishedAt: dbObs.sourcePublishedAt.getTime(),
+      sourceUpdatedAt: dbObs.sourceUpdatedAt?.getTime() ?? 0,
+      receivedAt: dbObs.receivedAt.getTime(),
+      processedAt: dbObs.processedAt?.getTime() ?? Date.now(),
+      rawPayloadHash: dbObs.rawPayloadHash ?? '',
+      eventFingerprint: dbObs.eventFingerprint,
+      sourceType: dbObs.sourceType ?? 'unknown',
+      language: dbObs.language ?? 'en',
+    };
+  }
+
+  /**
+   * Persist an Event + its versions to the database.
+   * Upserts: event row and all version rows.
+   */
+  private async persistEventToDb(event: Event): Promise<void> {
+    try {
+      await this.eventRepo.save({
+        id: event.id,
+        ontology: event.ontology,
+        currentState: event.currentState,
+        lifecycle: event.lifecycle,
+        canonicalEventId: event.id,
+        detectedAtMs: event.detectedAtMs,
+        lastUpdatedAtMs: event.lastUpdatedAtMs,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      // Persist versions (upsert by eventId+version)
+      for (const v of event.versions) {
+        await this.versionRepo.save({
+          eventId: event.id,
+          version: v.version,
+          evidenceJson: v.evidence,
+          createdAtMs: v.createdAtMs,
+          lifecycle: v.lifecycle,
+          reasonCode: v.reasonCode,
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to persist event ${event.id} to DB: ${err}`);
+    }
+  }
+
+  /**
+   * Persist a prediction to the database.
+   */
+  private async persistPredictionToDb(
+    eventId: string,
+    prediction: PredictionRecord,
+  ): Promise<void> {
+    const predEntity = this.predictionRepo.create({
+      id: prediction.predictionId,
+      eventId,
+      versionNumber: prediction.evidenceVersion,
+      featureHash: prediction.featureHash ?? '',
+      pUp: prediction.forecastDistribution?.pUp ?? null,
+      pDown: prediction.forecastDistribution?.pDown ?? null,
+      pFlat: prediction.forecastDistribution?.pFlat ?? null,
+      moveQuantiles: JSON.stringify(prediction.forecastDistribution),
+      abstainProbability: prediction.forecastDistribution?.abstainProbability ?? null,
+      abstainReasons: prediction.abstainReason ? [prediction.abstainReason] : [],
+      paperCandidateType: prediction.paperCandidate?.strategy ?? null,
+      paperCandidateConfidence: prediction.confidence,
+      riskGateResult: prediction.decision,
+      riskGateRejectionReason: prediction.abstainReason ?? null,
+      sourcePublishedAt: new Date(prediction.predictedAtMs),
+      receivedAt: new Date(prediction.predictedAtMs),
+      normalizedAt: new Date(prediction.predictedAtMs),
+      decisionAt: new Date(prediction.predictedAtMs),
+    });
+    await this.predictionRepo.save(predEntity);
+  }
+
+  /**
+   * Persist an outcome to the database.
+   */
+  private async persistOutcomeToDb(
+    eventId: string,
+    outcome: EventOutcome,
+  ): Promise<void> {
+    const outcomeEntity = this.outcomeRepo.create({
+      id: `outcome-${eventId}`,
+      eventId,
+      finalLifecycle: outcome.lifecycleAtResolution as string,
+      finalState: outcome.postEventState,
+      totalVersions: 0,
+      wasRetracted: outcome.retracted,
+      actualSpotMove: outcome.actualSpotMove,
+      actualIVMove: outcome.actualIVChange,
+      errorAttribution: outcome.outcomeSource ?? null,
+      sourceObservationsCount: 0,
+    });
+    await this.outcomeRepo.save(outcomeEntity);
+  }
+
+  /**
+   * Persist a source observation to the database.
+   * Uses event_fingerprint for deduplication.
+   */
+  private async persistSourceObsToDb(rec: EventRawRecord): Promise<void> {
+    try {
+      await this.sourceObsRepo.save({
+        sourceId: rec.sourceId,
+        title: rec.title,
+        body: rec.body,
+        sourceName: rec.sourceName,
+        sourceUrl: rec.sourceUrl,
+        eventFingerprint: rec.rawPayloadHash,
+        receivedAt: rec.receivedAt,
+        processedAtMs: Date.now(),
+        canonicalEventId: rec.rawPayloadHash,
+      });
+    } catch (err) {
+      this.logger.warn(`Failed to persist source observation ${rec.sourceId}: ${err}`);
+    }
+  }
+
+  // ── Internal: JSON Helpers ────────────────────────────────────────────────
+
+  /** Parse JSON safely, returning fallback on failure. */
+  private parseJsonSafe<T>(json: string | null | undefined, fallback: T): T {
+    if (!json) return fallback;
+    try {
+      return JSON.parse(json) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
   // ── Lifecycle hooks ────────────────────────────────────────────────────────
 
   /**
    * Called automatically after NestJS dependency injection is complete.
-   * Starts both polling loops (off-hours and market-hours).
+   * Hydrates in-memory caches from DB, then starts both polling loops.
    */
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    await this.hydrateFromDatabase();
     this.startWatching();
   }
 
@@ -445,6 +755,10 @@ export class EventOrchestratorService implements OnModuleDestroy {
         for (const rec of normalized) {
           if (!this.rawObservationCache.has(rec.sourceId)) {
             this.rawObservationCache.set(rec.sourceId, rec);
+            // Fire-and-forget DB persistence for source observation
+            this.persistSourceObsToDb(rec).catch((err) => {
+              this.logger.warn(`DB persist source_obs failed: ${err.message}`);
+            });
             allNew.push(rec);
           }
         }
@@ -1106,6 +1420,10 @@ export class EventOrchestratorService implements OnModuleDestroy {
    */
   freezeOutcome(event: Event, outcome: EventOutcome): void {
     this.outcomeSnapshots.set(event.id, outcome);
+    // DB persist: outcome snapshot
+    this.persistOutcomeToDb(event.id, outcome).catch((err) => {
+      this.logger.warn(`DB persist outcome failed: ${err.message}`);
+    });
     this.logger.log(`Outcome frozen for event ${event.id}: spot=${outcome.actualSpotMove}pts`);
   }
 
@@ -1254,6 +1572,10 @@ export class EventOrchestratorService implements OnModuleDestroy {
                 ? { ...updated, currentState: transition.newState, lastUpdatedAtMs: Date.now() }
                 : updated;
               this.eventStore.set(existingEventId, finalEvent);
+              // DB persist: updated event with new version
+              this.persistEventToDb(finalEvent).catch((err) => {
+                this.logger.warn(`DB persist event (update) failed: ${err.message}`);
+              });
             }
           } else {
             // New event
@@ -1283,6 +1605,10 @@ export class EventOrchestratorService implements OnModuleDestroy {
 
             this.eventStore.set(event.id, event);
             this.fingerprintIndex.set(fingerprint, event.id);
+            // DB persist: new event
+            this.persistEventToDb(event).catch((err) => {
+              this.logger.warn(`DB persist event (new) failed: ${err.message}`);
+            });
           }
         } catch (err) {
           this.classifyError(cycleId, 'event_processing', raw.sourceId, err);
@@ -1381,6 +1707,10 @@ export class EventOrchestratorService implements OnModuleDestroy {
     this.eventStore.set(event.id, event);
     this.fingerprintIndex.set(fingerprint, event.id);
     latency.featureAt = Date.now();
+    // DB persist: event after pipeline processing
+    this.persistEventToDb(event).catch((err) => {
+      this.logger.warn(`DB persist event (pipeline) failed: ${err.message}`);
+    });
 
     // Novelty
     const novelty = this.calculateNovelty(event);
@@ -1575,7 +1905,7 @@ export class EventOrchestratorService implements OnModuleDestroy {
     graph: TransmissionGraph,
     latencies: PerformanceLatency,
   ): PredictionRecord {
-    return {
+    const prediction: PredictionRecord = {
       predictionId: `pred-abstain-${event.id}-${Date.now()}`,
       eventId: event.id,
       evidenceVersion: event.versions.length,
@@ -1589,6 +1919,11 @@ export class EventOrchestratorService implements OnModuleDestroy {
       abstainReason: `Abstain probability ${(forecast.abstainProbability * 100).toFixed(1)}% exceeds threshold`,
       featureHash: featureHash(optionFeatures),
     };
+    // DB persist: prediction (fire-and-forget)
+    this.persistPredictionToDb(event.id, prediction).catch((err) => {
+      this.logger.warn(`DB persist prediction (abstain) failed: ${err.message}`);
+    });
+    return prediction;
   }
 
   private createPaperCandidatePrediction(
@@ -1616,7 +1951,7 @@ export class EventOrchestratorService implements OnModuleDestroy {
       },
     };
 
-    return {
+    const prediction: PredictionRecord = {
       predictionId: `pred-paper-${event.id}-${Date.now()}`,
       eventId: event.id,
       evidenceVersion: event.versions.length,
@@ -1630,6 +1965,11 @@ export class EventOrchestratorService implements OnModuleDestroy {
       paperCandidate,
       featureHash: featureHash(optionFeatures),
     };
+    // DB persist: prediction (fire-and-forget)
+    this.persistPredictionToDb(event.id, prediction).catch((err) => {
+      this.logger.warn(`DB persist prediction (paper_candidate) failed: ${err.message}`);
+    });
+    return prediction;
   }
 
   // ── Internal: State Maintenance ────────────────────────────────────────────
@@ -1654,6 +1994,10 @@ export class EventOrchestratorService implements OnModuleDestroy {
               lastUpdatedAtMs: now,
             };
             this.eventStore.set(event.id, updated);
+            // DB persist: state transition to S7
+            this.persistEventToDb(updated).catch((err) => {
+              this.logger.warn(`DB persist event (S7 transition) failed: ${err.message}`);
+            });
           }
         }
       }
