@@ -9,6 +9,8 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
  */
 @Entity('unified_market_snapshots')
 @Index('idx_unified_market_snapshots_symbol_ts', ['symbol', 'ts'])
+@Index('idx_unified_market_snapshots_received', ['receivedTimestamp'])
+@Index('idx_unified_market_snapshots_symbol_received', ['symbol', 'receivedTimestamp'])
 export class UnifiedMarketSnapshot {
   @PrimaryGeneratedColumn('uuid')
   id: string;

@@ -1,6 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createStructuredLogger } from '../shared/structured-logger';
+import { ErrorClassification } from '../shared/error-classifications';
 import { ExecutionProvider, ExecutionMode, PlaceOrderInput, OrderState, PositionState } from './execution-provider.interface';
+import { ProviderTokenService } from './provider-token.service';
 
 /**
  * Upstox SANDBOX-only execution provider (2026-09-05 task).
@@ -18,32 +21,82 @@ import { ExecutionProvider, ExecutionMode, PlaceOrderInput, OrderState, Position
  * order/execution state passes through this provider. Hermes persists sandbox
  * ORDER results in the isolated (on_real_data=false) records, never ticks.
  *
- * Credentials are intentionally NOT configured yet (account pending approval):
- * UPSTOX_SANDBOX_CLIENT_ID / _SECRET / _ACCESS_TOKEN remain unset, so Hermes
- * starts normally and this provider stays disabled.
+ * Credentials: UPSTOX_SANDBOX_CLIENT_ID / _SECRET set in .env.
+ * Access token loaded from database (provider_tokens table, provider='upstox_sandbox')
+ * with env var fallback. See ProviderTokenService for encrypted storage and rotation.
  */
 @Injectable()
 export class UpstoxSandboxProvider implements ExecutionProvider {
 	readonly provider = 'UPSTOX';
 	readonly mode: ExecutionMode = 'SANDBOX';
 	readonly onRealData = false;
-	private readonly logger = new Logger('UpstoxSandboxProvider');
+	private readonly logger = createStructuredLogger('UpstoxSandboxProvider');
 
 	private readonly baseUrl: string;
 	private readonly clientId: string;
 	private readonly clientSecret: string;
-	private readonly accessToken: string;
+	private accessToken: string;
 
-	constructor(config: ConfigService) {
+	constructor(
+		config: ConfigService,
+		@Optional() private readonly tokenService?: ProviderTokenService,
+	) {
 		// Fail closed: a REAL-mode request is a configuration error.
 		const requestedMode = (config.get<string>('UPSTOX_SANDBOX_MODE') || 'SANDBOX').toUpperCase();
 		if (requestedMode !== 'SANDBOX') {
+			this.logger.errorClassified({
+				classification: ErrorClassification.FATAL_STARTUP,
+				component: 'UpstoxSandboxProvider',
+				operation: 'constructor',
+				message: `Refusing to start: UPSTOX_SANDBOX_MODE must be SANDBOX (got ${requestedMode})`,
+				recovered: false,
+			});
 			throw new Error('[UPSTOX][SANDBOX] refusing to start: UPSTOX_SANDBOX_MODE must be SANDBOX (live Upstox is out of scope)');
 		}
 		this.baseUrl = config.get<string>('UPSTOX_SANDBOX_BASE_URL') || 'https://api-sandbox.upstox.com';
 		this.clientId = config.get<string>('UPSTOX_SANDBOX_CLIENT_ID') || '';
 		this.clientSecret = config.get<string>('UPSTOX_SANDBOX_CLIENT_SECRET') || '';
 		this.accessToken = config.get<string>('UPSTOX_SANDBOX_ACCESS_TOKEN') || '';
+	}
+
+	/**
+	 * Load access token from database (provider_tokens table, provider='upstox_sandbox').
+	 * Called after NestJS DI is ready. Falls back to env var if no DB token exists.
+	 * Returns true if DB token was loaded, false if using env fallback.
+	 */
+	async loadFromDb(): Promise<boolean> {
+		if (!this.tokenService) return false;
+		try {
+			const dbToken = await this.tokenService.getActiveAccessToken('upstox_sandbox');
+			if (dbToken) {
+				this.accessToken = dbToken;
+				this.logger.log('[UPSTOX][SANDBOX] access token loaded from database');
+				return true;
+			}
+		} catch (err) {
+			this.logger.warn(`[UPSTOX][SANDBOX] failed to load token from DB: ${(err as Error).message}`);
+		}
+		this.logger.log('[UPSTOX][SANDBOX] using env var fallback for access token');
+		return false;
+	}
+
+	/**
+	 * Store current access token to database. Called after obtaining a new token
+	 * (e.g., from manual OAuth or token refresh).
+	 */
+	async storeToDb(accessToken: string, refreshToken?: string): Promise<void> {
+		if (!this.tokenService) {
+			this.logger.warn('[UPSTOX][SANDBOX] cannot store token — ProviderTokenService not available');
+			return;
+		}
+		await this.tokenService.storeTokens(
+			accessToken,
+			refreshToken ?? null,
+			this.clientId,
+			'upstox_sandbox',
+		);
+		this.accessToken = accessToken;
+		this.logger.log('[UPSTOX][SANDBOX] access token stored to database');
 	}
 
 	get enabled(): boolean {

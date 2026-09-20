@@ -46,8 +46,8 @@ import { OptionTradingPageController } from './trading/option-trading-page.contr
 import { TradeBookModule } from './trading/trade-book.module';
 import { FnoMarketDataService } from './trading/fno-market-data.service';
 import { FnoMarketDataController } from './trading/fno-market-data.controller';
-import { FyersToken } from './trading/fyers-token.entity';
-import { FyersTokenService } from './trading/fyers-token.service';
+import { ProviderToken } from './trading/provider-token.entity';
+import { ProviderTokenService } from './trading/provider-token.service';
 import { FyersOAuthController } from './trading/fyers-oauth.controller';
 import { FyersAuthController } from './trading/fyers-auth.controller';
 import { MarketDataInspectionController } from './trading/market-data-inspection.controller';
@@ -74,6 +74,8 @@ import { ProjectStatusService } from './project-status/project-status.service';
 import { ProjectStatusPageController } from './project-status/project-status-page.controller';
 import { ProjectClarification } from './project-status/project-clarification.entity';
 import { ProjectClarificationService } from './project-status/project-clarification.service';
+import { TradingRoadmapService } from './project-status/trading-roadmap.service';
+import { TradingStatusController } from './project-status/trading-status.controller';
 import { JobApplicationRoadmapModule } from './job-application-roadmap/job-application-roadmap.module';
 import { JobApplicationRoadmapPageController } from './job-application-roadmap/job-application-roadmap-page.controller';
 import { JobApplicationRoadmapItem } from './job-application-roadmap/job-application-roadmap-item.entity';
@@ -135,6 +137,9 @@ import { PreOpenModule } from './trading/pre-open/pre-open.module';
 import { UnifiedOptionQuote } from './trading/unified-market-data/unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './trading/unified-market-data/unified-market-snapshot.entity';
 import { PatternSignal } from './trading/pattern-engine/pattern-signal.entity';
+import { AdaptationCandidate } from './trading/research/adaptation-candidate.entity';
+import { ResearchResult } from './trading/research/research-result.entity';
+import { ValidationResult } from './trading/research/validation-result.entity';
 import { PatternEngineService } from './trading/pattern-engine/pattern-engine.service';
 import { PatternSignalDispatchService } from './trading/pattern-engine/pattern-signal-dispatch.service';
 import { PatternEngineController } from './trading/pattern-engine/pattern-engine.controller';
@@ -163,7 +168,7 @@ import {
       InterviewQuestion, MailAccount, LearningWeight, MuhurtaWindow, PreApplyItem,
       FnfPortfolio, FnfTrade, FnfMarketSnapshot, FnfDecayCalibration, FnfOptionContract, FnfOptionQuote,
       FnfMarketSnapshotHistory, FnfOptionQuoteHistory, FnfTradeReflection, FnfDecisionJournal, FnfTradeReport,
-      SandboxTick, JobApplicationRoadmapItem, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, FyersToken, AgentTodoLog, Session,
+      SandboxTick, JobApplicationRoadmapItem, ProjectChecklistItem, TradeBookImport, TradeBookImportLog, ProviderToken, AgentTodoLog, Session,
       ProjectClarification,
       SideIncomeOpportunity, DatabaseSyncAudit, UpstoxPortfolio, UpstoxTrade,
       // Upstox LIVE paper entities (isolated)
@@ -172,6 +177,8 @@ import {
       UpstoxLivePaperWeeklyReport, UpstoxLivePaperToken,
       // Common normalized live store + pattern/learning dataset
       UnifiedOptionQuote, UnifiedMarketSnapshot, PatternSignal,
+      // Research & adaptation
+      AdaptationCandidate, ResearchResult, ValidationResult,
     ]),
     SideIncomeModule,
     AuthModule,
@@ -191,7 +198,7 @@ import {
     VisaGuidePageController, AstroController, PreApplyPageController, FnfTradingController, FnfTradingPageController,
     OptionTradingPageController, FnoMarketDataController, MarketDataInspectionController, MarketDataPageController,
     FnfOptionChainController, FailedApplicationsPageController, JobApplicationRoadmapPageController,
-    ProjectStatusPageController, QuickQuestionsController,
+    ProjectStatusPageController, TradingStatusController, QuickQuestionsController,
     CvRegionFormatController, FyersAuthController, FyersOAuthController, UpstoxTradingPageController,
     PatternEngineController,
     AuthController, // auth endpoints must register BEFORE the fallback (root-module controllers register first)
@@ -206,7 +213,7 @@ import {
     DailyDigestService, LinkedInProfileService, EmailTrackerService, InterviewPrepService, AstroMuhurtaService,
     AstroLeadScoringService, PreApplyItemRepository, PreApplyService, MuhurtaSendService, QualificationService,
     FnfTradingService, FnoMarketDataService, FnfOptionChainService, MarketDataInspectionService, FeatureEngineService,
-    UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, FyersTokenService,
+    UpstoxSandboxProvider, UpstoxSandboxIngestionService, ProjectStatusService, TradingRoadmapService, ProviderTokenService,
     ProjectClarificationService,
     PatternEngineService, PatternSignalDispatchService,
     CandidateEvidenceService,

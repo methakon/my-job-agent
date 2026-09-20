@@ -2,7 +2,7 @@ import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { FnfTradingService, WEEKDAY_NAMES, DECAY_DEFAULTS } from './fnf-trading.service';
 import { FnoMarketDataService } from './fno-market-data.service';
-import { FyersTokenService } from './fyers-token.service';
+import { ProviderTokenService } from './provider-token.service';
 import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
 import { BypassAuth, AllowIps } from '../auth/bypass-auth.decorator';
 
@@ -40,7 +40,7 @@ const badge = (label: string, cls: string): string => `<span class="badge ${cls}
 export class FnfTradingPageController {
 	constructor(
 		private readonly trading: FnfTradingService,
-		private readonly fyersTokens: FyersTokenService,
+		private readonly fyersTokens: ProviderTokenService,
 		private readonly feed: FnoMarketDataService,
 		private readonly unifiedStore: UnifiedMarketDataService,
 	) {}
@@ -70,7 +70,7 @@ export class FnfTradingPageController {
 			: fyers === 'error'
 				? `<div class="banner bad">⚠️ FYERS login failed — ${esc(reason ?? 'unknown reason')}. Click <b>GET THE TOKEN</b> to try again (login link is valid for 5 minutes).</div>`
 				: '';
-		const tokenInfo = await this.fyersTokens.getActiveTokenInfo();
+		const tokenInfo = await this.fyersTokens.getActiveTokenInfo('fyers', 'live');
 		const feedStatus = this.feed.status();
 		// Tick source of truth: this web app holds no broker socket of its own
 		// (one writer only — the headless trading engine), so the honest "is the

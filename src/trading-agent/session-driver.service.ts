@@ -1,7 +1,16 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FeedHealthService } from '../trading/unified-market-data/feed-health.service';
+import { UnifiedArchiveService, ArchiveRunResult } from '../trading/unified-market-data/unified-archive.service';
 import { PersistenceHealthMachine } from '../shared/persistence-state';
+import { OffHoursResearchService } from '../trading/research/off-hours-research.service';
+import { HistoricalContextBuilderService, ResearchContext } from '../trading/unified-market-data/historical-context-builder.service';
+// import { EventOrchestratorService } from '../trading/event-intel/event-orchestrator.service';  // DISABLED: memory pressure on 8GB; re-enable after upgrade
+import { FnfTrade } from '../trading/fnf-trade.entity';
+import { AdaptationCandidate } from '../trading/research/adaptation-candidate.entity';
+import { TradeRecord } from '../trading/research/validation-engine.service';
 
 type Signal = Awaited<ReturnType<FnfTradingService['generateSignals']>>[number];
 type Portfolio = Awaited<ReturnType<FnfTradingService['listPortfolios']>>[number];
@@ -33,13 +42,26 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 	private lastArmedLog = 0;
 	private lastSessionDate = '';
 	private lastSessionArchiveDate = '';
+	private lastContextLoadDate = '';
 	private lastDayArchiveDate = '';
 	private persistencePolicy: PersistencePolicy = 'ALLOW';
 
+	/** Historical research context loaded once per day at session startup.
+	 *  Accessible by trading services without DB queries (hot-path safe). */
+	activeContext: ResearchContext | null = null;
+
 	constructor(
+		@InjectRepository(FnfTrade)
+		private readonly tradeRepo: Repository<FnfTrade>,
+		@InjectRepository(AdaptationCandidate)
+		private readonly candidateRepo: Repository<AdaptationCandidate>,
 		private readonly trading: FnfTradingService,
 		private readonly feedHealth: FeedHealthService,
 		private readonly persistenceHealth: PersistenceHealthMachine,
+		private readonly unifiedArchive: UnifiedArchiveService,
+		private readonly offHoursResearch: OffHoursResearchService,
+		private readonly contextBuilder: HistoricalContextBuilderService,
+		// private readonly eventOrchestrator: EventOrchestratorService,  // DISABLED: memory pressure on 8GB; re-enable after upgrade
 	) {
 		this.intervalMs = Math.max(5_000, Number(process.env.FNO_SESSION_DRIVER_MS ?? 10_000));
 		this.paperQty = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
@@ -66,16 +88,32 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 			const today = this.istDateKey(now);
 			if (dow >= 1 && dow <= 5 && minutes >= this.sessionEndMin && this.lastSessionArchiveDate !== today) {
 				this.lastSessionArchiveDate = today;
+				// FNF archival (existing).
 				const moved = await this.trading.archiveTicksBefore(`${today} 15:30:00`);
 				if (moved.snapshots || moved.quotes) {
 					this.logger.log(`session archive ${today}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) → history`);
 				}
+				// Unified archival (new).
+				const unified = await this.unifiedArchive.archiveTicksBefore(`${today} 15:30:00`);
+				if (unified.snapshots.deleted || unified.quotes.deleted) {
+					this.logger.log(`unified session archive ${today}: ${unified.snapshots.deleted} snapshot(s), ${unified.quotes.deleted} quote(s) → history (${unified.durationMs}ms)`);
+				} else if (unified.error) {
+					this.logger.warn(`unified session archive ${today} error: ${unified.error}`);
+				}
 			}
 			if (this.lastDayArchiveDate !== today) {
 				this.lastDayArchiveDate = today;
+				// FNF day-rollover archival (existing).
 				const moved = await this.trading.archiveTicksBefore(`${today} 00:00:00`);
 				if (moved.snapshots || moved.quotes) {
 					this.logger.log(`day-rollover archive ${today}: ${moved.snapshots} snapshot(s), ${moved.quotes} quote(s) → history`);
+				}
+				// Unified day-rollover archival (new).
+				const unified = await this.unifiedArchive.archiveTicksBefore(`${today} 00:00:00`);
+				if (unified.snapshots.deleted || unified.quotes.deleted) {
+					this.logger.log(`unified day-rollover archive ${today}: ${unified.snapshots.deleted} snapshot(s), ${unified.quotes.deleted} quote(s) → history (${unified.durationMs}ms)`);
+				} else if (unified.error) {
+					this.logger.warn(`unified day-rollover archive ${today} error: ${unified.error}`);
 				}
 			}
 		} catch (error) {
@@ -140,6 +178,15 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 
 		// Tick archival runs unconditionally (even with no portfolio / out of session).
 		await this.maybeArchiveSessions(now);
+
+		// ── Event Intelligence: DISABLED ─────────────────────────────────────
+		// Trigger event ingestion from all registered source adapters.
+		// Disabled due to memory pressure on 8GB RAM machine.
+		// Re-enable after hardware upgrade by uncommenting the 3 lines above.
+		// this.eventOrchestrator.ingestEvents().catch((err) => {
+		// 	this.throttledWarn(`event ingestion failed: ${(err as Error).message}`);
+		// });
+
 		const portfolios = (await this.trading.listPortfolios()).filter((p) => p.autoTradeEnabled);
 		if (!portfolios.length) {
 			const ts = Date.now();
@@ -154,9 +201,19 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 			// Log the session summary once after close, then an hourly idle heartbeat.
 			const { dow } = this.istParts(now);
 			const dayKey = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
-			if (dow >= 1 && dow <= 5 && this.lastSessionDate !== dayKey && now.getUTCHours() + 5 >= 16) {
+			// IST minute-based check: utcMinutes + 330 >= 960 (16:00 IST = 960 min)
+			const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+			const istMinutes = utcMinutes + 330; // +5:30
+			if (dow >= 1 && dow <= 5 && this.lastSessionDate !== dayKey && istMinutes >= 960) {
 				this.lastSessionDate = dayKey;
 				await this.logLearningSummary();
+
+				// ── Off-Hours Research (asynchronous, never blocks trading) ──
+				// Fire-and-forget: runs post-market analysis + adaptation review.
+				// Errors are logged, never crash the trading agent.
+				this.runOffHoursResearchSafely().catch((err) => {
+					this.logger.error(`[RESEARCH] unhandled off-hours research error: ${(err as Error).message}`);
+				});
 			}
 			if (Date.now() - this.lastArmedLog > 3_600_000) {
 				this.lastArmedLog = Date.now();
@@ -166,6 +223,13 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 				);
 			}
 			return;
+		}
+
+		// ── Session startup: load historical context (once per day, before first trade) ──
+		const todayKey = `${now.getUTCFullYear()}-${now.getUTCMonth() + 1}-${now.getUTCDate()}`;
+		if (this.lastContextLoadDate !== todayKey) {
+			this.lastContextLoadDate = todayKey;
+			await this.loadHistoricalContext();
 		}
 
 		for (const portfolio of portfolios) {
@@ -303,6 +367,57 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 			}
 		} catch (error) {
 			this.throttledWarn(`learning summary failed: ${(error as Error).message}`);
+		}
+	}
+
+	/**
+	 * Run off-hours research asynchronously. Fire-and-forget from session close.
+	 * Loads today's closed trades from DB for the validation pipeline.
+	 * Errors logged, never crash the agent.
+	 */
+	private async runOffHoursResearchSafely(): Promise<void> {
+		try {
+			const today = new Date();
+			const sessionDate = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
+			// Load ALL closed trades for the validation pipeline (not just today's).
+			// ValidationEngine compares candidate performance against historical trades.
+			const allTrades = await this.tradeRepo.find({
+				where: { status: 'CLOSED' as any },
+				order: { orderedAt: 'ASC' },
+			});
+			this.logger.log(`[RESEARCH] off-hours research triggered for ${sessionDate}, ${allTrades.length} closed trades loaded`);
+			const report = await this.offHoursResearch.runDailyResearch('NIFTY', sessionDate, allTrades as any);
+			this.logger.log(
+				`[RESEARCH] completed: regime=${report.marketRegime}, ${report.candidateImprovements.length} candidates`,
+			);
+		} catch (error) {
+			this.logger.error(`[RESEARCH] off-hours research failed (non-fatal): ${(error as Error).message}`);
+		}
+	}
+
+	/**
+	 * Load precomputed historical context into the builder's cache.
+	 * Called at session startup. Reads from the history tables via the
+	 * HistoricalContextBuilder's cached precomputed context (memory-only).
+	 * No per-tick DB queries — just a Map lookup after the initial load.
+	 */
+	private async loadHistoricalContext(): Promise<void> {
+		try {
+			// Load ACTIVE adaptation candidates from DB (if any exist).
+			const activeCandidates = await this.candidateRepo.find({
+				where: { status: 'ACTIVE' as any },
+			});
+			const context = await this.contextBuilder.assembleContext('NIFTY', activeCandidates);
+			this.activeContext = context;
+			this.logger.log(
+				`[CONTEXT] loaded: regime=${context.historical.regime}, ` +
+				`vol=${context.historical.volatility.dailyVol ?? 'N/A'}, ` +
+				`trend=${context.historical.trend.direction}, ` +
+				`patterns=${Object.keys(context.patterns.frequency).length}, ` +
+				`adaptations=${activeCandidates.length}`,
+			);
+		} catch (error) {
+			this.logger.warn(`[CONTEXT] historical context load failed (non-fatal): ${(error as Error).message}`);
 		}
 	}
 }

@@ -4,11 +4,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { mysqlConfig } from '../shared/db.config';
 import { AstroMuhurtaService } from '../astro/astro-muhurta.service';
 import { EncryptionService } from '../auth/encryption.service';
-import { FyersTokenService } from '../trading/fyers-token.service';
+import { ProviderTokenService } from '../trading/provider-token.service';
 import { FnfOptionChainService } from '../trading/fnf-option-chain.service';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FnoMarketDataService } from '../trading/fno-market-data.service';
-import { FyersToken } from '../trading/fyers-token.entity';
+import { ProviderToken } from '../trading/provider-token.entity';
 import { MuhurtaWindow } from '../astro/muhurta-window.entity';
 import { FnfPortfolio } from '../trading/fnf-portfolio.entity';
 import { FnfTrade } from '../trading/fnf-trade.entity';
@@ -25,6 +25,9 @@ import { SandboxTick } from '../trading/sandbox-tick.entity';
 import { UpstoxSandboxProvider } from '../trading/upstox-sandbox.provider';
 import { UpstoxSandboxIngestionService } from '../trading/upstox-sandbox-ingestion.service';
 import { UnifiedMarketDataModule } from '../trading/unified-market-data/unified-market-data.module';
+import { ResearchModule } from '../trading/research/research.module';
+import { AdaptationCandidate } from '../trading/research/adaptation-candidate.entity';
+// import { EventIntelModule } from '../trading/event-intel/event-intel.module';  // DISABLED: memory pressure on 8GB; re-enable after upgrade
 import { SessionDriverService } from './session-driver.service';
 
 /**
@@ -56,9 +59,12 @@ import { SessionDriverService } from './session-driver.service';
       FnfDecisionJournal,
       FnfTradeReport,
       SandboxTick,
-      FyersToken,
+      ProviderToken,
+      AdaptationCandidate,
     ]),
     UnifiedMarketDataModule,
+    ResearchModule,
+    // EventIntelModule,  // DISABLED: memory pressure on 8GB; re-enable after upgrade
   ],
   providers: [
     AstroMuhurtaService,
@@ -69,8 +75,9 @@ import { SessionDriverService } from './session-driver.service';
     UpstoxSandboxProvider,
     UpstoxSandboxIngestionService,
     // FYERS token DB store (FnoMarketDataService reads its access token from
-    // the single fyers_tokens row written by the OAuth callback — not .env).
-    FyersTokenService,
+    // the single provider_tokens row written by the OAuth callback — not .env).
+    ProviderTokenService,
+    // Upstox token DB store (reuses provider_tokens table with provider='upstox_sandbox').
     EncryptionService,
   ],
 })

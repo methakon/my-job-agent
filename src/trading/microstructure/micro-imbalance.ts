@@ -36,6 +36,21 @@
  * and no decision, order or risk path reads it. Versioned: microimb-v1.
  */
 
+/**
+ * ── DISCLAIMER ─────────────────────────────────────────────────────────────────
+ * ABSORPTION / STACKED IMBALANCE AS HYPOTHESIS, NOT PROOF.
+ *
+ * Strong queue imbalance or microprice offset are HYPOTHESSES about directional
+ * pressure — they are NOT proof of directional intent. A large bid-side stack
+ * may be a market-maker hedging, an algo layering, or a stale order that will
+ * be pulled. Stacked imbalance shows WHERE size sits, not WHY it sits there.
+ *
+ * Do not use queue imbalance or microprice offset as standalone entry signals.
+ * They must be combined with other evidence (trade flow, event context, regime)
+ * and treated as probabilistic hints, not deterministic triggers.
+ * ───────────────────────────────────────────────────────────────────────────────
+ */
+
 export const MICRO_IMBALANCE_VERSION = 'microimb-v1';
 
 export type MicroStatus = 'OK' | 'UNAVAILABLE' | 'DISABLED';

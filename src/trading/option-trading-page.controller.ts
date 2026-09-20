@@ -2,7 +2,7 @@ import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { DECAY_DEFAULTS, FnfTradingService, WEEKDAY_NAMES } from './fnf-trading.service';
 import { FnoMarketDataService } from './fno-market-data.service';
-import { FyersTokenService } from './fyers-token.service';
+import { ProviderTokenService } from './provider-token.service';
 
 const esc = (s: unknown): string =>
   String(s ?? '').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] as string));
@@ -29,7 +29,7 @@ export class OptionTradingPageController {
   constructor(
     private readonly trading: FnfTradingService,
     private readonly feed: FnoMarketDataService,
-    private readonly fyersTokens: FyersTokenService,
+    private readonly fyersTokens: ProviderTokenService,
   ) {}
 
   @Get()
@@ -65,7 +65,7 @@ export class OptionTradingPageController {
       : fyers === 'error'
         ? `<div class="banner bad">⚠️ FYERS login failed — ${esc(reason ?? 'unknown reason')}. Click <b>GET THE TOKEN</b> to try again (login link is valid for 5 minutes).</div>`
         : '';
-    const tokenInfo = await this.fyersTokens.getActiveTokenInfo();
+    const tokenInfo = await this.fyersTokens.getActiveTokenInfo('fyers', 'live');
     const fmtIst = (d: Date | null): string =>
       d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
     const tokenExpired = !!tokenInfo?.expiresAt && tokenInfo.expiresAt.getTime() < Date.now();

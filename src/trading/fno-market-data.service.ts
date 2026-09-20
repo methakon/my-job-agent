@@ -3,7 +3,7 @@ import * as crypto from 'crypto';
 import { FnfTradingService } from './fnf-trading.service';
 import { parseYahooChartResponse, parseYahooSymbolConfig, YahooSymbolConfig } from './yahoo-finance-parser';
 import { FnfOptionChainService } from './fnf-option-chain.service';
-import { FyersTokenService } from './fyers-token.service';
+import { ProviderTokenService } from './provider-token.service';
 import { OptionContract } from './option-chain-parser';
 import { shouldAcceptTick } from './market-feed-guard';
 import { UnifiedMarketDataService } from './unified-market-data/unified-market-data.service';
@@ -126,7 +126,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly trading: FnfTradingService,
     private readonly optionChain: FnfOptionChainService,
-    private readonly fyersTokens: FyersTokenService,
+    private readonly fyersTokens: ProviderTokenService,
     private readonly unified: UnifiedMarketDataService,
     private readonly feedHealth: FeedHealthService,
     private readonly arbitration: FeedArbitrationService,
@@ -449,7 +449,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     // written by the OAuth callback); .env FYERS_ACCESS_TOKEN is only a
     // fallback for boxes that have never completed a callback login.
     const appId = process.env.FYERS_APP_ID?.trim();
-    const dbToken = await this.fyersTokens.getActiveAccessToken();
+    const dbToken = await this.fyersTokens.getActiveAccessToken('fyers', 'live');
     const accessToken = (dbToken ?? process.env.FYERS_ACCESS_TOKEN)?.trim() ?? null;
     if (!appId || !accessToken) {
       this.credentialsOk = false;
@@ -570,7 +570,7 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
   private async tryFyersReconnect(): Promise<void> {
     if (this.destroyed) return;
     try {
-      const token = await this.fyersTokens.getActiveAccessToken();
+      const token = await this.fyersTokens.getActiveAccessToken('fyers', 'live');
       if (!token) {
         this.credentialsOk = false;
         return;

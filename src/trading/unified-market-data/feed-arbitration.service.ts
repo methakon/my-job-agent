@@ -1,4 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { createStructuredLogger } from '../../shared/structured-logger';
+import { ErrorClassification } from '../../shared/error-classifications';
 import { MarketDataFeedLease } from './market-data-feed-lease.entity';
 import { LEASE_STORE, LeaseStore } from './lease-connection.store';
 import {
@@ -104,7 +106,7 @@ export const withTimeout = async <T>(
  */
 @Injectable()
 export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
-  private readonly logger = new Logger(FeedArbitrationService.name);
+  private readonly logger = createStructuredLogger(FeedArbitrationService.name);
   private readonly local = new Map<string, FeedRegistration>();
   private readonly enabled: boolean;
   private readonly mode: ArbitrationMode;
@@ -233,6 +235,14 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
       if (nowMs - this.lastFailOpenWarnMs > 300_000) {
         this.lastFailOpenWarnMs = nowMs;
         this.logger.warn(`[FEED-ARBITER] lease read failed (${(error as Error).message}) — failing OPEN for local producers`);
+        this.logger.warnWithContext('[FEED-ARBITER] lease read failed — failing OPEN for local producers', {
+          component: 'FeedArbitration',
+          errorCode: 'LEASE_READ_FAILED',
+          operation: 'read',
+          message: (error as Error).message,
+          recoveryAction: 'fail_open',
+          recovered: true,
+        });
       }
     }
 
@@ -331,6 +341,15 @@ export class FeedArbitrationService implements OnModuleInit, OnModuleDestroy {
       if (now2 - this.lastFailOpenWarnMs > 300_000) {
         this.lastFailOpenWarnMs = now2;
         this.logger.warn(`[FEED-ARBITER] lease write failed for ${feedName}: ${(error as Error).message}`);
+        this.logger.warnWithContext(`[FEED-ARBITER] lease write failed for ${feedName}`, {
+          component: 'FeedArbitration',
+          provider: feedName,
+          errorCode: 'LEASE_WRITE_FAILED',
+          operation: 'beat',
+          message: (error as Error).message,
+          recoveryAction: 'retry_next_poll',
+          recovered: false,
+        });
       }
     }
   }

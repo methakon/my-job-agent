@@ -12,6 +12,8 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
 @Entity('unified_option_quotes')
 @Index('idx_unified_option_quotes_key_ts', ['instrumentKey', 'ts'])
 @Index('idx_unified_option_quotes_chain', ['underlying', 'expiry', 'strike'])
+@Index('idx_unified_option_quotes_received', ['receivedTimestamp'])
+@Index('idx_unified_option_quotes_underlying_received', ['underlying', 'receivedTimestamp'])
 export class UnifiedOptionQuote {
   @PrimaryGeneratedColumn('uuid')
   id: string;

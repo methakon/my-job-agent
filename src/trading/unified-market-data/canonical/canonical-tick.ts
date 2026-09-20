@@ -427,6 +427,9 @@ export function interpretObservation(
   }
 
   const ltp = num(observation.ltp);
+  if (present(observation.ltp) && ltp === null) {
+    return reject('INVALID_VALUE', `ltp "${observation.ltp}" is not a valid number`, name);
+  }
   const bid = num(observation.bid);
   const ask = num(observation.ask);
   const bidQty = num(observation.bidQty);
