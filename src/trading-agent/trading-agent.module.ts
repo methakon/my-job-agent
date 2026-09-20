@@ -27,7 +27,7 @@ import { UpstoxSandboxIngestionService } from '../trading/upstox-sandbox-ingesti
 import { UnifiedMarketDataModule } from '../trading/unified-market-data/unified-market-data.module';
 import { ResearchModule } from '../trading/research/research.module';
 import { AdaptationCandidate } from '../trading/research/adaptation-candidate.entity';
-import { EventIntelModule } from '../trading/event-intel/event-intel.module';
+// import { EventIntelModule } from '../trading/event-intel/event-intel.module';  // DISABLED: memory pressure on 8GB; re-enable after upgrade
 import { SessionDriverService } from './session-driver.service';
 
 /**
@@ -64,7 +64,7 @@ import { SessionDriverService } from './session-driver.service';
     ]),
     UnifiedMarketDataModule,
     ResearchModule,
-    EventIntelModule,
+    // EventIntelModule,  // DISABLED: memory pressure on 8GB; re-enable after upgrade
   ],
   providers: [
     AstroMuhurtaService,

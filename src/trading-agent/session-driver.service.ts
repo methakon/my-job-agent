@@ -7,7 +7,7 @@ import { UnifiedArchiveService, ArchiveRunResult } from '../trading/unified-mark
 import { PersistenceHealthMachine } from '../shared/persistence-state';
 import { OffHoursResearchService } from '../trading/research/off-hours-research.service';
 import { HistoricalContextBuilderService, ResearchContext } from '../trading/unified-market-data/historical-context-builder.service';
-import { EventOrchestratorService } from '../trading/event-intel/event-orchestrator.service';
+// import { EventOrchestratorService } from '../trading/event-intel/event-orchestrator.service';  // DISABLED: memory pressure on 8GB; re-enable after upgrade
 import { FnfTrade } from '../trading/fnf-trade.entity';
 import { AdaptationCandidate } from '../trading/research/adaptation-candidate.entity';
 import { TradeRecord } from '../trading/research/validation-engine.service';
@@ -61,7 +61,7 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		private readonly unifiedArchive: UnifiedArchiveService,
 		private readonly offHoursResearch: OffHoursResearchService,
 		private readonly contextBuilder: HistoricalContextBuilderService,
-		private readonly eventOrchestrator: EventOrchestratorService,
+		// private readonly eventOrchestrator: EventOrchestratorService,  // DISABLED: memory pressure on 8GB; re-enable after upgrade
 	) {
 		this.intervalMs = Math.max(5_000, Number(process.env.FNO_SESSION_DRIVER_MS ?? 10_000));
 		this.paperQty = Math.max(1, Number(process.env.FNO_PAPER_QTY ?? 1));
@@ -179,13 +179,13 @@ export class SessionDriverService implements OnModuleInit, OnModuleDestroy {
 		// Tick archival runs unconditionally (even with no portfolio / out of session).
 		await this.maybeArchiveSessions(now);
 
-		// ── Event Intelligence: non-blocking ingestion ─────────────────────
-		// Trigger event ingestion from all registered source adapters. This
-		// runs once per cycle; the orchestrator's own timers handle the 24x7
-		// polling loop. Errors are logged, never crash the trading agent.
-		this.eventOrchestrator.ingestEvents().catch((err) => {
-			this.throttledWarn(`event ingestion failed: ${(err as Error).message}`);
-		});
+		// ── Event Intelligence: DISABLED ─────────────────────────────────────
+		// Trigger event ingestion from all registered source adapters.
+		// Disabled due to memory pressure on 8GB RAM machine.
+		// Re-enable after hardware upgrade by uncommenting the 3 lines above.
+		// this.eventOrchestrator.ingestEvents().catch((err) => {
+		// 	this.throttledWarn(`event ingestion failed: ${(err as Error).message}`);
+		// });
 
 		const portfolios = (await this.trading.listPortfolios()).filter((p) => p.autoTradeEnabled);
 		if (!portfolios.length) {
