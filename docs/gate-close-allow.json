@@ -658,6 +658,11 @@
       "reason": "Event Intelligence workstream: structured error logging + error classification wiring (EXPECTED_HANDLED, RECOVERED, etc.). Seed DB rows pending.",
       "workstream": "event-intelligence (rows 228-242 to be seeded)",
       "authority": "operator-approved roadmap items EVENT-INTEL-001..015"
+    },
+    "a21d9db": {
+      "reason": "config-only: exclude event-intel from root tsconfig to reduce tsserver memory",
+      "workstream": "infrastructure",
+      "authority": "user-requested"
     }
   }
 }
