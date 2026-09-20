@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "incremental": true
+  },
+  "include": ["src/trading/event-intel/**/*"],
+  "exclude": []
+}
