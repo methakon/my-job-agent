@@ -674,8 +674,8 @@
       "workstream": "Event Intelligence",
       "authority": "memory gate enforcement"
     },
-    "69654b8646220948e9e7638cf3c1e86e82e013c2": {
-      "short": "69654b8",
+    "fd98e3d7966cebb92bfbe988842b398d37e98205": {
+      "short": "fd98e3d",
       "reason": "Bugfix: FYERS OAuth controller bracket-property access broken by ProviderTokenService getter rename in ad1110a. fyersTokenService[\"appId\"] \u2192 [\"fyersAppId\"], same for appSecret. No roadmap row needed \u2014 runtime-only fix.",
       "workstream": "trading-agent (bugfix)",
       "authority": "operator instruction 2026-09-21: fix FYERS OAuth missing_credentials",
