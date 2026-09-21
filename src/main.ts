@@ -94,8 +94,9 @@ async function bootstrap() {
   // shell); API/JSON clients keep the plain 401.
   app.useGlobalFilters(new UnauthorizedHtmlRedirectFilter());
 
-  await app.listen(3010);
-  console.log(`my-job-agent listening on port 3010`);
+  const port = parseInt(process.env.PORT || "3010", 10);
+  await app.listen(port);
+  console.log(`my-job-agent listening on port ${port}`);
 }
 
 bootstrap();
