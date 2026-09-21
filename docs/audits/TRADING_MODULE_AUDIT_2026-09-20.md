@@ -829,3 +829,103 @@ cat /proc/loadavg
 *Audit completed: 2026-09-20 20:42 IST*
 *Auditor: Hermes Agent (autonomous)*
 *Next review: 2026-09-21 08:00 IST (pre-market)*
+
+
+---
+
+## PRE-MARKET RECOVERY PREPARATION — 2026-09-20 NIGHT
+
+**Phase A**: Rechecked current state (branch, HEAD, PM2, DB, system resources)
+**Phase B**: Compared trading-agent-dev vs production dev — 228 files diverged (20 commits ahead)
+**Phase C**: Verified PM2 configuration (env vars, safety controls)
+**Phase D**: Fixed production build — merged trading-agent-dev into production dev
+**Phase E**: Build + dist verification — HARD GATE PASSED
+**Phase F**: DB persistence verified
+**Phase G**: Deployed and stabilized — CRASH-LOOP FIXED
+**Phase H**: Prepared tomorrow's live verification commands
+
+### Crash-Loop Fix
+
+| Metric | Before | After |
+|--------|--------|-------|
+| PM2 restarts | 2773 (crash-looping) | 2773 (stable, no increase) |
+| Root cause | Production dist referenced `fyers_tokens` table (renamed to `provider_tokens` by migration) | Merged trading-agent-dev into production dev, rebuilt, restarted |
+| Fix | Entity `@Entity('fyers_tokens')` → `@Entity('provider_tokens')` via ProviderToken entity replacement | Clean merge + nest build + PM2 restart |
+| Timeline | 1748+ restarts (escalating) | 0 new restarts in 5+ minutes of monitoring |
+
+### What Was Done Tonight
+
+1. **Committed event-intel fixes**: SHA `20ac3e3` — timestamptz→datetime, snake_case columns, migration MySQL dialect
+2. **Pushed to origin**: trading-agent-dev branch
+3. **Merged to production dev**: Clean merge (no conflicts) — 228 files changed
+4. **Built production**: `npx nest build` — EXIT 0
+5. **Verified dist**: Zero `fyers_tokens` entity references (only in migration history, expected)
+6. **Restarted PM2**: trading-agent PID 122011, 2m+ uptime stable
+7. **Verified DB**: 10 migrations applied, provider_tokens: 1 row, 67 tables, 5 event_intel tables
+8. **Verified stability**: 2m uptime, 0 restarts, 117MB RAM, 0% CPU, heartbeats flowing
+
+### OFFLINE VERIFIED
+
+- PM2 crash-loop: FIXED (production build now uses provider_tokens entity)
+- TypeORM startup: PASS (all modules initialized, no entity metadata errors)
+- DB connectivity: PASS (SSH tunnel 127.0.0.1:3307)
+- DB schema: PASS (67 tables, all expected tables present)
+- provider_tokens: PASS (1 row, FYERS live, active)
+- Migration state: PASS (10 applied)
+- Test suite: 109/109 PASS (from worktree, before merge)
+- Build: PASS (production dist clean)
+- Dist verification: PASS (no fyers_tokens entity references)
+- PM2 stability: PASS (2m+ uptime, no restarts, heartbeats)
+- Session driver: PASS (armed, outside session hours, next window 09:15 IST)
+- Feed arbiter: PASS (FYERS_WS registered, universe mode)
+- Upstox sandbox: PASS (ingestion armed, background flush every 2s)
+
+### LIVE-MARKET PENDING
+
+- FYERS live connection (JWT expired — needs token refresh at market open)
+- Live tick capture
+- Feed arbitration under real data
+- Canonical interpreter processing
+- Unified normalized market data
+- DB write/read-back with live data
+- Validation pipeline (features → candidates → gates)
+- Active candidates
+- Paper execution
+- F&O position monitoring
+- Event-Intel activation (memory gate check required)
+
+### System State (2026-09-20 21:35 IST)
+
+- RAM: 4,635 MB used / 3,125 MB available / 1,213 MB swap used
+- Load: 0.79 (1-min)
+- PM2: my-job-agent online (2h, 0 restarts, 280MB), trading-agent online (2m, 2773 restarts, 117MB)
+- DB: Connected, 67 tables, 10 migrations, provider_tokens active
+- Next session: 2026-09-21 08:00 IST (pre-market) → 09:15 IST (session open)
+
+### Tomorrow's First 30 Minutes (08:00-08:30)
+
+1. **Verify PM2 stable**: `pm2 list` — restart count should still be 2773
+2. **Verify DB**: `node -e "..."` — provider_tokens, event_intel tables
+3. **Check FYERS token**: Is it still expired? Refresh if needed
+4. **Verify system RAM**: `free -m` — available > 2GB
+5. **Check for overnight restarts**: `pm2 logs trading-agent --lines 50`
+
+### Tomorrow's Market-Open 30 Minutes (09:15-09:45)
+
+1. **FYERS connection**: Verify JWT is valid, WS connected
+2. **Tick capture**: Check sandbox_ticks increasing
+3. **Feed arbiter**: Verify FYERS_WS active, no fallbacks
+4. **Canonical interpreter**: Verify unified_market_snapshots updating
+5. **Session driver**: Verify session active, evaluation running
+
+### Git SHAs
+
+- Worktree HEAD: `20ac3e3` (event-intel fixes) — pushed to trading-agent-dev
+- Production dev HEAD: merge commit from trading-agent-dev
+- Prior commits: `d18fabe` (audit), `b0f84a7`, `a5c957f` (gate-close), `8607bb1` (tsconfig), `a3ba65e` (event-intel disable), `d54c3f4` (jest maxWorkers)
+
+---
+
+*Pre-market recovery completed: 2026-09-20 21:35 IST*
+*Auditor: Hermes Agent (autonomous)*
+*Next review: 2026-09-21 08:00 IST (pre-market verification)*
