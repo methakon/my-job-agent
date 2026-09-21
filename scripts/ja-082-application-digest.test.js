@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('application-digest.service.js');
+const svc=new S.ApplicationDigestService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+const a1=svc.addApplication({applicationId:'app-1',jobTitle:'Eng',company:'Co1',currentStage:'applied',priority:'high',score:80});
+const a2=svc.addApplication({applicationId:'app-2',jobTitle:'Lead',company:'Co2',currentStage:'interview',priority:'medium',score:50,nextAction:'follow up'});
+const a3=svc.addApplication({applicationId:'app-3',jobTitle:'Sr Eng',company:'Co3',currentStage:'applied',priority:'low',score:30});
+const d1=svc.generate('daily','summary',[a1.id,a2.id,a3.id]);
+T('addApplication',()=>eq('id',!!a1.id,true));
+T('count',()=>eq('cnt',svc.getCount(),3));
+T('getApplications',()=>eq('len',svc.getApplications().length,3));
+T('getByStage',()=>eq('applied',svc.getByStage('applied').length,2));
+T('getHighPriority',()=>eq('hp',svc.getHighPriority().length,1));
+T('generate',()=>eq('id',!!d1.id,true));
+T('digestCount',()=>eq('dc',svc.getDigestCount(),1));
+T('getDigest',()=>eq('found',!!svc.getDigest(d1.id),true));
+T('getRecentDigests',()=>eq('len',svc.getRecentDigests(5).length,1));
+T('digest total',()=>{const d=svc.getDigest(d1.id);return eq('total',d.totalApplications,3);});
+T('digest byStage',()=>{const d=svc.getDigest(d1.id);return eq('applied',d.byStage['applied'],2);});
+T('digest summary',()=>typeof d1.summary==='string');
+console.log('\nResults: '+(P===12?'passed':'failed')+','+P+' passed,'+F+' failed,12 expected\n');process.exit(P===12?0:1);

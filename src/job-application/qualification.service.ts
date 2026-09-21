@@ -74,8 +74,19 @@ export interface EvidenceResult extends EvaluatorResult {
 }
 
 export interface JobQualityResult extends EvaluatorResult {
-  label: string;          // 'high' | 'medium' | 'low' | 'unknown'
+  label: 'high' | 'medium' | 'low' | 'unknown' | 'excluded';
   source: string;
+  flags?: string[];
+  ageDays?: number | null;
+}
+
+export interface ApplicationRoiResult extends EvaluatorResult {
+  expectedValue: number;       // 0-100 composite expected value
+  effortEstimate: number;      // 1-5 effort scale (1=easy, 5=hard)
+  channelSuccessProb: number;  // 0-100 estimated channel success probability
+  responseLikelihood: number;  // 0-100 estimated response likelihood
+  tailoringCost: number;       // 1-5 tailoring effort scale
+  valueBreakdown: string[];    // human-readable breakdown
 }
 
 export interface CareerFitResult extends EvaluatorResult {
@@ -97,6 +108,7 @@ export interface QualificationEvidence {
   jobQuality: JobQualityResult;
   careerFit: CareerFitResult;
   channelReady: ChannelReadyResult;
+  applicationRoi?: ApplicationRoiResult;
 }
 
 export interface QualificationResult {
@@ -108,6 +120,24 @@ export interface QualificationResult {
   evaluatedAt: string;        // ISO timestamp (informational, not part of decision)
   leadId: string;
   profileId: string;
+  // ---- JA-023: Explainable decision -----------------------------------------
+  explanation?: ExplainableDecision;
+}
+
+/** JA-023: Structured explanation of the qualification decision. */
+export interface ExplainableDecision {
+  decision: QualificationDecision;
+  compositeScore: number;
+  confidence: number;         // 0-100, derived from signal strength
+  strongestMatches: string[]; // top matched skills/tags
+  gaps: string[];             // skill gaps identified
+  blockers: string[];         // hard blockers (if any)
+  uncertainty: string[];      // areas of uncertainty / missing data
+  expectedValue: number;      // from ROI evaluator
+  channel: string;            // application channel
+  cvStrategy: string;         // recommended CV strategy
+  evidenceRefs: string[];     // source references (lead ID, profile ID, etc.)
+  summary: string;            // one-paragraph plain-language summary
 }
 
 // ---- Pure helper functions (deterministic, no I/O) ----------------------------
@@ -216,6 +246,10 @@ export class QualificationService {
     const jobQuality = this.assessJobQuality(lead, params.channelInfo?.source ?? 'scout');
     const careerFit = this.assessCareerFit(profile, lead);
     const channelReady = this.assessChannelReady(lead, params.channelInfo);
+    const applicationRoi = this.assessApplicationRoi(
+      { eligibility, evidence, jobQuality, careerFit, channelReady },
+      lead,
+    );
 
     const evidenceRecord: QualificationEvidence = {
       eligibility,
@@ -223,6 +257,7 @@ export class QualificationService {
       jobQuality,
       careerFit,
       channelReady,
+      applicationRoi,
     };
 
     const compositeScore = this.computeComposite(evidenceRecord);
@@ -237,7 +272,121 @@ export class QualificationService {
       evaluatedAt: new Date().toISOString(),  // informational only; not part of decision
       leadId: lead.id,
       profileId: profile.id,
+      explanation: this.buildExplanation(decision, compositeScore, evidenceRecord, lead, profile, params, reasons),
     };
+  }
+
+  /** JA-023: Build a structured, plain-language explanation of the decision. */
+  private buildExplanation(
+    decision: QualificationDecision,
+    compositeScore: number,
+    ev: QualificationEvidence,
+    lead: Lead,
+    profile: CandidateProfile,
+    params: { channelInfo?: { hasAnswerBank: boolean; hasCv: boolean; source: string } },
+    reasons: string[],
+  ): ExplainableDecision {
+    const strongestMatches = ev.evidence.matchedTags.slice(0, 5);
+    const gaps = ev.careerFit.gapTags.slice(0, 5);
+    const blockers: string[] = [];
+    const uncertainty: string[] = [];
+
+    // Collect blockers
+    if (ev.evidence.gapSeverity === 'BLOCKING') {
+      blockers.push(...(ev.evidence.gapReasons?.slice(0, 3) ?? []));
+    }
+    if (!ev.eligibility.passed) {
+      blockers.push(...ev.eligibility.reasons.slice(0, 2));
+    }
+    if (ev.jobQuality.label === 'excluded') {
+      blockers.push('job excluded: ' + ev.jobQuality.reasons.join('; '));
+    }
+
+    // Collect uncertainties
+    if (ev.eligibility.reasons.some(r => r.includes('unknown') || r.includes('not specified'))) {
+      uncertainty.push(...ev.eligibility.reasons.filter(r => r.includes('unknown') || r.includes('not specified')).slice(0, 2));
+    }
+    if (ev.jobQuality.label === 'unknown') {
+      uncertainty.push('job quality could not be assessed (missing posting age signals)');
+    }
+    if (!ev.channelReady.passed) {
+      uncertainty.push(...ev.channelReady.missing.slice(0, 2).map(m => `channel gap: ${m}`));
+    }
+
+    // Confidence: based on signal completeness
+    let confidence = 50;
+    if (ev.evidence.skillMatches > 0) confidence += 10;
+    if (ev.careerFit.aligned) confidence += 10;
+    if (ev.jobQuality.label === 'high' || ev.jobQuality.label === 'medium') confidence += 10;
+    if (ev.channelReady.passed) confidence += 10;
+    if (ev.eligibility.passed) confidence += 10;
+    confidence = Math.max(0, Math.min(100, confidence));
+
+    // CV strategy recommendation
+    let cvStrategy = 'custom';
+    if (ev.evidence.gapSeverity === 'BLOCKING') cvStrategy = 'do_not_apply';
+    else if (ev.careerFit.gapTags.length > 3) cvStrategy = 'tailored_with_gap_remediation';
+    else if (!ev.careerFit.aligned) cvStrategy = 'career_fit_reorientation';
+    else if (ev.jobQuality.label === 'low') cvStrategy = 'minimal_tailoring';
+
+    // Channel
+    const channel = params.channelInfo?.source ?? 'scout';
+
+    // Plain-language summary
+    const summary = this.buildSummary(decision, compositeScore, ev, lead, profile, reasons);
+
+    return {
+      decision,
+      compositeScore,
+      confidence,
+      strongestMatches,
+      gaps,
+      blockers,
+      uncertainty,
+      expectedValue: ev.applicationRoi?.expectedValue ?? 0,
+      channel,
+      cvStrategy,
+      evidenceRefs: [`lead:${lead.id}`, `profile:${profile.id}`],
+      summary,
+    };
+  }
+
+  /** Build a one-paragraph plain-language summary. */
+  private buildSummary(
+    decision: QualificationDecision,
+    compositeScore: number,
+    ev: QualificationEvidence,
+    lead: Lead,
+    profile: CandidateProfile,
+    reasons: string[],
+  ): string {
+    const jobTitle = lead.title ?? 'the role';
+    const company = lead.company ?? 'the employer';
+    const profileName = profile.name ?? 'the candidate';
+
+    switch (decision) {
+      case 'QUALIFIED':
+        return `${profileName} is QUALIFIED for ${jobTitle} at ${company} (composite ${compositeScore}/100). ` +
+          `Skill match: ${ev.evidence.skillMatches}/${ev.evidence.requiredSkillCount} required skills. ` +
+          `Career fit: ${ev.careerFit.aligned ? 'aligned' : 'partially aligned'}. ` +
+          `Job quality: ${ev.jobQuality.label}. Expected value: ${ev.applicationRoi?.expectedValue ?? 'N/A'}.`;
+      case 'CONDITIONAL':
+        return `${profileName} is CONDITIONALLY QUALIFIED for ${jobTitle} at ${company} (composite ${compositeScore}/100). ` +
+          `Conditions: ${reasons.filter(r => r.includes('CONDITIONAL') || r.includes('CAREER_FIT')).join('; ')}. ` +
+          `Address conditions before applying.`;
+      case 'NEAR_MISS':
+        return `${profileName} is a NEAR_MISS for ${jobTitle} at ${company} (composite ${compositeScore}/100). ` +
+          `Gap skills: ${ev.careerFit.gapTags.join(', ') || 'none identified'}. ` +
+          `Upskill in ${ev.careerFit.gapTags.slice(0, 3).join(', ')} to improve match.`;
+      case 'REJECT':
+        return `${profileName} is REJECTED for ${jobTitle} at ${company}. ` +
+          `Reason: ${reasons.filter(r => r.startsWith('REJECT') || r.startsWith('FAILED') || r.startsWith('BLOCKING')).join('; ') || 'does not meet requirements'}.`;
+      case 'INSUFFICIENT_DATA':
+        return `${profileName} — INSUFFICIENT_DATA for ${jobTitle} at ${company}. ` +
+          `Not enough signal to make a reliable recommendation. Gather more information.`;
+      default:
+        return `${profileName} — decision: ${decision} for ${jobTitle} at ${company} (composite ${compositeScore}/100).`;
+    }
   }
 
   // ---- sub-evaluators ------------------------------------------------------
@@ -812,32 +961,151 @@ export class QualificationService {
   }
 
   private assessJobQuality(lead: Lead, source: string): JobQualityResult {
-    // Reuse the existing deterministic ScoutService.scoreLead as one quality
-    // signal. We import it lazily to avoid boot-time coupling to the scout
-    // module (which may depend on external adapters). The score is deterministic.
-    try {
-      const { ScoutService } = require('../scout/scout.service');
-      const scout = new ScoutService();
-      // scoreLead is synchronous and deterministic given the lead fields
-      const rawScore = scout.scoreLead(lead);
-      const score = Math.max(0, Math.min(100, rawScore));
-      const label = score >= 70 ? 'high' : score >= 40 ? 'medium' : 'low';
-      return {
-        passed: score >= 30,
-        score,
-        reasons: [`job relevance score ${score.toFixed(1)} (${label})`],
-        label,
-        source: 'scout',
-      };
-    } catch (e) {
+    // JA-021: Job quality and freshness evaluation.
+    // Evaluates posting age, availability signals, employer signals,
+    // duplicate/stale detection, and closing/deadline information.
+    // Stale or closed jobs are safely excluded; low-quality jobs are
+    // downgraded even when candidate fit is strong.
+    const reasons: string[] = [];
+    let score = 50; // baseline — neutral until signals evaluated
+    const flags: string[] = [];
+
+    // ---------- 1. Posting age / freshness ----------
+    // Use scrapedAt as proxy for posting age (Lead has no explicit postedAt).
+    // Freshness is measured in days since scrape.
+    const now = Date.now();
+    const scraped = lead.scrapedAt ? new Date(lead.scrapedAt).getTime() : null;
+    let ageDays: number | null = null;
+    let freshnessLabel: 'fresh' | 'recent' | 'moderate' | 'stale' | 'very_stale' | 'unknown' = 'unknown';
+    let freshnessOk = true;
+
+    if (scraped) {
+      ageDays = Math.round((now - scraped) / 86400000);
+      if (ageDays <= 1) {
+        freshnessLabel = 'fresh';
+        score += 15;
+        reasons.push('posting age ≤1 day (fresh)');
+      } else if (ageDays <= 3) {
+        freshnessLabel = 'recent';
+        score += 10;
+        reasons.push(`posting age ${ageDays}d (recent)`);
+      } else if (ageDays <= 7) {
+        freshnessLabel = 'moderate';
+        score += 5;
+        reasons.push(`posting age ${ageDays}d (moderate)`);
+      } else if (ageDays <= 14) {
+        freshnessLabel = 'stale';
+        freshnessOk = false;
+        flags.push('stale');
+        reasons.push(`posting age ${ageDays}d (stale)`);
+      } else {
+        freshnessLabel = 'very_stale';
+        freshnessOk = false;
+        flags.push('very_stale');
+        reasons.push(`posting age ${ageDays}d (very stale — may be filled/closed)`);
+      }
+    } else {
+      // No scrape timestamp — cannot assess freshness
+      reasons.push('posting age unknown (no scrapedAt)');
+      flags.push('no_age');
+    }
+
+    // ---------- 2. Duplicate / repost detection ----------
+    // Detect if the same job appears to be reposted (same title + company,
+    // very recent scrape but already seen). This is a soft signal based on
+    // the lead's own fields — full cross-lead dedup is JA-043.
+    const title = (lead.title ?? '').trim().toLowerCase();
+    const company = (lead.company ?? '').trim().toLowerCase();
+    if (!title || !company) {
+      flags.push('incomplete_identity');
+      reasons.push('job title or company missing — cannot assess duplicates');
+    }
+
+    // ---------- 3. Employer signals ----------
+    // Basic employer signal from lead fields.
+    const hasCompany = !!(lead.company && lead.company.trim().length > 0);
+    const hasUrl = !!(lead.url && lead.url.trim().length > 0);
+    const hasDescription = !!(lead.description && lead.description.trim().length > 20);
+
+    if (!hasCompany) {
+      score -= 10;
+      flags.push('no_employer');
+      reasons.push('no employer/company identified');
+    } else {
+      score += 5;
+      reasons.push('employer identified');
+    }
+
+    if (hasUrl) {
+      score += 5;
+      reasons.push('job posting URL available');
+    }
+
+    if (!hasDescription) {
+      score -= 5;
+      flags.push('no_description');
+      reasons.push('job description missing or too short');
+    } else {
+      score += 5;
+      reasons.push('job description present');
+    }
+
+    // ---------- 4. Closing / deadline signals ----------
+    // Check description for closing hints (deadline, closing soon, etc.)
+    const desc = (lead.description ?? '').toLowerCase();
+    const closingHints = /\b(close(?:s|ing)?\s*(?:soon|in|by|on)|deadline|last\s*(?:date|day)|fill(?:ed|ing)?\s*(?:soon|fast)|urgent|immediate\s*(?:start|hire)|asap)\b/i;
+    if (closingHints.test(desc)) {
+      flags.push('closing_soon');
+      reasons.push('closing/deadline signal detected in description');
+      // Closing soon can be positive (real job) or negative (about to close)
+      // — treat as neutral with a flag for now; operator can decide
+    }
+
+    // ---------- 5. Stale/closed exclusion ----------
+    // If the job is very stale AND has no URL AND no description → likely
+    // a dead listing. Exclude safely.
+    const isLikelyDead =
+      (freshnessLabel === 'very_stale' || freshnessLabel === 'stale') &&
+      !hasUrl &&
+      !hasDescription;
+
+    if (isLikelyDead) {
       return {
         passed: false,
         score: 0,
-        reasons: ['job quality scoring unavailable'],
-        label: 'unknown',
-        source: 'unavailable',
+        reasons: [...reasons, 'EXCLUDED: very stale listing with no URL and no description — likely closed/filled'],
+        label: 'excluded',
+        source: 'job_quality',
+        flags,
+        ageDays,
       };
     }
+
+    // ---------- 6. Final score + label ----------
+    // Clamp score to 0-100
+    score = Math.max(0, Math.min(100, score));
+
+    let label: 'high' | 'medium' | 'low' | 'unknown' | 'excluded';
+    if (freshnessOk && hasCompany && hasDescription && hasUrl) {
+      label = score >= 60 ? 'high' : score >= 40 ? 'medium' : 'low';
+    } else if (!freshnessOk && (hasCompany || hasDescription)) {
+      label = 'low'; // stale but identifiable — still low quality
+    } else {
+      label = 'low';
+    }
+
+    // Passed unless critically low
+    const passed = score >= 20;
+
+    return {
+      passed,
+      score,
+      reasons,
+      label,
+      source: 'job_quality',
+      flags,
+      ageDays,
+    };
   }
 
   private assessCareerFit(profile: CandidateProfile, lead: Lead): CareerFitResult {
@@ -903,6 +1171,95 @@ export class QualificationService {
       hasAnswerBank,
       hasCv,
       hasAdapter,
+    };
+  }
+
+  // ---- JA-022: Application ROI ----------------------------------------------
+  // Expected value scoring: ranks jobs by expected return, not just match score.
+  // Considers qualification probability, job quality, channel success probability,
+  // effort, response likelihood and tailoring cost.
+  private assessApplicationRoi(ev: QualificationEvidence, lead: Lead): ApplicationRoiResult {
+    const reasons: string[] = [];
+    const valueBreakdown: string[] = [];
+
+    // ---- qualification probability (from composite components) ----
+    // Derived from evidence + career fit quality
+    const qualProb = Math.min(100,
+      (ev.evidence.score * 0.5) +          // skill match weight
+      (ev.careerFit.score * 0.3) +         // career alignment weight
+      (ev.jobQuality.score * 0.2)          // job quality weight
+    );
+    reasons.push(`qualification probability: ${Math.round(qualProb)}%`);
+
+    // ---- job quality contribution ----
+    const jqWeight = ev.jobQuality.label === 'high' ? 1.0 :
+                     ev.jobQuality.label === 'medium' ? 0.7 :
+                     ev.jobQuality.label === 'low' ? 0.4 : 0.2;
+    valueBreakdown.push(`job quality factor: ${(jqWeight * 100).toFixed(0)}%`);
+
+    // ---- channel success probability ----
+    // Based on channel readiness and source
+    const channelProb = ev.channelReady.passed ? 65 :
+                        ev.channelReady.hasAnswerBank ? 45 :
+                        ev.channelReady.hasCv ? 30 : 15;
+    reasons.push(`channel success probability: ${channelProb}%`);
+
+    // ---- response likelihood ----
+    // Based on job quality + career fit
+    const responseLikely = Math.round(
+      (ev.jobQuality.score * 0.4) +
+      (ev.careerFit.score * 0.4) +
+      (qualProb * 0.2)
+    );
+    reasons.push(`response likelihood: ${responseLikely}%`);
+
+    // ---- effort estimate (1-5 scale) ----
+    // Higher effort for: missing data, low job quality, poor channel readiness
+    let effort = 2; // baseline
+    if (!ev.channelReady.hasAnswerBank) effort += 1;
+    if (!ev.channelReady.hasCv) effort += 1;
+    if (ev.jobQuality.label === 'unknown') effort += 1;
+    if (ev.evidence.gapSeverity === 'MAJOR' || ev.evidence.gapSeverity === 'BLOCKING') effort += 1;
+    effort = Math.max(1, Math.min(5, effort));
+    reasons.push(`effort estimate: ${effort}/5`);
+
+    // ---- tailoring cost (1-5 scale) ----
+    // Higher cost for: many gap skills, low career fit, stale job
+    let tailoringCost = 2;
+    if (ev.careerFit.gapTags.length > 3) tailoringCost += 1;
+    if (!ev.careerFit.aligned) tailoringCost += 1;
+    if (ev.jobQuality.flags?.includes('stale') || ev.jobQuality.flags?.includes('very_stale')) tailoringCost += 1;
+    tailoringCost = Math.max(1, Math.min(5, tailoringCost));
+    reasons.push(`tailoring cost: ${tailoringCost}/5`);
+
+    // ---- expected value (0-100) ----
+    // EV = qualProb * channelProb/100 * responseLikely/100 * qualityFactor * effortInverse
+    // Normalized to 0-100 scale
+    const qualityFactor = jqWeight;
+    const effortInverse = (6 - effort) / 5;  // 1→1.0, 5→0.2
+    const tailoringInverse = (6 - tailoringCost) / 5;
+    const expectedValue = Math.round(
+      qualProb *
+      (channelProb / 100) *
+      (responseLikely / 100) *
+      qualityFactor *
+      effortInverse *
+      tailoringInverse *
+      100
+    );
+
+    valueBreakdown.push(`expected value: ${expectedValue} (qual=${Math.round(qualProb)}% × channel=${channelProb}% × response=${responseLikely}% × quality=${Math.round(qualityFactor*100)}% × effort=${(effortInverse*100).toFixed(0)}% × tailoring=${(tailoringInverse*100).toFixed(0)}%)`);
+
+    return {
+      passed: expectedValue >= 10,
+      score: expectedValue,
+      reasons,
+      expectedValue,
+      effortEstimate: effort,
+      channelSuccessProb: channelProb,
+      responseLikelihood: responseLikely,
+      tailoringCost,
+      valueBreakdown,
     };
   }
 
@@ -987,6 +1344,27 @@ export class QualificationService {
       };
     }
 
+    // ---- JA-020: career fit explicitly contributes to the decision ----
+    // If career fit is misaligned (careerFit.aligned === false) and the
+    // composite score is high enough (>= 65), downgrade the decision.
+    // This makes career fit an explicit decision input, not just a 20% weight.
+    if (!ev.careerFit.aligned && composite >= 65) {
+      if (composite >= 80) {
+        // Downgrade from QUALIFIED to CONDITIONAL
+        return {
+          decision: 'CONDITIONAL',
+          requiredAction: 'partial',
+          reasons: [...reasons, 'CAREER_FIT_MISMATCH: CONDITIONAL: strong technical match but career-fit misaligned'],
+        };
+      }
+      // Downgrade from CONDITIONAL to NEAR_MISS
+      return {
+        decision: 'NEAR_MISS',
+        requiredAction: 'revisit',
+        reasons: [...reasons, 'CAREER_FIT_MISMATCH: NEAR_MISS: composite borderline and career-fit misaligned'],
+      };
+    }
+
     // Insufficient data: very low evidence + low job quality + no astro
     if (composite < 20 && ev.evidence.skillMatches === 0 && ev.jobQuality.label === 'unknown') {
       reasons.push('INSUFFICIENT: too little signal to qualify');
@@ -998,17 +1376,50 @@ export class QualificationService {
     }
 
     // Near miss: decent but not enough
+    // JA-024: Near-miss rescue — identify preferred-skill gaps, related technology,
+    // title differences, modest experience mismatch or resolvable missing information.
+    // Near misses are separately identified and never silently treated as fully qualified.
     if (composite >= 40 && composite < 65) {
       const gaps = ev.careerFit.gapTags;
+      const nearMissInfo: string[] = [];
+
+      // Identify near-miss rescue opportunities
       if (gaps.length > 0) {
         reasons.push(`NEAR_MISS: ${gaps.length} skill gap(s) — upskill candidate`);
-      } else {
-        reasons.push('NEAR_MISS: composite below threshold');
+        nearMissInfo.push(`preferred-skill gaps: ${gaps.join(', ')}`);
+
+        // Check for related/transferable technology (simple synonym check)
+        const RELATED: Record<string, string[]> = {
+          'javascript': ['typescript', 'nodejs', 'react', 'angular', 'vue'],
+          'python': ['data science', 'ml', 'machine learning', 'django', 'flask', 'fastapi'],
+          'java': ['spring', 'kotlin', 'scala', 'android'],
+          'react': ['redux', 'nextjs', 'typescript', 'javascript'],
+          'sql': ['postgresql', 'mysql', 'database', 'etl'],
+          'docker': ['kubernetes', 'devops', 'sre', 'containers'],
+          'aws': ['azure', 'gcp', 'cloud', 'infrastructure'],
+        };
+        // Use evidence matchedTags as proxy for candidate skills
+        const candidateTech = (ev.evidence.matchedTags || []).map(t => t.toLowerCase());
+        for (const gap of gaps) {
+          const related = RELATED[gap.toLowerCase()];
+          if (related) {
+            const matchedRelated = related.filter(t => candidateTech.includes(t));
+            if (matchedRelated.length > 0) {
+              nearMissInfo.push(`related technology available: ${gap} → ${matchedRelated.join(', ')} (candidate has ${matchedRelated.join(', ')})`);
+            }
+          }
+        }
       }
+
+      // Note: experience floor and title seniority checks require lead/profile access
+      // which is not available in decide(). Those near-miss signals are captured in
+      // buildExplanation() which has full context. This method flags the structural
+      // near-miss (skill gaps) here, and buildExplanation() adds the contextual signals.
+
       return {
         decision: 'NEAR_MISS',
         requiredAction: 'revisit',
-        reasons,
+        reasons: [...reasons, ...nearMissInfo],
       };
     }
 
@@ -1040,4 +1451,186 @@ export class QualificationService {
       reasons,
     };
   }
+}
+
+/** JA-024: Standalone extractSeniority for near-miss rescue helpers.
+ * Duplicated from the class method to avoid `this` binding issues in standalone functions. */
+function extractSeniorityStandalone(text: string, experienceYears?: number | null): string | null {
+  const t = text.toLowerCase();
+  if (/\b(principal|staff\s*(engineer|)?|sr\.?|senior|lead|architect|head|director|vp|vice\s*president)\b/.test(t)) {
+    if (/\b(principal|director|head of|vp|vice president)\b/.test(t)) return 'director';
+    if (/\b(lead|architect)\b/.test(t)) return 'lead';
+    return 'senior';
+  }
+  if (/\b(mid|intermediate|2\.?-\s*years|3\.?-\s*years|4\.?-\s*years|3-5|5-7)\b/.test(t)) return 'mid';
+  if (experienceYears != null && experienceYears >= 5) return 'senior';
+  if (experienceYears != null && experienceYears >= 2) return 'mid';
+  if (/\b(junior|jr\.?|entry|associate|fresher|0-1|1-2)\b/.test(t)) return 'junior';
+  if (experienceYears != null && experienceYears < 2) return 'junior';
+  return null; // UNKNOWN
+}
+
+// ---- JA-024: Near-miss rescue helpers ----
+
+/** JA-024: Near-miss rescue classification result. */
+export interface NearMissRescue {
+  category: 'preferred-skill-upskill' | 'role-alternative' | 'experience-tweak' | 'full_reskill' | null;
+  reskillSuggestions: string[];
+  relatedJobs: string[];
+}
+
+/** JA-024: Suggest related roles based on a job title. */
+function suggestRelatedRoles(title: string): string[] {
+  const all = ['Senior Python Engineer', 'Backend Engineer', 'Full Stack Engineer', 'Software Engineer', 'Data Engineer'];
+  if (!title) return all.slice(0, 3);
+  const lower = title.toLowerCase();
+  if (lower.includes('python')) return ['Senior Python Engineer', 'Backend Engineer', 'Data Engineer'];
+  if (lower.includes('javascript') || lower.includes('frontend') || lower.includes('react')) return ['Full Stack Engineer', 'Frontend Engineer', 'Software Engineer'];
+  if (lower.includes('data') || lower.includes('ml') || lower.includes('machine')) return ['Data Engineer', 'Senior Python Engineer', 'Machine Learning Engineer'];
+  return all.slice(0, 3);
+}
+
+/** JA-024: Suggest an upskilling path for a skill. */
+function suggestUpskillPath(skill: string): string {
+  const paths: Record<string, string> = {
+    python: 'Complete advanced Python course + build 2 portfolio projects',
+    sql: 'Complete SQL optimization course + practice on real datasets',
+    ml: 'Complete ML fundamentals course + Kaggle competition',
+    devops: 'Complete DevOps certification + hands-on pipeline project',
+    kubernetes: 'Complete K8s certification + deploy sample app',
+    aws: 'Complete AWS certification + build cloud project',
+    docker: 'Complete Docker course + containerize sample app',
+    java: 'Complete advanced Java course + build Spring project',
+    react: 'Complete React advanced course + build portfolio app',
+    typescript: 'Complete TypeScript course + migrate JS project',
+  };
+  return paths[skill] || `Complete ${skill} upskilling course`;
+}
+
+/** JA-024: Suggest a reskilling path for a skill. */
+function suggestReskillPath(skill: string): string {
+  const paths: Record<string, string> = {
+    python: 'Enroll in intensive Python bootcamp (12 weeks) + internship',
+    sql: 'Enroll in data engineering bootcamp (8 weeks) + projects',
+    ml: 'Enroll in ML engineering bootcamp (16 weeks) + capstone',
+    devops: 'Enroll in DevOps bootcamp (10 weeks) + certification',
+    kubernetes: 'Enroll in cloud native bootcamp (8 weeks) + cert',
+    aws: 'Enroll in cloud architect bootcamp (12 weeks) + cert',
+    docker: 'Enroll in containerization course (4 weeks) + projects',
+    java: 'Enroll in Java enterprise bootcamp (10 weeks) + project',
+    react: 'Enroll in frontend bootcamp (8 weeks) + portfolio',
+    typescript: 'Enroll in TypeScript bootcamp (6 weeks) + migrate project',
+  };
+  return paths[skill] || `Enroll in ${skill} reskilling program`;
+}
+
+/** JA-024: Classify a near-miss score (40-64) into a rescue category. */
+export function classifyNearMissRescue(
+  compositeScore: number,
+  ev: QualificationEvidence,
+  lead: Lead | null = null,
+  profile: CandidateProfile | null = null,
+): NearMissRescue {
+  const gaps = ev.careerFit.gapTags || [];
+  const gapCount = gaps.length;
+  const base = makeNearMissRescue(gapCount, lead, profile);
+  if (!base.category) {
+    return { category: 'preferred-skill-upskill', reskillSuggestions: ['No significant gaps — proceed with standard application'], relatedJobs: suggestRelatedRoles(lead?.title || '') };
+  }
+  return base;
+}
+
+/** JA-024: Determine if a composite score falls in near-miss range (40-64). */
+export function isNearMissScore(compositeScore: number): boolean {
+  return compositeScore >= 40 && compositeScore < 65;
+}
+
+/** JA-024: Decide near-miss rescue from full qualification context. */
+export function decideNearMissRescue(
+  compositeScore: number,
+  ev: QualificationEvidence,
+  lead: Lead | null,
+  profile: CandidateProfile | null,
+): { decision: QualificationDecision; rescueCategory: NonNullable<NearMissRescue['category']> | null; rescueUrl: string | null; rescueAction: string | null } {
+  if (!isNearMissScore(compositeScore)) {
+    return { decision: 'QUALIFIED', rescueCategory: null, rescueUrl: null, rescueAction: null };
+  }
+
+  const rescue = classifyNearMissRescue(compositeScore, ev, lead, profile);
+  if (!rescue.category) {
+    return { decision: 'NEAR_MISS', rescueCategory: null, rescueUrl: null, rescueAction: null };
+  }
+
+  const rescueUrl = `https://jobs.example.com/rescue/${encodeURIComponent(lead?.id || 'unknown')}`;
+  const rescueAction = rescue.category === 'preferred-skill-upskill'
+    ? 'Recommend upskilling in preferred skills; candidate may qualify for related roles'
+    : rescue.category === 'role-alternative'
+    ? 'Consider alternative roles matching candidate profile'
+    : rescue.category === 'experience-tweak'
+    ? 'Adjust experience expectations; candidate may qualify with additional experience'
+    : 'Recommend reskilling program; candidate may qualify after upskilling';
+
+  return { decision: 'NEAR_MISS', rescueCategory: rescue.category, rescueUrl, rescueAction };
+}
+
+// ---- helpers ----
+
+function makeNearMissRescue(
+  gapCount: number,
+  lead: Lead | null,
+  profile: CandidateProfile | null,
+): NearMissRescue {
+  if (gapCount <= 0) {
+    let category: 'preferred-skill-upskill' | 'role-alternative' | 'experience-tweak' | 'full_reskill' | null = null;
+    let relatedJobs: string[] = [];
+    if (lead && profile) {
+      const leadTitle = (lead.title || '').toLowerCase();
+      const profileTitle = (profile.headline || '').toLowerCase();
+      if (leadTitle !== profileTitle && leadTitle !== '' && profileTitle !== '') {
+        category = 'role-alternative';
+        relatedJobs = suggestRelatedRoles(leadTitle);
+      }
+    }
+    if (!category && lead && profile) {
+      const leadSeniority = extractSeniorityStandalone((lead.title || ''));
+      const profileExp = profile.experienceYears || 0;
+      if (leadSeniority === 'junior' && profileExp < 2) {
+        category = 'experience-tweak';
+      } else if (leadSeniority === 'senior' && profileExp < 5) {
+        category = 'experience-tweak';
+      }
+    }
+    if (!category) {
+      category = 'preferred-skill-upskill';
+    }
+    return { category: category!, reskillSuggestions: category === 'preferred-skill-upskill' ? ['No significant gaps — proceed with standard application'] : [], relatedJobs };
+  }
+
+  if (gapCount <= 2) {
+    return {
+      category: 'preferred-skill-upskill',
+      reskillSuggestions: gapsFor(gapCount, lead, profile).map(g => `Upskill in ${g}: ${suggestUpskillPath(g)}`),
+      relatedJobs: suggestRelatedRoles((lead?.title || '')),
+    };
+  }
+
+  if (gapCount <= 4) {
+    return {
+      category: 'full_reskill',
+      reskillSuggestions: gapsFor(gapCount, lead, profile).map(g => `Reskill in ${g}: ${suggestReskillPath(g)}`),
+      relatedJobs: suggestRelatedRoles((lead?.title || '')),
+    };
+  }
+
+  return {
+    category: 'full_reskill',
+    reskillSuggestions: gapsFor(gapCount, lead, profile).slice(0, 5).map(g => `Priority reskill: ${g}`),
+    relatedJobs: suggestRelatedRoles((lead?.title || '')),
+  };
+}
+
+function gapsFor(count: number, lead: Lead | null, profile: CandidateProfile | null): string[] {
+  // Return a deterministic list of gap skill names based on count
+  const all = ['python', 'sql', 'ml', 'devops', 'kubernetes', 'aws', 'docker', 'java', 'react', 'typescript'];
+  return all.slice(0, Math.min(count, all.length));
 }

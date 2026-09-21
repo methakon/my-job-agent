@@ -1,0 +1,23 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('portal-status-polling.service.js');
+const svc=new S.PortalStatusPollingService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+svc.setMinPollInterval(1000);
+const a1=svc.register({applicationId:'app-1',portal:'naukri',jobTitle:'Engineer',lastStatus:'applied',appliedAt:'2026-01-01T00:00:00Z'});
+svc.register({applicationId:'app-2',portal:'naukri',jobTitle:'Lead',lastStatus:'interview'});
+svc.register({applicationId:'app-3',portal:'linkedin',jobTitle:'Sr Eng',lastStatus:'applied'});
+const pollResult=svc.poll('app-1','naukri','applied');
+T('register',()=>eq('stage',a1.lastStatus,'applied'));
+T('poll status',()=>eq('status',pollResult.status,'applied'));
+T('poll changed',()=>eq('changed',pollResult.changed,false));
+T('poll rateLimited',()=>eq('rl',pollResult.rateLimited,false));
+T('getApp',()=>eq('found',!!svc.getApplication(a1.id),true));
+T('getByPortal',()=>{const arr=svc.getApplicationsByPortal('naukri');return eq('cnt',arr.length,2);});
+T('getPollHistory',()=>{const h=svc.getPollHistory('app-1','naukri');return eq('len',h.length,1);});
+T('getPending',()=>{const p=svc.getPendingPolls();return Array.isArray(p);});
+T('getCount',()=>eq('cnt',svc.getCount(),3));
+T('backoff',()=>{const b=svc.calculateBackoff(5,false);return typeof b==='number'&&b>0;});
+console.log('\nResults: '+(P===10?'passed':'failed')+','+P+' passed,'+F+' failed,10 expected\n');process.exit(P===10?0:1);

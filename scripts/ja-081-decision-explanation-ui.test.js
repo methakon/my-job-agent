@@ -1,0 +1,24 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('decision-explanation-ui.service.js');
+const svc=new S.DecisionExplanationUIService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+svc.generate('app-1',{tech:85,comm:85},{tech:0.6,comm:0.4},'lead-1',['good dev','clear comm']);
+svc.generate('app-2',{tech:30,comm:20},{tech:0.5,comm:0.5},'lead-2',['weak tech','poor comm']);
+svc.generate('app-3',{tech:55,comm:50},{tech:0.5,comm:0.5},'lead-3',['decent dev','ok comm']);
+const d1=svc.generate('app-4',{tech:90,comm:60},{tech:0.6,comm:0.4},'lead-4',['strong dev','great comm']);
+T('generate',()=>eq('id',!!d1.id,true));
+T('getExplanation',()=>eq('found',!!svc.getExplanation(d1.id),true));
+T('getByApplication',()=>eq('found',!!svc.getByApplication('app-1'),true));
+T('getDecisions',()=>{const ds=svc.getDecisions();return eq('len',ds.length,4);});
+T('getCount',()=>eq('cnt',svc.getCount(),4));
+T('getStats',()=>{const s=svc.getStats();return eq('total',s.total,4);});
+T('decision proceed',()=>eq('dec',d1.decision,'proceed'));
+T('decision reject',()=>eq('dec',svc.getExplanation(svc.getDecisions()[1].id).decision,'reject'));
+T('overallScore',()=>eq('score',d1.overallScore,78));
+T('explanation text',()=>typeof d1.explanation==='string');
+T('keyDrivers',()=>eq('len',d1.keyDrivers.length,2));
+T('concerns empty',()=>eq('concerns',d1.concerns.length,0));
+console.log('\nResults: '+(P===12?'passed':'failed')+','+P+' passed,'+F+' failed,12 expected\n');process.exit(P===12?0:1);

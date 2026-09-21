@@ -1,0 +1,21 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('rejection-learning.service.js');
+const svc=new S.RejectionLearningService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+const r1=svc.record({employerName:'TechCo',rejectionStage:'screening',reason:'culture'});
+const r2=svc.record({employerName:'TechCo2',rejectionStage:'interview',reason:'skill',channel:'email'});
+const r3=svc.record({employerName:'Co',channel:'linkedin',reason:'fit'});
+T('record',()=>eq('id',!!r1.id,true)&&eq('stage',r1.rejectionStage,'screening'));
+T('aggregate employer',()=>{const a=svc.aggregate({employerName:'TechCo'});return eq('count',a.totalRejections,1);});
+T('aggregate channel',()=>{const a=svc.aggregate({channel:'linkedin'});return eq('count',a.totalRejections,1);});
+T('aggregate role',()=>{const a=svc.aggregate({role:'Engineer'});return eq('count',a.totalRejections,0);});
+T('get',()=>{const r=svc.getRejection(r1.id);return eq('found',!!r,true)&&eq('reason',r.reason,'culture');});
+T('list',()=>eq('count',svc.listRejections().length,3));
+T('count',()=>eq('count',svc.getCount(),3));
+T('top reasons',()=>{const a=svc.aggregate();return eq('has',a.topReasons.length>0,true);});
+T('avg days',()=>typeof svc.aggregate().avgDaysToRejection==='number');
+T('empty filter',()=>eq('empty',svc.aggregate({employerName:'Unknown'}).totalRejections,0));
+console.log('\nResults: '+(P===10?'passed':'failed')+','+P+' passed,'+F+' failed,10 expected\n');process.exit(P===10?0:1);
