@@ -47,8 +47,8 @@ export class FyersOAuthController {
   @Get('login')
   @BypassAuth()
   async login(@Res() res: Response) {
-    const appId = this.fyersTokenService['appId'];
-    const appSecret = this.fyersTokenService['appSecret'];
+    const appId = this.fyersTokenService['fyersAppId'];
+    const appSecret = this.fyersTokenService['fyersAppSecret'];
     const redirectUri = this.fyersTokenService['config'].get<string>('FYERS_REDIRECT_URI')?.trim();
 
     if (!appId || !appSecret || !redirectUri) {
