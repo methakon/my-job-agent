@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('template-tracking.service.js');
+const svc=new S.TemplateTrackingService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+const t1=svc.createTemplate('cover','pdf','content1','user1',['tag1']);
+const t2=svc.createTemplate('cover','pdf','content2','user2',[]);
+svc.linkApplication('app-1',t1.id,'portal-a');
+svc.linkApplication('app-2',t2.id,'portal-b');
+T('create',()=>eq('id',!!t1.id,true));
+T('version',()=>eq('ver',t1.version,'v1.0.0'));
+T('get',()=>eq('found',!!svc.getTemplate(t1.id),true));
+T('list len',()=>eq('len',svc.listTemplates().length,2));
+T('getApplicationTemplate',()=>eq('found',!!svc.getApplicationTemplate('app-1'),true));
+T('count by tmpl',()=>eq('cnt',svc.getApplicationCountByTemplate(t1.id),1));
+T('history',()=>eq('hist',svc.getTemplateHistory('cover','pdf').length,2));
+T('link count',()=>eq('links',svc.listApplicationLinks().length,2));
+T('app template',()=>eq('ver',svc.getApplicationTemplate('app-1').templateVersion,'v1.0.0'));
+T('list sorted',()=>eq('order',svc.listTemplates()[0].createdAt>=svc.listTemplates()[1].createdAt,true));
+console.log('\nResults: '+(P===10?'passed':'failed')+','+P+' passed,'+F+' failed,10 expected\n');process.exit(P===10?0:1);

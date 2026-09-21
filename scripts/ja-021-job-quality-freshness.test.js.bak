@@ -1,0 +1,260 @@
+#!/usr/bin/env node
+'use strict';
+// JA-021: Job quality and freshness — deterministic tests
+// Verifies assessJobQuality evaluates posting age, availability, employer
+// signals, duplicates, stale listings, and closing/deadline info.
+
+const { QualificationService } = require('../src/job-application/qualification.service');
+const { JobLead } = require('../src/leads/job-lead.entity');
+const { CandidateProfile } = require('../src/profile/candidate-profile.entity');
+const { DataSource } = require('typeorm');
+
+// In-memory SQLite for tests
+const ds = new DataSource({
+  type: 'sqlite',
+  database: ':memory:',
+  entities: [JobLead, CandidateProfile],
+  synchronize: true,
+  logging: false,
+});
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function assert(condition, msg) {
+  if (condition) {
+    passed++;
+    console.log(`  ✓ ${msg}`);
+  } else {
+    failed++;
+    failures.push(msg);
+    console.log(`  ✗ FAIL: ${msg}`);
+  }
+}
+
+function assertEqual(actual, expected, msg) {
+  if (actual === expected) {
+    passed++;
+    console.log(`  ✓ ${msg} (${actual})`);
+  } else {
+    failed++;
+    failures.push(`${msg}: expected ${expected}, got ${actual}`);
+    console.log(`  ✗ FAIL: ${msg} — expected ${expected}, got ${actual}`);
+  }
+}
+
+async function run() {
+  await ds.initialize();
+  const repo = ds.getRepository(JobLead);
+  const profileRepo = ds.getRepository(CandidateProfile);
+
+  const now = new Date();
+  const day = 86400000;
+
+  // Helper: create a lead with controlled scrapedAt
+  async function makeLead(opts = {}) {
+    const lead = repo.create({
+      title: opts.title || 'Software Engineer',
+      company: opts.company || 'Tech Corp',
+      location: opts.location || 'Bengaluru',
+      description: opts.description || 'Full-stack role',
+      url: opts.url || 'https://example.com/job',
+      scrapedAt: opts.scrapedAt || now,
+      status: 'active',
+      source: opts.source || 'scout',
+      matchScore: opts.matchScore ?? null,
+      matchedSkills: opts.matchedSkills ?? null,
+    });
+    return repo.save(lead);
+  }
+
+  // Helper: create a profile
+  async function makeProfile() {
+    const p = profileRepo.create({
+      name: 'Test Candidate',
+      email: 'test@example.com',
+      skills: 'JavaScript,TypeScript,React,Node.js,Python',
+      experienceYears: 5,
+      currentLocation: 'Bengaluru',
+      noticePeriod: '30 days',
+    });
+    return profileRepo.save(p);
+  }
+
+  // ---- Test 1: Fresh posting (scraped today) ----
+  console.log('\nTest 1: Fresh posting (scraped today)');
+  {
+    const lead = await makeLead({ scrapedAt: now });
+    const profile = await makeProfile();
+    const svc = ds.getRepository(QualificationService);
+    // We need to test assessJobQuality directly — it's private
+    // Use reflection or create a test instance
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assertEqual(result.label, 'high', 'fresh posting → high quality label');
+    assert(result.score >= 60, 'fresh posting → score ≥ 60');
+    assert(result.passed === true, 'fresh posting → passed');
+    assert(result.ageDays !== null && result.ageDays <= 1, 'fresh posting → ageDays ≤ 1');
+    assert(result.reasons.some(r => r.includes('fresh') || r.includes('≤1 day')), 'fresh posting → freshness reason present');
+  }
+
+  // ---- Test 2: Recent posting (3 days ago) ----
+  console.log('\nTest 2: Recent posting (3 days ago)');
+  {
+    const lead = await makeLead({ scrapedAt: new Date(now.getTime() - 3 * day) });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assertEqual(result.label, 'medium', 'recent posting → medium quality label');
+    assert(result.reasons.some(r => r.includes('3d') || r.includes('recent')), 'recent posting → age reason present');
+    assert(result.passed === true, 'recent posting → passed');
+  }
+
+  // ---- Test 3: Stale posting (10 days ago, no URL, no description) ----
+  console.log('\nTest 3: Stale posting (10 days ago, no URL, no description)');
+  {
+    const lead = await makeLead({
+      scrapedAt: new Date(now.getTime() - 10 * day),
+      url: '',
+      description: 'Short',
+    });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assertEqual(result.label, 'excluded', 'stale+no URL+no desc → excluded');
+    assertEqual(result.passed, false, 'stale+no URL+no desc → not passed');
+    assert(result.reasons.some(r => r.includes('EXCLUDED')), 'stale+no URL+no desc → exclusion reason present');
+  }
+
+  // ---- Test 4: Very stale posting (30 days ago, has URL and description) ----
+  console.log('\nTest 4: Very stale posting (30 days ago, has URL and description)');
+  {
+    const lead = await makeLead({
+      scrapedAt: new Date(now.getTime() - 30 * day),
+      url: 'https://example.com/job',
+      description: 'Full description here',
+    });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assertEqual(result.label, 'low', 'very stale with URL+desc → low quality (not excluded)');
+    assert(result.passed === true, 'very stale with URL+desc → still passed (low quality)');
+    assert(result.flags && result.flags.includes('very_stale'), 'very stale → very_stale flag present');
+  }
+
+  // ---- Test 5: No scrapedAt (unknown freshness) ----
+  console.log('\nTest 5: No scrapedAt (unknown freshness)');
+  {
+    const lead = await makeLead({ scrapedAt: null });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assert(result.reasons.some(r => r.includes('unknown')), 'no scrapedAt → unknown age reason');
+    assert(result.flags && result.flags.includes('no_age'), 'no scrapedAt → no_age flag');
+    assert(result.passed === true, 'no scrapedAt → still passed (has URL+desc+company)');
+  }
+
+  // ---- Test 6: Closing/deadline signal in description ----
+  console.log('\nTest 6: Closing/deadline signal in description');
+  {
+    const lead = await makeLead({
+      description: 'Apply now — closing soon! Deadline: Friday.',
+    });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assert(result.flags && result.flags.includes('closing_soon'), 'closing text → closing_soon flag');
+    assert(result.reasons.some(r => r.includes('closing/deadline')), 'closing text → closing reason');
+  }
+
+  // ---- Test 7: No company, no URL, no description (poor quality) ----
+  console.log('\nTest 7: No company, no URL, no description');
+  {
+    const lead = await makeLead({
+      company: '',
+      url: '',
+      description: 'x',  // too short
+    });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assert(result.score < 50, 'poor quality → score < 50');
+    assert(result.flags && result.flags.includes('no_employer'), 'no company → no_employer flag');
+    assert(result.flags && result.flags.includes('no_description'), 'no description → no_description flag');
+    assertEqual(result.label, 'low', 'poor quality → low label');
+  }
+
+  // ---- Test 8: Full quality signals (high) ----
+  console.log('\nTest 8: Full quality signals (high)');
+  {
+    const lead = await makeLead({
+      scrapedAt: new Date(now.getTime() - 1 * day),
+      company: 'Google',
+      url: 'https://careers.google.com/job',
+      description: 'Senior engineer role with full benefits',
+    });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assertEqual(result.label, 'high', 'full signals → high label');
+    assert(result.score >= 70, 'full signals → score ≥ 70');
+    assert(result.passed === true, 'full signals → passed');
+    assert(result.reasons.some(r => r.includes('employer identified')), 'full signals → employer reason');
+    assert(result.reasons.some(r => r.includes('job description present')), 'full signals → description reason');
+    assert(result.reasons.some(r => r.includes('job posting URL')), 'full signals → URL reason');
+  }
+
+  // ---- Test 9: Duplicate detection — missing identity ----
+  console.log('\nTest 9: Duplicate detection — missing identity');
+  {
+    const lead = await makeLead({
+      title: '',
+      company: '',
+    });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assert(result.reasons.some(r => r.includes('cannot assess duplicates')), 'missing title/company → duplicate warning');
+    assert(result.flags && result.flags.includes('incomplete_identity'), 'missing title/company → incomplete_identity flag');
+  }
+
+  // ---- Test 10: Moderate age (5 days) ----
+  console.log('\nTest 10: Moderate age (5 days)');
+  {
+    const lead = await makeLead({ scrapedAt: new Date(now.getTime() - 5 * day) });
+    const profile = await makeProfile();
+    const qsvc = new QualificationService(repo, profileRepo);
+    const result = qsvc['assessJobQuality'](lead, 'scout');
+    
+    assertEqual(result.label, 'medium', 'moderate age → medium label');
+    assert(result.reasons.some(r => r.includes('5d') || r.includes('moderate')), 'moderate age → age reason present');
+  }
+
+  // Cleanup
+  await ds.destroy();
+
+  console.log(`\n${'='.repeat(50)}`);
+  console.log(`Results: ${passed} passed, ${failed} failed`);
+  if (failed > 0) {
+    console.log('Failures:');
+    failures.forEach(f => console.log(`  - ${f}`));
+  }
+  console.log(`${'='.repeat(50)}`);
+
+  process.exit(failed > 0 ? 1 : 0);
+}
+
+run().catch(err => {
+  console.error('Test error:', err);
+  process.exit(1);
+});

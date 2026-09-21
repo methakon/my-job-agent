@@ -9,11 +9,29 @@ import { CandidateEvidenceLibraryService } from './job-application/candidate-evi
 import { ChannelLearningService } from './job-application/channel-learning.service';
 import { ATSQuestionDiscoveryService } from './job-application/ats-question-discovery.service';
 import { EmployerIntelligenceService } from './job-application/employer-intelligence.service';
+import { BrowserFieldMappingService } from './job-application/browser-field-mapping.service';
+import { CrossPortalDedupService } from './job-application/cross-portal-dedup.service';
+import { RecruiterMemoryService } from './job-application/recruiter-memory.service';
 import { CVStrategyService } from './job-application/cv-strategy.service';
 import { CVCustomizationService } from './job-application/cv-customization.service';
 import { CVDriftProtectionService } from './job-application/cv-drift-protection.service';
 import { ATSCustomizationService } from './job-application/ats-scoring.service';
 import { AdaptationMatcherService } from './job-application/skills/adaptation-matcher.service';
+import { RejectionLearningService } from './job-application/rejection-learning.service';
+import { InterviewOfferLearningService } from './job-application/interview-offer-learning.service';
+import { ConfidenceCalibrationService } from './job-application/confidence-calibration.service';
+import { TemplateTrackingService } from './job-application/template-tracking.service';
+import { TemplatePerformanceService } from './job-application/template-performance.service';
+import { CVStrategyLearningService } from './job-application/cv-strategy-learning.service';
+import { ApplicationLifecycleService } from './job-application/application-lifecycle.service';
+import { PortalStatusPollingService } from './job-application/portal-status-polling.service';
+import { FollowUpAutomationService } from './job-application/follow-up-automation.service';
+import { PrecisionApplicationQueueService } from './job-application/precision-application-queue.service';
+import { DecisionExplanationUIService } from './job-application/decision-explanation-ui.service';
+import { ApplicationDigestService } from './job-application/application-digest.service';
+import { ClosedLoopLearningService } from './job-application/closed-loop-learning.service';
+import { LearningSafetyGuardrailsService } from './job-application/learning-safety-guardrails.service';
+import { KPIDashboardService } from './job-application/kpi-dashboard.service';
 import { JobLead } from './leads/job-lead.entity';
 import { Application } from './applications/application.entity';
 import { LearningWeight } from './applications/learning-weight.entity';
@@ -222,11 +240,29 @@ import {
     ChannelLearningService,
     ATSQuestionDiscoveryService,
     EmployerIntelligenceService,
+    BrowserFieldMappingService,
+    CrossPortalDedupService,
+    RecruiterMemoryService,
     CVStrategyService,
     CVCustomizationService,
     CVDriftProtectionService,
     ATSCustomizationService,
     AdaptationMatcherService,
+  RejectionLearningService,
+  InterviewOfferLearningService,
+  ConfidenceCalibrationService,
+  TemplateTrackingService,
+  TemplatePerformanceService,
+  CVStrategyLearningService,
+  ApplicationLifecycleService,
+  PortalStatusPollingService,
+  FollowUpAutomationService,
+  PrecisionApplicationQueueService,
+  DecisionExplanationUIService,
+  ApplicationDigestService,
+  ClosedLoopLearningService,
+  LearningSafetyGuardrailsService,
+  KPIDashboardService,
   ],
 })
 export class AppModule {}

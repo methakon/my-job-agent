@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('template-performance.service.js');
+const svc=new S.TemplatePerformanceService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+const t1=svc.track({templateId:'tmpl-a',applicationId:'app-1',outcome:'applied'});
+const t2=svc.track({templateId:'tmpl-a',applicationId:'app-2',outcome:'interview'});
+svc.track({templateId:'tmpl-a',applicationId:'app-3',outcome:'offer'});
+svc.track({templateId:'tmpl-b',applicationId:'app-4',outcome:'applied'});
+T('track',()=>eq('id',!!t1.id,true));
+T('count',()=>eq('cnt',svc.getCount(),4));
+T('report total',()=>{const r=svc.getReport('tmpl-a');return eq('total',r.totalUses,3);});
+T('report byOutcome',()=>{const r=svc.getReport('tmpl-a');return eq('applied',r.byOutcome['applied'],1);});
+T('report interviewRate',()=>{const r=svc.getReport('tmpl-a');return eq('rate',r.interviewRate,1/3);});
+T('report offerRate',()=>{const r=svc.getReport('tmpl-a');return eq('offerRate',r.offerRate,1/3);});
+T('report acceptanceRate',()=>{const r=svc.getReport('tmpl-a');return eq('accRate',r.acceptanceRate,0);});
+T('report sampleWarning',()=>{const r=svc.getReport('tmpl-a');return eq('warn',r.sampleSizeWarning,true);});
+T('getByTemplate',()=>{const list=svc.getByTemplate('tmpl-a');return eq('len',list.length,3);});
+T('getReportByVersion',()=>{const r=svc.getReportByVersion('tmpl-a','v1');return eq('ver',r.templateVersion,'v1')&&eq('uses',r.totalUses,3);});
+console.log('\nResults: '+(P===10?'passed':'failed')+','+P+' passed,'+F+' failed,10 expected\n');process.exit(P===10?0:1);

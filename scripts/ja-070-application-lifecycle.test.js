@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('application-lifecycle.service.js');
+const svc=new S.ApplicationLifecycleService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+const e1=svc.record({applicationId:'app-1',stage:'applied',source:'portal',timestamp:'2026-01-01T00:00:00Z'});
+svc.record({applicationId:'app-1',stage:'screening',source:'portal',timestamp:'2026-01-02T00:00:00Z'});
+svc.record({applicationId:'app-2',stage:'applied',source:'referral',timestamp:'2026-01-01T00:00:00Z'});
+svc.record({applicationId:'app-1',stage:'interview',source:'portal',timestamp:'2026-01-03T00:00:00Z'});
+T('record',()=>eq('stage',e1.stage,'applied'));
+T('getLifecycle',()=>{const lc=svc.getLifecycle('app-1');return eq('stage',lc.currentStage,'interview');});
+T('daysInStage',()=>{const lc=svc.getLifecycle('app-1');return typeof lc.daysInStage==='number';});
+T('totalDays',()=>{const lc=svc.getLifecycle('app-1');return typeof lc.totalDays==='number';});
+T('stalled',()=>{const lc=svc.getLifecycle('app-1');return eq('stalled',lc.stalled,false);});
+T('summary',()=>{const s=svc.getSummary();return eq('total',s.totalApplications,2);});
+T('byStage',()=>{const s=svc.getSummary();return eq('applied',s.byCurrentStage['applied'],1);});
+T('byChannel',()=>{const s=svc.getSummary();return eq('portal',s.byChannel['portal'],1);});
+T('count',()=>eq('cnt',svc.getCount(),2));
+T('events',()=>{const ev=svc.getEvents('app-1');return eq('len',ev.length,3);});
+console.log('\nResults: '+(P===10?'passed':'failed')+','+P+' passed,'+F+' failed,10 expected\n');process.exit(P===10?0:1);
