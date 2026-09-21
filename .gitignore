@@ -53,3 +53,6 @@ dist/
 var/
 __pycache__/
 *.pyc
+
+# Database backups — local files, never commit
+backups/

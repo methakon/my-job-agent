@@ -1,0 +1,26 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('follow-up-automation.service.js');
+const svc=new S.FollowUpAutomationService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+const t1=svc.addTemplate({type:'reminder',channel:'email',subject:'Following up',body:'Hi there'});
+const t2=svc.addTemplate({type:'status_request',channel:'email',subject:'Status check',body:'Any updates?'});
+const a1=svc.schedule('app-1','check_in','email',{},new Date(Date.now()+86400000).toISOString());
+svc.schedule('app-1','reminder','linkedin',{},new Date(Date.now()+172800000).toISOString());
+svc.markSent(a1.id,true);
+T('addTemplate',()=>eq('type',t1.type,'reminder'));
+T('addTemplate2',()=>eq('type',t2.type,'status_request'));
+T('schedule',()=>eq('status',a1.status,'pending'));
+T('suggest',()=>{const s=svc.suggest('app-1','applied',10,'pending');return eq('type',s.recommendedType,'check_in');});
+T('suggest urgency',()=>{const s=svc.suggest('app-1','applied',20,'pending');return eq('urgency',s.urgency,'high');});
+T('suggest rejected',()=>{const s=svc.suggest('app-1','applied',5,'rejected');return eq('type',s.recommendedType,'rejection_followup');});
+T('markSent',()=>{svc.markSent(a1.id,true);const a=svc.getByApplication('app-1');return eq('sent',a[0].status,'sent');});
+T('cancel',()=>{const p=svc.getPending();if(p.length===0)return false;const c=svc.cancel(p[0].id);return eq('cancelled',c.status,'cancelled');});
+T('getPending',()=>{const p=svc.getPending();return Array.isArray(p);});
+T('getByApp',()=>{const a=svc.getByApplication('app-1');return eq('len',a.length,2);});
+T('getTemplate',()=>eq('found',!!svc.getTemplate('reminder','email'),true));
+T('getCount',()=>eq('cnt',svc.getCount(),2));
+T('getStats',()=>{const s=svc.getStats();return eq('total',s.total,2);});
+console.log('\nResults: '+(P===12?'passed':'failed')+','+P+' passed,'+F+' failed,12 expected\n');process.exit(P===12?0:1);

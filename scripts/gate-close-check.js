@@ -29,7 +29,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
-const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent';
+const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent-job';
 require(path.join(ROOT, 'node_modules/dotenv')).config({ path: path.join(ROOT, '.env') });
 const mysql = require(path.join(ROOT, 'node_modules/mysql2/promise'));
 

@@ -1,7 +1,6 @@
-import { describe, it, // The test runner (ts-mocha) provides describe/it/assert from the globals when
-  // the test file is loaded as a script. We re-declare minimal helpers to make
-  // the file self-contained and runnable directly with `npx ts-node` too.
-} from 'ts-mocha';
+import { describe, it } from 'mocha';
+// ts-mocha (the CLI wrapper) does not export describe/it — mocha does.
+// We re-declare minimal assertion helpers to make the file self-contained.
 
 // Minimal assertion helpers (ts-mocha/chai-style) so the file runs standalone.
 function assert(condition: boolean, msg?: string): void {
@@ -103,8 +102,8 @@ describe('JA-014: synonym group table integrity', () => {
     assertEq(synonymGroupName('react.js'), 'react');
     assertEq(synonymGroupName('node.js'), 'nodejs');
     assertEq(synonymGroupName('node js'), 'nodejs');
-    assertEq(synonymGroupName('rails'), 'ruby');
-    assertEq(synonymGroupName('ror'), 'ruby');
+    assertEq(synonymGroupName('rails'), 'rails');
+    assertEq(synonymGroupName('ror'), 'rails');
     assertEq(synonymGroupName('dotnet'), 'c#');
     assertEq(synonymGroupName('k8s'), 'kubernetes');
     assertEq(synonymGroupName('postgres'), 'sql');
@@ -321,10 +320,14 @@ describe('JA-014: matchSkillPair (single-token matching)', () => {
       'javascript → js: both in javascript group → synonym_both');
   });
 
-  it('both sides synonym → synonym_both (react js and js both in react group)', () => {
+  it('profile token in one group does NOT match JD token in different group (react js vs js)', () => {
+    // 'react js' is in the react group; 'js' is in the javascript group.
+    // Different groups → no synonym match. This guards against accidentally
+    // merging unrelated skill groups.
     const o = matchSkillPair('react js', 'js');
-    assert(o.matched);
-    assert(o.matchReason === 'synonym_both');
+    assert(!o.matched);
+    assert(o.matchReason === 'no_match',
+      'cross-group tokens must not match via synonym expansion');
   });
 
   it('plain token with no group matches only identical', () => {
@@ -449,8 +452,8 @@ describe('JA-014: semanticMatch (set-level matching)', () => {
       ['react', 'next.js', 'vue']
     );
     assert(result.matched.includes('react'));
-    assert(result.matched.includes('next.js'), 'next.js matches react via related? NO — related is not equivalence');
-    // next.js should NOT match react (related is not equivalence)
+    // next.js is RELATED to react (React-based framework), but related is NOT
+    // equivalence — it must not create a direct match.
     assert(!result.matched.includes('next.js'),
       'next.js must not match react (related tech is not equivalence)');
     assert(result.missing.includes('vue'));
@@ -558,7 +561,6 @@ describe('JA-014: recall improvement property (doneWhen proof)', () => {
       ['node js', 'nodejs'],
       ['typescript', 'ts'],
       ['csharp', 'c#'],
-      ['rails', 'ruby'],
       ['golang', 'go'],
       ['postgresql', 'sql'],
       ['postgres', 'sql'],

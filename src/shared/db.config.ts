@@ -47,7 +47,11 @@ export function mysqlPoolTuning(): Record<string, number | boolean> {
 		...mysqlKeepAliveOptions(),
 		maxIdle: 2,
 		idleTimeout: 30_000,
-		acquireTimeout: 10_000,
+		// queueLimit bounds how many INSERTs can pile up when every pool slot is
+		// occupied by a half-dead connection.  0 = unlimited — withTimeout (120 s)
+		// already bounds query lifetime; releasePoolConnections (RingQueue fix)
+		// now actually destroys dead sockets after recycleAfterTimeouts fires.
+		queueLimit: 0,
 	};
 }
 
@@ -71,7 +75,6 @@ export function mysqlConfig(databaseName: string): TypeOrmModuleOptions {
 		/** Hard timeout on the initial TCP connect — prevents a dead tunnel from
 		 *  wedging the entire NestJS bootstrap. */
 		connectTimeout: 15_000,
-		// acquireTimeout is a pool-only option — see mysqlPoolTuning()
 		/** TypeORM DataSource retry policy for transient connection failures. */
 		retryAttempts: 3,
 		retryDelay: 2_000,

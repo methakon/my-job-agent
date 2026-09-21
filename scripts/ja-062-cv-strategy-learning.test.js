@@ -1,0 +1,22 @@
+#!/usr/bin/env node
+'use strict';
+const load=(f)=>require('../dist/job-application/'+f);
+const S=load('cv-strategy-learning.service.js');
+const svc=new S.CVStrategyLearningService();
+let P=0,F=0;const eq=(l,g,w)=>{const o=JSON.stringify(g)===JSON.stringify(w);process.stdout.write((o?'✔':'✘')+' '+l+': got '+JSON.stringify(g)+' want '+JSON.stringify(w)+'\n');return o;};
+const T=(l,fn)=>{try{if(fn())P++;else F++;}catch(e){F++;console.log('✘ '+l+': '+e.message);}};
+const o1=svc.record({strategy:'keyword',role:'Engineer',outcome:'applied'});
+const o2=svc.record({strategy:'keyword',role:'Engineer',outcome:'interview'});
+svc.record({strategy:'skills',role:'Lead',outcome:'offer'});
+svc.record({strategy:'skills',role:'Lead',outcome:'accepted'});
+T('record',()=>eq('id',!!o1.id,true));
+T('count',()=>eq('cnt',svc.getCount(),4));
+T('get perf',()=>{const p=svc.getPerformance('keyword');return eq('total',p.totalUses,2);});
+T('byOutcome',()=>{const p=svc.getPerformance('keyword');return eq('applied',p.byOutcome['applied'],1);});
+T('interviewRate',()=>{const p=svc.getPerformance('keyword');return eq('ir',p.interviewRate,1/2);});
+T('offerRate',()=>{const p=svc.getPerformance('skills');return eq('or',p.offerRate,1/2);});
+T('acceptanceRate',()=>{const p=svc.getPerformance('skills');return eq('ar',p.acceptanceRate,1);});
+T('getAll',()=>{const all=svc.getAllPerformances();return eq('len',all.length,2);});
+T('sampleWarning',()=>{const p=svc.getPerformance('keyword');return eq('warn',p.sampleSizeWarning,true);});
+T('byRole',()=>{const p=svc.getPerformance('keyword');return eq('eng',p.byRole['Engineer'],2);});
+console.log('\nResults: '+(P===10?'passed':'failed')+','+P+' passed,'+F+' failed,10 expected\n');process.exit(P===10?0:1);
