@@ -452,10 +452,10 @@ export class UnifiedMarketDataService {
   private releasePoolConnections(): void {
     const connection = this.quotes?.manager?.connection as unknown as { driver?: { pool?: { _allConnections?: unknown } } } | undefined;
     const pool = connection?.driver?.pool;
-    const sockets = pool?._allConnections;
+    const sockets = pool?._allConnections as unknown as { toArray?: () => unknown[] } | undefined;
     let released = 0;
-    if (sockets && typeof (sockets as Iterable<unknown>)[Symbol.iterator] === 'function') {
-      for (const socket of sockets as Iterable<{ destroy?: () => void }>) {
+    if (sockets && typeof sockets.toArray === 'function') {
+      for (const socket of sockets.toArray() as Array<{ destroy?: () => void }>) {
         try {
           socket.destroy?.();
           released += 1;

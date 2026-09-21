@@ -47,9 +47,9 @@ export class FyersOAuthController {
   @Get('login')
   @BypassAuth()
   async login(@Res() res: Response) {
-    const appId = this.fyersTokenService['fyersAppId'];
-    const appSecret = this.fyersTokenService['fyersAppSecret'];
-    const redirectUri = this.fyersTokenService['config'].get<string>('FYERS_REDIRECT_URI')?.trim();
+    const appId = process.env.FYERS_APP_ID?.trim();
+    const appSecret = process.env.FYERS_APP_SECRET?.trim();
+    const redirectUri = process.env.FYERS_REDIRECT_URI?.trim();
 
     if (!appId || !appSecret || !redirectUri) {
       this.logger.warn('FYERS credentials incomplete');
@@ -286,3 +286,4 @@ export class FyersOAuthController {
     error: (msg: string, err?: Error) => console.error(`[FYERS-OAUTH] ERROR: ${msg}`, err),
   };
 }
+
