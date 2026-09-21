@@ -111,18 +111,6 @@
       "evidence": "git show --name-only d80e0ba lists only job-application-roadmap module files; the workstream's own table holds 40 rows; project_checklist_items correctly holds 0 rows for it.",
       "expires_hint": "Entry can be deleted once d80e0ba leaves the guard's commit window (default: last 15 code commits)."
     },
-    "9804254921cd8ed43645a833eecaecf9a8c4399f": {
-      "short": "9804254",
-      "reason": "Phase 4: channel learning + ATS question discovery",
-      "workstream": "job-application-roadmap",
-      "authority": "JOB AGENT WORKER"
-    },
-    "952132db7679e2b535482a50c62c54441e3b2715": {
-      "short": "952132d",
-      "reason": "Phase 5: employer intelligence",
-      "workstream": "job-application-roadmap",
-      "authority": "JOB AGENT WORKER"
-    },
     "bfaa1776345a0986f6a45ea2ec1d6af3068c2f5c": {
       "short": "bfaa177",
       "reason": "Same separate Job Application workstream, same module path: JA-003 regression baseline — automated baseline tests proving the JA-002 submission safety invariant across all real submission paths including direct low-level invocation (scripts/ja-003-regression-baseline.test.js). Tracked in its own job_application_roadmap_items control plane; project_checklist_items holds no row for it and none should be invented.",
@@ -131,24 +119,6 @@
       "recorded": "2026-09-12T01:2x+05:30 (session completing JA-003 regression baseline; commit authored by the parallel JA session)",
       "evidence": "git show --name-only bfaa177 lists only scripts/ja-003-regression-baseline.test.js; no src/ changes, no .env changes, no market-data/trading code.",
       "expires_hint": "Delete once bfaa177 leaves the guard commit window (default: last 15 code commits)."
-    },
-    "50987a19745d4eb29496d2a591efb1b91e044c1": {
-      "short": "50987a1",
-      "reason": "Job Application Agent roadmap item",
-      "workstream": "job-application-roadmap",
-      "authority": "JOB AGENT WORKER"
-    },
-    "fd531dafbbf8664c006d7a9b8d13aabca13a7282": {
-      "short": "fd531da",
-      "reason": "Phase 5: employer intelligence",
-      "workstream": "job-application-roadmap",
-      "authority": "JOB AGENT WORKER"
-    },
-    "50987a1b88d3fa7f13e9570a96d58a32ff79bdad": {
-      "short": "50987a1",
-      "reason": "JA-041 fix: flag dropdowns with options but no evidence match",
-      "workstream": "job-application-roadmap",
-      "authority": "JOB AGENT WORKER"
     },
     "e0fcb92a6c808e838edb5c424a9585458c1b38d0": {
       "short": "e0fcb92",
@@ -716,6 +686,51 @@
       "recorded": "2026-09-21T09:02+05:30",
       "evidence": "git show --name-only 69654b8 lists only src/trading/fyers-oauth.controller.ts (2-line fix)",
       "expires_hint": "Entry can be deleted once 69654b8 leaves the guard commit window."
+    },
+    "4ce0ab84717faa3b9849f93e632881cafb6d1966": {
+      "short": "4ce0ab8",
+      "reason": "Job Application / mail-pipeline workstream (agent-side queue item 76 'IMAP Credential Storage Fix & Exponential Backoff', tracked in agent_todo_log, NOT in project_checklist_items): guards every ImapFlow client against the unhandled 'error' event that killed the whole process 62 times between 2026-09-07 and 2026-09-12 (each death took the trading desks' HTTP routes and the /project-status control plane down with it), and makes the backoff/auto-disable rule one shared implementation (src/applications/imap-safety.ts). Touches only src/applications/*, scripts/imap-safety.test.js and the package.json test:imap script.",
+      "workstream": "job-application / mail pipeline (own queue: agent_todo_log id 76; project_checklist_items verified to hold 0 rows matching IMAP|mail|inbox|reply|credential)",
+      "authority": "operator standing instruction for the job-application workstream ('keep the Job Agent workstream completely separate ... do not invent a roadmap row'). NOTE: roadmap coverage for this IMAP workstream is MISSING and has been reported to the operator for a decision; this entry is a holding exemption pending that decision and can be revoked by deleting it.",
+      "recorded": "2026-09-12T10:2x+05:30 (session resuming after the 09:31 desk crash-loop; commit authored in this session, not by the parallel JA session)",
+      "evidence": "npm run test:imap 57/57, including the crash reproduced on a real ImapFlow instance (unguarded emit('error') throws, guarded does not); git show --name-only 4ce0ab8 lists only src/applications/imap-safety.ts, src/applications/inbox-reader.service.ts, src/applications/email-tracker.service.ts, scripts/imap-safety.test.js, package.json.",
+      "expires_hint": "Delete once 4ce0ab8 leaves the guard commit window (default: last 15 code commits)."
+    },
+    "4d65f3a511a2e5f0b5116e50e54c95f3bcb58844": {
+      "short": "4d65f3a",
+      "reason": "Same separate Job Application workstream, same module path: Cloudflare Email Routing configuration for the JA pipeline (swarna.sekhar@berhampore.in -> swarna.s.jobs@gmail.com), committed with changes only under src/job-application-roadmap/* (page controller, seed, service). No project_checklist_items row exists for it (verified: 0 rows matching email routing / reply tracking / mailbox in checklist-v4.seed.json), and the workstream is intentionally tracked in job_application_roadmap_items.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream ('existing legitimate separate-workstream commit, not missing trading roadmap coverage. Do not invent a roadmap row.') applied to the same module; operator may revoke by deleting this entry.",
+      "recorded": "2026-09-11T04:0x+05:30 (session handling the operator's LIVE Upstox token intake, roadmap row 876)",
+      "evidence": "git show --name-only 4d65f3a lists only src/job-application-roadmap/* files; author/committer bapay.9@gmail.com; email-routing is infrastructure for the JA workstream, not a trading roadmap item.",
+      "expires_hint": "Entry can be deleted once 4d65f3a leaves the guard's commit window (default: last 15 code commits)."
+    },
+    "6b2431ae134f14bcd81fd5937eba92f2f279e4e6": {
+      "short": "6b2431a",
+      "reason": "Same separate Job Application workstream, same module path: JA-002 final-submission sandbox safety guard (src/applications/* + scripts/ja-002-sandbox-safety.test.js). Tracked in its own job_application_roadmap_items control plane; project_checklist_items holds no row for it and none should be invented.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row); applied to the same module. Delete this entry to revoke.",
+      "recorded": "2026-09-12T00:2x+05:30 (session finishing roadmap rows 877/878; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only 6b2431a lists only src/applications/* files and the JA test script; no market-data/trading code.",
+      "expires_hint": "Delete once 6b2431a leaves the guard commit window (default: last 15 code commits)."
+    },
+    "a80422dbcda591fd8e625cef5a62bc1f1dba816d": {
+      "short": "a80422d",
+      "reason": "Same separate Job Application workstream: JA-010 qualification-engine test aligned to the real service behaviour (scripts/ja-010-qualification-engine.test.js only, 809 lines added, no src/ changes). Authored by the PARALLEL job-application session in this shared working tree; that workstream is tracked in its own job_application_roadmap_items control plane and project_checklist_items holds no row for it (none should be invented).",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row); applied to the same module. Delete this entry to revoke.",
+      "recorded": "2026-09-12T10:3x+05:30 (session completing trading roadmap row 27; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only a80422d lists only scripts/ja-010-qualification-engine.test.js; no src/ changes, no .env changes, no market-data/trading code.",
+      "expires_hint": "Delete once a80422d leaves the guard commit window (default: last 15 code commits)."
+    },
+    "b185d858885d4eb4bd71122a600cae806f80655d": {
+      "short": "b185d85",
+      "reason": "Same separate Job Application workstream: JA-010 qualification engine wired into the app module and its apply-engine entry points (src/job-application/qualification.service.ts + registration in src/app.module.ts + src/applications/apply-engine.service.ts). Authored by the PARALLEL job-application session in this shared working tree; that workstream keeps its own job_application_roadmap_items control plane and project_checklist_items holds no row for it (none should be invented). Incidentally this commit resolved the unresolved QualificationService dependency that had been crash-looping the shared dist earlier the same day.",
+      "workstream": "job-application-roadmap (separate control plane: job_application_roadmap_items)",
+      "authority": "operator standing instruction 2026-09-11 for this workstream (separate-workstream commit is not missing trading roadmap coverage; do not invent a row), reaffirmed 2026-09-12 when the operator directed that the IMAP/mail reliability item stay in its own agent_todo_log workstream and that the trading roadmap contain only trading items. Delete this entry to revoke.",
+      "recorded": "2026-09-12T10:4x+05:30 (session completing trading roadmap row 39; commit authored by the parallel JA session)",
+      "evidence": "git show --name-only b185d85 lists src/job-application/qualification.service.ts, src/app.module.ts, src/applications/apply-engine.service.ts; no market-data/gap-engine/trading code, no .env change.",
+      "expires_hint": "Delete once b185d85 leaves the guard commit window (default: last 15 code commits)."
     }
   }
 }
