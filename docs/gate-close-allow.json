@@ -773,6 +773,42 @@
       "reason": "JA-020 career fit explicitly contributes to decision",
       "workstream": "job-application-roadmap",
       "authority": "JOB AGENT WORKER"
+    },
+    "4f0f4058479441975ec182a1e68b59027ec1034d": {
+      "short": "4f0f405",
+      "reason": "Trading Agent workstream — FYERS OAuth bracket-notation env access + unified-market-data pool release toArray() (token-stack and DB-pool reliability fixes from the 2026-09-21 session; no dedicated roadmap row)",
+      "workstream": "Trading Agent",
+      "authority": "operator live-deploy instruction 2026-09-23 (trading-agent-dev push)",
+      "recorded": "2026-09-23T02:35:00+05:30",
+      "evidence": "Files: src/trading/fyers-oauth.controller.ts, src/trading/unified-market-data/unified-market-data.service.ts. Surfaced as guard-window drift when pushing trading-agent-dev from its linked worktree (git exports GIT_DIR, so the guard scans the pushed branch's history).",
+      "expires_hint": "Delete once 4f0f405 leaves the guard commit window (last 15 code commits of trading-agent-dev)."
+    },
+    "f4147bbdd4d9c28aab959e3749341e2d65de0b6a": {
+      "short": "f4147bb",
+      "reason": "Trading Agent workstream (shared runtime) — DB pool tuning: removed invalid acquireTimeout, queueLimit:0; jest devDep",
+      "workstream": "Trading Agent",
+      "authority": "operator live-deploy instruction 2026-09-23 (trading-agent-dev push)",
+      "recorded": "2026-09-23T02:35:00+05:30",
+      "evidence": "Files: src/shared/db.config.ts, package.json, package-lock.json. Companion commit to 4f0f405 from the same 2026-09-21 session.",
+      "expires_hint": "Delete once f4147bb leaves the guard commit window (last 15 code commits of trading-agent-dev)."
+    },
+    "c7d5fe36b17fc87774e6fbb895f478fc6636011c": {
+      "short": "c7d5fe3",
+      "reason": "Trading Agent workstream — OAuth bracket-property access aligned to ProviderTokenService getters (token-flow fix; prior origin/trading-agent-dev tip)",
+      "workstream": "Trading Agent",
+      "authority": "operator live-deploy instruction 2026-09-23 (trading-agent-dev push)",
+      "recorded": "2026-09-23T02:35:00+05:30",
+      "evidence": "Files: src/trading/fyers-oauth.controller.ts, docs/gate-close-allow.json. Was pushed to origin/trading-agent-dev 2026-09-21 before the guard scanned this branch from a linked worktree.",
+      "expires_hint": "Delete once c7d5fe3 leaves the guard commit window (last 15 code commits of trading-agent-dev)."
+    },
+    "7851eab90fdb1e6656a3cbd14bf07ad75c3bb458": {
+      "short": "7851eab",
+      "reason": "Job Application workstream — job-agent-dev → dev integration merge (Phase 4-5 services, JA test scripts, academic application scripts). Separately tracked in job_application_roadmap_items; component commits already allow-listed (5e9fdb9, 80e654c).",
+      "workstream": "job-application-roadmap",
+      "authority": "JOB AGENT WORKER",
+      "recorded": "2026-09-23T02:35:00+05:30",
+      "evidence": "Merge commit bringing the job-agent-dev lineage onto dev. Not a Trading Agent commit — attributed to the JA workstream; must not be duplicated into project_checklist_items.",
+      "expires_hint": "Delete once 7851eab leaves the guard commit window (last 15 code commits of trading-agent-dev)."
     }
   }
 }
