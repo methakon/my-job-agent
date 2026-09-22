@@ -130,16 +130,19 @@ function bootApp() {
   const { UpstoxLivePaperTokenService } = require(path.join(BUILD, 'trading', 'upstox-live-paper', 'upstox-live-paper-auth.service'));
   const { UpstoxLivePaperToken } = require(path.join(BUILD, 'trading', 'upstox-live-paper', 'upstox-live-paper-token.entity'));
   const { UpstoxLivePaperConfig } = require(path.join(BUILD, 'trading', 'upstox-live-paper', 'upstox-live-paper.config'));
+  // 2026-09-23: token reads/writes moved to the unified provider_tokens store.
+  const { ProviderToken } = require(path.join(BUILD, 'trading', 'provider-token.entity'));
+  const { ProviderTokenService } = require(path.join(BUILD, 'trading', 'provider-token.service'));
 
   class PreOpenWindowModule {}
   Module({
     imports: [
       ConfigModule.forRoot({ isGlobal: true }),
       TypeOrmModule.forRoot(mysqlConfig(process.env.DATABASE_NAME || 'myjob_agent')),
-      TypeOrmModule.forFeature([PreOpenObservation, UpstoxLivePaperToken]),
+      TypeOrmModule.forFeature([PreOpenObservation, UpstoxLivePaperToken, ProviderToken]),
     ],
     providers: [
-      EncryptionService, UpstoxLivePaperConfig, UpstoxLivePaperTokenService,
+      EncryptionService, UpstoxLivePaperConfig, UpstoxLivePaperTokenService, ProviderTokenService,
       PreOpenRepository, UpstoxPreOpenSource,
       { provide: PRE_OPEN_QUOTE_SOURCE, useExisting: UpstoxPreOpenSource },
       PreOpenCaptureService,

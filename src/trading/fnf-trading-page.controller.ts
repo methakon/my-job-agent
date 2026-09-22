@@ -50,6 +50,7 @@ export class FnfTradingPageController {
 		@Res() res: Response,
 		@Query('fyers') fyers: string | undefined,
 		@Query('reason') reason: string | undefined,
+		@Query('upstox') upstox: string | undefined,
 	) {
 		const [portfolios, trades, market, signals, learning, astro, calibrations] = await Promise.all([
 			this.trading.listPortfolios(),
@@ -69,6 +70,13 @@ export class FnfTradingPageController {
 			? '<div class="banner ok">✅ FYERS login successful — token stored in the database. The FYERS feed reconnects automatically (within a minute — no restart needed).</div>'
 			: fyers === 'error'
 				? `<div class="banner bad">⚠️ FYERS login failed — ${esc(reason ?? 'unknown reason')}. Click <b>GET THE TOKEN</b> to try again (login link is valid for 5 minutes).</div>`
+				: '';
+		// ── Upstox portal login banner (separate card — FYERS and Upstox
+		// statuses stay independently visible; auth success ≠ feed connectivity) ──
+		const upstoxBanner = upstox === 'ok'
+			? '<div class="banner ok">✅ Upstox login successful — token stored securely in the database. Note: authentication and the live market feed are separate states — the Upstox market-data consumers pick the stored token up on their next cycle.</div>'
+			: upstox === 'error'
+				? `<div class="banner bad">⚠️ Upstox login failed — ${esc(reason ?? 'unknown reason')}. Click <b>GET UPSTOX TOKEN</b> to try again (login link is valid for 5 minutes).</div>`
 				: '';
 		const tokenInfo = await this.fyersTokens.getActiveTokenInfo('fyers', 'live');
 		const feedStatus = this.feed.status();
@@ -129,6 +137,27 @@ export class FnfTradingPageController {
   </div>
   <p style="margin:12px 0 2px"><a class="btn" href="/auth/fyers/login">🔑 GET THE TOKEN — log in at FYERS</a></p>
   <div class="hint">Opens FYERS in this tab (FY ID + password + TOTP + PIN — typed only into FYERS, never stored by this app). On success FYERS returns you here automatically: the token is saved in the database (single row, encrypted) and the FYERS feed reconnects on its own. No .env edits, no restart.</div>
+</div>`;
+
+		// ── Upstox token card — same portal flow, right beside the FYERS button ──
+		const upstoxInfo = await this.fyersTokens.getActiveTokenInfo('upstox', 'live');
+		const upstoxExpired = !!upstoxInfo?.expiresAt && upstoxInfo.expiresAt.getTime() < Date.now();
+		const [upstoxCls, upstoxLabel] = !upstoxInfo
+			? ['warn', 'NO TOKEN — click GET UPSTOX TOKEN below']
+			: upstoxExpired
+				? ['bad', 'EXPIRED — click GET UPSTOX TOKEN below']
+				: ['ok', 'ACTIVE (stored in DB, encrypted)'];
+		const upstoxCard = `
+<div class="card token-card">
+  <div class="card-title">🔑 Upstox token — market data (pre-open + live pollers)</div>
+  <div class="kv">
+    <div><span>Stored token</span><b class="${upstoxCls}">${upstoxLabel}</b></div>
+    <div><span>Expires (IST)</span><b>${fmtIst(upstoxInfo?.expiresAt ?? null)}</b></div>
+    <div><span>Stored as</span><b class="dim">provider=upstox · environment=live · single active row (provider_tokens)</b></div>
+    <div><span>Consumed by</span><b class="dim">Upstox pre-open + live market-data services (DB token — never .env)</b></div>
+  </div>
+  <p style="margin:12px 0 2px"><a class="btn" href="/api/upstox/login">🔑 GET UPSTOX TOKEN — log in at Upstox</a></p>
+  <div class="hint">Opens Upstox in this tab (Upstox user ID + 2FA — typed only into Upstox, never stored by this app). On success Upstox returns you here automatically: the token is saved in the database in the same encrypted store as FYERS (provider=upstox, environment=live) and the Upstox market-data consumers pick it up on their next cycle. No .env edits, no restart. Login success means the token is stored — the live feed is a separate status.</div>
 </div>`;
 
 		// ── portfolio card ──
@@ -321,7 +350,11 @@ code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,
   <div class="meta">API: <code>GET /trading/...</code> · Swagger <a href="/docs">/docs</a></div>
 </div>
 ${fyersBanner}
+${upstoxBanner}
+<div class="grid2">
 ${fyersCard}
+${upstoxCard}
+</div>
 ${portfolioHtml}
 
 <div class="card">

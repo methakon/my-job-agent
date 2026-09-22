@@ -242,12 +242,16 @@ assert.ok(configSrc.includes('UPSTOX_LIVE_STRIKE_WINDOW'), 'config exposes UPSTO
 assert.ok(marketSrc.includes('liveStrikeWindow'), 'per-poll universe bounded by the configured strike window');
 console.log('✔ 14: expiry = nearest listed (today on expiry day) from broker contracts, universe bounded');
 
-// ── 15. token read path must not use a where-less findOne (TypeORM 0.3) ───────
+// ── 15. token read path: unified provider store, TypeORM-0.3 safe ─────────────
+// 2026-09-23: reads/writes moved to the unified provider_tokens store
+// (provider=upstox, environment=live) via ProviderTokenService — the same store
+// the FYERS feed consumes. The previous desk-local newest-row lookup is gone
+// with the legacy table; the provider store queries by `where`.
 const authSrc = fs.readFileSync(path.join(SRC, 'upstox-live-paper-auth.service.ts'), 'utf8');
 assert.ok(!/findOne\(\{\s*order:/.test(authSrc), 'token lookup never uses findOne without a where (throws in TypeORM 0.3)');
-assert.ok(/find\(\{\s*order: \{\s*updatedAt: 'DESC'\s*\},\s*take: 1\s*\}\)/.test(authSrc), 'token lookup takes the newest row via find(...take:1)');
+assert.ok(authSrc.includes("providerTokens.getCurrentToken('upstox', 'live')"), 'token reads go through the unified provider store (single active row)');
 assert.ok(authSrc.includes('AUTH_REQUIRED'), 'token service reports AUTH_REQUIRED when no valid row exists');
-console.log('✔ 15: token lookup is TypeORM-0.3 safe (newest row via find/take)');
+console.log('✔ 15: token lookup reads provider_tokens (single active row), TypeORM-0.3 safe');
 
 // ── 16. SPA fallback must not swallow imported-module API routes ──────────────
 const fallbackSrc = fs.readFileSync(path.join(ROOT, 'src/app-fallback.controller.ts'), 'utf8');
