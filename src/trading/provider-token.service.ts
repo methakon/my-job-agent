@@ -70,9 +70,15 @@ export class ProviderTokenService {
    * @param accessToken - Raw access token from provider
    * @param refreshToken - Raw refresh token (nullable)
    * @param clientId - Provider app/client ID for audit
-   * @param provider - Provider identifier (e.g., 'fyers', 'upstox_sandbox')
+   * @param provider - Provider identifier (e.g., 'fyers', 'upstox', 'upstox_sandbox')
    * @param environment - 'sandbox', 'live', 'paper'
    * @param authCode - Original auth_code (hashed for audit, not stored plaintext)
+   * @param options - Optional lifecycle metadata.
+   *   `expiresAt` is stored on the row when the provider returns an authoritative
+   *   expiry (Upstox OAuth: the token's own exp claim = 3:30 AM IST the next day).
+   *   `tokenDate` is the IST calendar date the token was issued (YYYY-MM-DD).
+   *   FYERS call sites pass neither: behaviour there is unchanged (expiresAt stays
+   *   null; expiry is derived from the JWT exp claim at read time).
    * @returns stored token record
    */
   async storeTokens(
@@ -82,6 +88,7 @@ export class ProviderTokenService {
     provider: string,
     environment: string = 'live',
     authCode: string | null = null,
+    options: { expiresAt?: Date | null; tokenDate?: string | null } = {},
   ): Promise<ProviderToken> {
     const authCodeHash = authCode ? this.hashAuthCode(authCode) : null;
     const accessTokenEncrypted = this.encryption.encrypt(accessToken);
@@ -110,7 +117,12 @@ export class ProviderTokenService {
       existing.status = 'active';
       existing.statusReason = null;
       existing.revokedAt = null;
-      existing.expiresAt = null;
+      // Re-login clears any stale expiry; when the caller supplied an
+      // authoritative one (Upstox: the token's own exp claim), it replaces the
+      // value. FYERS passes none, so expiry stays null here and is derived from
+      // the JWT exp claim at read time — unchanged.
+      existing.expiresAt = options.expiresAt ?? null;
+      if (options.tokenDate !== undefined) existing.tokenDate = options.tokenDate;
       return this.repo.save(existing);
     }
 
@@ -124,7 +136,8 @@ export class ProviderTokenService {
       authCodeHash,
       status: 'active',
       statusReason: null,
-      expiresAt: null,
+      expiresAt: options.expiresAt ?? null,
+      ...(options.tokenDate !== undefined ? { tokenDate: options.tokenDate } : {}),
     });
 
     return this.repo.save(token);
@@ -160,6 +173,11 @@ export class ProviderTokenService {
     } catch {
       expiresAt = null; // opaque/non-JWT token
     }
+    // Fall back to the expiry stored on the row when the token itself carries
+    // no decodable JWT exp (e.g. an opaque Upstox token written with an
+    // explicit expiresAt by the OAuth callback). FYERS rows store null here,
+    // so their read behaviour is unchanged.
+    if (!expiresAt && row.expiresAt) expiresAt = row.expiresAt;
     return { active: true, expiresAt, refreshAvailable: !!row.refreshTokenEncrypted };
   }
 
@@ -203,8 +221,9 @@ export class ProviderTokenService {
     provider: string,
     environment: string = 'live',
     authCode: string | null = null,
+    options: { expiresAt?: Date | null; tokenDate?: string | null } = {},
   ): Promise<ProviderToken> {
-    return this.storeTokens(accessToken, refreshToken, clientId, provider, environment, authCode);
+    return this.storeTokens(accessToken, refreshToken, clientId, provider, environment, authCode, options);
   }
 
   /** Find tokens issued on or after a date for a provider. */

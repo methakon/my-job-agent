@@ -72,6 +72,7 @@ if (!fs.existsSync(DIST)) {
 }
 const { UpstoxLivePaperTokenService } = require(path.join(DIST, 'upstox-live-paper-auth.service.js'));
 const { UpstoxLivePaperTokenController } = require(path.join(DIST, 'upstox-live-paper-token.controller.js'));
+const { ProviderTokenService } = require(path.join(ROOT, 'dist', 'trading', 'provider-token.service.js'));
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 const CLIENT_ID = '8ca3aaaa-1111-2222-3333-444455556666';
@@ -94,21 +95,44 @@ const makeConfig = (over = {}) => {
   return { get: (key) => values[key] };
 };
 
+/**
+ * In-memory repo for the REAL ProviderTokenService — the unified store the
+ * token service now writes/reads (provider_tokens). Implements the exact
+ * TypeORM surface used by storeTokens/getCurrentToken/getActiveAccessToken:
+ * findOne / find / count / update / create / save, including FindOperator
+ * handling for the stray-row collapse (update({..., id: Not(existing.id)})).
+ */
 const makeRepo = () => {
   const rows = [];
+  const matches = (row, where) =>
+    Object.entries(where ?? {}).every(([k, v]) => {
+      if (v && typeof v === 'object' && typeof v.type === 'string' && 'value' in v) {
+        return v.type === 'not' ? row[k] !== v.value : true;
+      }
+      return row[k] === v;
+    });
   return {
     rows,
-    async findOne() {
-      return rows[0] ?? null;
+    async findOne({ where } = {}) {
+      return rows.find((r) => matches(r, where)) ?? null;
     },
-    async find() {
-      return rows.slice();
+    async find({ where } = {}) {
+      return where ? rows.filter((r) => matches(r, where)) : rows.slice();
+    },
+    async count({ where } = {}) {
+      return where ? rows.filter((r) => matches(r, where)).length : rows.length;
+    },
+    async update(criteria, patch) {
+      for (const r of rows) if (matches(r, criteria)) Object.assign(r, patch);
     },
     create(obj) {
       return { ...obj, updatedAt: new Date() };
     },
     async save(entity) {
-      rows.unshift(entity);
+      if (!entity.id) entity.id = `pt-${rows.length + 1}-${Math.random().toString(36).slice(2, 8)}`;
+      const idx = rows.findIndex((r) => r.id === entity.id);
+      if (idx >= 0) rows[idx] = entity;
+      else rows.unshift(entity);
       return entity;
     },
   };
@@ -116,9 +140,12 @@ const makeRepo = () => {
 
 const build = (over = {}) => {
   const repo = makeRepo();
-  const encryption = { encrypt: (value) => `enc:${value}` };
-  const service = new UpstoxLivePaperTokenService(makeConfig(over), repo, encryption);
-  return { service, repo };
+  const encryption = { encrypt: (value) => `enc:${value}`, decrypt: (value) => String(value ?? '').replace(/^enc:/, '') };
+  // The service persists through the unified provider store — construct the
+  // REAL ProviderTokenService on the in-memory repo (no DB, no network).
+  const providerStore = new ProviderTokenService(repo, encryption, makeConfig());
+  const service = new UpstoxLivePaperTokenService(makeConfig(over), encryption, providerStore);
+  return { service, repo, providerStore };
 };
 
 const mkRes = () => ({
@@ -239,7 +266,10 @@ const jsonResponse = (body, status = 200) => ({
     assert.equal(new Date(out.expiresAt).getTime(), EXP * 1000, 'expiry must come from the exp claim');
 
     assert.equal(repo.rows.length, 1, 'exactly one row persisted');
-    assert.equal(repo.rows[0].status, 'TOKEN_VALID');
+    assert.equal(repo.rows[0].provider, 'upstox');
+    assert.equal(repo.rows[0].environment, 'live');
+    assert.equal(repo.rows[0].status, 'active');
+    assert.equal(new Date(repo.rows[0].expiresAt).getTime(), EXP * 1000, 'expiry (exp claim) stored on the provider row');
     assert.equal(repo.rows[0].accessTokenEncrypted, `enc:${token}`, 'token stored encrypted, never plain');
     assert.ok(!JSON.stringify(out).includes('eyJ'), 'the raw token must not be handed back to the caller');
   });

@@ -1,9 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
 import { EncryptionService } from '../../auth/encryption.service';
-import { UpstoxLivePaperToken } from './upstox-live-paper-token.entity';
+import { ProviderTokenService } from '../provider-token.service';
 
 export type TokenStatus =
   | 'AUTHENTICATED'
@@ -22,13 +20,32 @@ const STATUS: Record<TokenStatus, TokenStatus> = {
   AUTH_REQUIRED: 'AUTH_REQUIRED',
 };
 
+/**
+ * Upstox LIVE token service — OAuth state handling, code→token exchange and
+ * token status for the Upstox market-data consumers (pre-open source + live
+ * market service).
+ *
+ * STORAGE (2026-09-23): tokens are persisted through the unified, encrypted
+ * ProviderTokenService store — table `provider_tokens`, provider='upstox',
+ * environment='live', status='active', ONE active row per provider+environment
+ * updated in place — the exact same store the FYERS feed consumes. The desk's
+ * legacy `upstox_live_paper_tokens` table is historical only; the runtime path
+ * neither reads nor writes it.
+ *
+ * SAFETY:
+ *  - The access token is never returned to a browser and never logged.
+ *  - No consumer ever falls back to a .env or hard-coded token
+ *    (getValidUpstoxAccessToken reads the DB store only).
+ *  - The code→token exchange runs server-side; the single-use, TTL-bounded
+ *    OAuth state is what authorizes it, never the caller's identity.
+ */
 @Injectable()
 export class UpstoxLivePaperTokenService implements OnModuleInit {
   private readonly logger = new Logger(UpstoxLivePaperTokenService.name);
 
   private readonly config: ConfigService;
-  private readonly repo: Repository<UpstoxLivePaperToken>;
   private readonly encryption: EncryptionService;
+  private readonly providerTokens: ProviderTokenService;
 
   /** Hard safety: never accept tokens for apps we don't recognise. */
   private readonly allowedClientIds: Set<string>;
@@ -37,9 +54,15 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
 
   /**
    * Pending OAuth authorization states. Single-use + TTL-bounded so a callback
-   * cannot be replayed and a code cannot be injected by a third party.
+   * cannot be replayed and a code cannot be injected by a third party. Each
+   * entry also remembers the same-origin path the browser should land on after
+   * the callback (`returnTo`): '/fnf-trading' for the FNF portal button;
+   * null → the Upstox desk page (default).
    */
-  private readonly pendingStates = new Map<string, { createdAt: number; used: boolean }>();
+  private readonly pendingStates = new Map<
+    string,
+    { createdAt: number; used: boolean; returnTo: string | null }
+  >();
 
   /** Upstox's documented login dialog (Step 1 of the code flow). */
   private static readonly AUTH_DIALOG_URL = 'https://api.upstox.com/v2/login/authorization/dialog';
@@ -52,13 +75,12 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
 
   constructor(
     config: ConfigService,
-    @InjectRepository(UpstoxLivePaperToken)
-    repo: Repository<UpstoxLivePaperToken>,
     encryption: EncryptionService,
+    providerTokens: ProviderTokenService,
   ) {
     this.config = config;
-    this.repo = repo;
     this.encryption = encryption;
+    this.providerTokens = providerTokens;
 
     const configured = (config.get<string>('UPSTOX_LIVE_API_KEY') ?? '').trim();
     const fallback = config.get<string>('UPSTOX_LIVE_ALLOWED_CLIENT_IDS') ?? '';
@@ -81,21 +103,22 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
   }
 
   async onModuleInit(): Promise<void> {
-    await this.ensureSeedRow();
-    this.logger.log(`[UPSTOX-LIVE-PAPER] token service ready; allowed client_ids=${[...this.allowedClientIds].join(',') || '(none)'}`);
+    this.logger.log(
+      `[UPSTOX-LIVE-PAPER] token service ready (store=provider_tokens provider=upstox environment=live); allowed client_ids=${[...this.allowedClientIds].join(',') || '(none)'}`,
+    );
   }
 
   // ── status ─────────────────────────────────────────────────────────────────
 
   async tokenStatus(): Promise<{ status: TokenStatus; clientId: string; issuedAt: string | null; expiresAt: string | null; expiryWithinMinutes: number | null }> {
-    const token = await this.latestToken();
-    if (!token) {
+    const row = await this.providerTokens.getCurrentToken('upstox', 'live');
+    if (!row?.accessTokenEncrypted) {
       return { status: 'TOKEN_MISSING', clientId: '', issuedAt: null, expiresAt: null, expiryWithinMinutes: null };
     }
-    const now = Date.now();
-    const expiresAtMs = token.expiresAt?.getTime() ?? 0;
-    const issuedAtMs = token.issuedAt?.getTime() ?? 0;
-    const remainingMs = Math.max(0, expiresAtMs - now);
+    const info = await this.providerTokens.getActiveTokenInfo('upstox', 'live');
+    const expiresAt = info?.expiresAt ?? row.expiresAt ?? null;
+    const expiresAtMs = expiresAt?.getTime() ?? 0;
+    const remainingMs = Math.max(0, expiresAtMs - Date.now());
     const remainingMinutes = expiresAtMs > 0 ? Math.ceil(remainingMs / 60_000) : null;
 
     let status: TokenStatus;
@@ -109,9 +132,9 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
 
     return {
       status,
-      clientId: token.clientId,
-      issuedAt: token.issuedAt?.toISOString() ?? null,
-      expiresAt: token.expiresAt?.toISOString() ?? null,
+      clientId: row.clientId,
+      issuedAt: row.issuedAt?.toISOString() ?? null,
+      expiresAt: expiresAt?.toISOString() ?? null,
       expiryWithinMinutes: remainingMinutes,
     };
   }
@@ -121,20 +144,20 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
   /**
    * Returns a valid non-expired access_token, or throws if none exists.
    * Market-data services MUST use this; they never call the Upstox token API
-   * themselves and never read the token from .env.
+   * themselves and never read the token from .env or any hard-coded value.
    */
   async getValidUpstoxAccessToken(): Promise<{ token: string; clientId: string; expiresAt: Date }> {
-    const token = await this.latestToken();
-    if (!token) throw new Error('Upstox LIVE access token missing — AUTH_REQUIRED');
-    if (!token.expiresAt || token.expiresAt <= new Date()) {
+    const row = await this.providerTokens.getCurrentToken('upstox', 'live');
+    if (!row) throw new Error('Upstox LIVE access token missing — AUTH_REQUIRED');
+    const info = await this.providerTokens.getActiveTokenInfo('upstox', 'live');
+    const expiresAt = info?.expiresAt ?? row.expiresAt ?? null;
+    if (!expiresAt || expiresAt <= new Date()) {
       const s = await this.tokenStatus();
       throw new Error(`Upstox LIVE access token ${s.status} — AUTH_REQUIRED`);
     }
-    return {
-      token: this.encryption.decrypt(token.accessTokenEncrypted),
-      clientId: token.clientId,
-      expiresAt: token.expiresAt,
-    };
+    const token = await this.providerTokens.getActiveAccessToken('upstox', 'live');
+    if (!token) throw new Error('Upstox LIVE access token missing — AUTH_REQUIRED');
+    return { token, clientId: row.clientId, expiresAt };
   }
 
   // ── persistence from OAuth callback / notifier ─────────────────────────────
@@ -142,6 +165,13 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
   /**
    * Persist a token received through the configured Upstox notifier OR OAuth
    * callback. Validates client_id against our allowed set before storing.
+   *
+   * The write goes to the unified encrypted provider store
+   * (provider='upstox', environment='live', status='active'): ProviderTokenService
+   * updates the single active row IN PLACE, so a fresh token atomically replaces
+   * the previous one — there is never a moment where two active Upstox rows
+   * could be selected. Provenance (expiresAt from the token's own claims, IST
+   * token date) is preserved on the row.
    */
   async persistToken(payload: {
     clientId: string;
@@ -149,7 +179,7 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
     tokenType?: string;
     issuedAt?: string | number;
     expiresAt?: string | number;
-  }): Promise<UpstoxLivePaperToken> {
+  }): Promise<{ clientId: string; expiresAt: Date | null; tokenType: string }> {
     const normalizedClientId = payload.clientId.trim().toUpperCase();
     if (!this.allowedClientIds.size) {
       this.logger.warn('[UPSTOX-LIVE-PAPER] no allowed client_ids configured — rejecting token persist');
@@ -164,50 +194,63 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
     const issuedAt = this.parseTs(payload.issuedAt);
     const tokenType = (payload.tokenType ?? 'Bearer').trim() || 'Bearer';
 
-    // Do NOT log the token.
-    const encrypted = this.encryption.encrypt(payload.accessToken);
-    if (!encrypted) {
+    // Encryption pre-flight: same guard the desk used before — if the AES
+    // pipeline is broken, fail loudly and store nothing.
+    if (!this.encryption.encrypt(payload.accessToken)) {
       this.logger.error('[UPSTOX-LIVE-PAPER] failed to encrypt access token — not storing');
       throw new Error('token encryption failed');
     }
 
-    const existing = await this.repo.findOne({ where: { clientId: normalizedClientId } });
-    const entity = (existing ?? this.repo.create({ broker: 'UPSTOX', clientId: normalizedClientId })) as UpstoxLivePaperToken;
-    entity.accessTokenEncrypted = encrypted;
-    entity.tokenType = tokenType;
-    entity.issuedAt = issuedAt ?? null;
-    entity.expiresAt = expiresAt ?? null;
-    entity.status = expiresAt && expiresAt > new Date() ? 'TOKEN_VALID' : 'TOKEN_EXPIRY';
-    return this.repo.save(entity);
+    // Do NOT log the token. Encrypted at rest with AES-256-CBC under
+    // ENCRYPTION_KEY by ProviderTokenService (same mechanism as FYERS).
+    await this.providerTokens.storeTokens(
+      payload.accessToken,
+      null,
+      normalizedClientId,
+      'upstox',
+      'live',
+      null,
+      { expiresAt, tokenDate: this.istDateString(issuedAt ?? new Date()) },
+    );
+
+    this.logger.log(
+      `[UPSTOX-LIVE-PAPER] token persisted (provider=upstox environment=live client_id=${normalizedClientId} exp=${expiresAt?.toISOString() ?? 'n/a'})`,
+    );
+    return { clientId: normalizedClientId, expiresAt, tokenType };
   }
 
   // ── admin / manual initiation helpers ──────────────────────────────────────
 
-  async initiateTokenRequest(): Promise<{ url: string; state: string }> {
+  /**
+   * Build the Upstox authorization URL and register its single-use state.
+   * `returnTo` is an optional same-origin path the callback redirects back to
+   * (e.g. '/fnf-trading' for the FNF portal button); anything else is ignored
+   * and the callback falls back to the Upstox desk page.
+   */
+  async initiateTokenRequest(returnTo?: string): Promise<{ url: string; state: string }> {
     const clientId = (this.config.get<string>('UPSTOX_LIVE_API_KEY') ?? '').trim();
     if (!clientId) throw new Error('UPSTOX_LIVE_API_KEY not configured — cannot initiate token request');
     const redirectUri = (this.config.get<string>('UPSTOX_LIVE_REDIRECT_URI') ?? '').trim();
     if (!redirectUri) throw new Error('UPSTOX_LIVE_REDIRECT_URI not configured — cannot initiate token request');
     const state = Buffer.from(this.randomBytes ? this.randomBytes(18).toString('hex') : Math.random().toString(36).slice(2)).toString('base64');
-    this.registerState(state);
+    this.registerState(state, returnTo);
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: clientId,
       redirect_uri: redirectUri,
       state,
     });
-    // Upstox's documented dialog host. The previous value
-    // (apps.upstox.com/authorization) does not resolve at all, so the
-    // "Authorize" link led to a dead page.
+    // Upstox's documented dialog host — the FNF portal button and this desk's
+    // init page both redirect here.
     return { url: `${UpstoxLivePaperTokenService.AUTH_DIALOG_URL}?${params.toString()}`, state };
   }
 
   /**
    * Validate and burn an authorization state. Single-use and TTL-bounded, so a
    * replayed callback or an injected code is refused before anything reaches
-   * Upstox.
+   * Upstox. Returns the returnTo path the flow was started with (when any).
    */
-  consumeState(state: string | undefined): { ok: true } | { ok: false; reason: string } {
+  consumeState(state: string | undefined): { ok: true; returnTo: string | null } | { ok: false; reason: string } {
     const key = (state ?? '').trim();
     if (!key) return { ok: false, reason: 'Missing OAuth state — this callback was not started from the desk' };
     const entry = this.pendingStates.get(key);
@@ -219,13 +262,19 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
     }
     entry.used = true;
     this.pendingStates.delete(key);
-    return { ok: true };
+    return { ok: true, returnTo: entry.returnTo ?? null };
   }
 
   /**
    * Step 3 of the documented flow: exchange the single-use authorization code
    * for an access token server-side, then persist it. The token is never
    * returned to the caller and never logged.
+   *
+   * Expiry semantics (documented Upstox behaviour): an access token obtained
+   * through this flow is valid until 3:30 AM IST the following day. We do not
+   * invent a lifetime — the token's own exp claim (JWT) is authoritative and is
+   * what gets stored; `expires_in` / `expires_at` from the response are honoured
+   * next; a token with no discoverable lifetime is REFUSED rather than guessed.
    */
   async completeAuthorization(code: string): Promise<{ clientId: string; expiresAt: Date | null; tokenType: string }> {
     const clientId = (this.config.get<string>('UPSTOX_LIVE_API_KEY') ?? '').trim();
@@ -281,16 +330,23 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
     });
 
     this.logger.log(
-      `[UPSTOX-LIVE-PAPER] authorization code exchanged; token stored for client_id=${saved.clientId} exp=${expiresAt.toISOString()}`,
+      `[UPSTOX-LIVE-PAPER] authorization code exchanged; token stored for client_id=${saved.clientId} exp=${(saved.expiresAt ?? expiresAt).toISOString()}`,
     );
     return { clientId: saved.clientId, expiresAt: saved.expiresAt ?? expiresAt, tokenType: saved.tokenType ?? 'Bearer' };
   }
 
   // ── internal ───────────────────────────────────────────────────────────────
 
-  private registerState(state: string): void {
+  private registerState(state: string, returnTo?: string): void {
     this.pruneStates();
-    this.pendingStates.set(state, { createdAt: Date.now(), used: false });
+    this.pendingStates.set(state, { createdAt: Date.now(), used: false, returnTo: this.sanitizeReturnTo(returnTo) });
+  }
+
+  /** Same-origin path only ('/fnf-trading', '/upstox-live-paper.html'); else null. */
+  private sanitizeReturnTo(returnTo: string | undefined): string | null {
+    const value = (returnTo ?? '').trim();
+    if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\') || /[\r\n]/.test(value)) return null;
+    return value;
   }
 
   private pruneStates(): void {
@@ -327,22 +383,14 @@ export class UpstoxLivePaperTokenService implements OnModuleInit {
     return this.parseTs(response?.expires_at ?? undefined);
   }
 
-  private async ensureSeedRow(): Promise<void> {
-    const configuredClientId = (this.config.get<string>('UPSTOX_LIVE_API_KEY') ?? '').trim().toUpperCase();
-    if (!configuredClientId) return;
-    const existing = await this.repo.findOne({ where: { clientId: configuredClientId } });
-    if (!existing) {
-      await this.repo.save(this.repo.create({ broker: 'UPSTOX', clientId: configuredClientId, status: 'TOKEN_MISSING' }));
-      this.logger.log(`[UPSTOX-LIVE-PAPER] seeded token row for client_id=${configuredClientId}`);
-    }
-  }
-
-  private async latestToken(): Promise<UpstoxLivePaperToken | null> {
-    // TypeORM 0.3 rejects findOne() without a `where` ("You must provide
-    // selection conditions…"), even with an order clause — which made every
-    // token read throw, so the desk could never see a token it had stored.
-    const rows = await this.repo.find({ order: { updatedAt: 'DESC' }, take: 1 });
-    return rows[0] ?? null;
+  /** IST calendar date (YYYY-MM-DD) for row provenance (provider_tokens.tokenDate). */
+  private istDateString(when: Date): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(when);
   }
 
   private parseTs(raw: string | number | undefined): Date | null {

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, Res, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { BypassAuth } from '../../auth/bypass-auth.decorator';
 import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
@@ -7,16 +7,43 @@ import { UpstoxLivePaperTokenService } from './upstox-live-paper-auth.service';
  * Upstox LIVE token endpoints.
  *
  * Supports:
- *  - OAuth authorization-code flow: GET /api/upstox/token/init → user logs in →
- *    GET /api/upstox/callback?code=...&state=... → exchange code → store token.
- *  - Upstox notifier flow: POST /api/upstox/notifier → validate + persist.
+ *  - Portal one-click login: GET /api/upstox/login → 302 straight to Upstox's
+ *    authorization dialog. This is the target of the FNF Trading portal's
+ *    "GET UPSTOX TOKEN" button and mirrors the FYERS /auth/fyers/login flow.
+ *    No token logic runs in browser JavaScript anywhere.
+ *  - OAuth authorization-code callback: GET /api/upstox/callback?code=…&state=…
+ *    (this exact path is the redirect URI registered with Upstox —
+ *    UPSTOX_LIVE_REDIRECT_URI — so it must not be renamed) → single-use state
+ *    validation → server-side code exchange → encrypted provider_tokens store.
+ *  - Manual/admin initiation page: GET /api/upstox/token/init.
+ *  - Upstox notifier flow: POST /api/upstox/notifier → validate + persist
+ *    (same provider_tokens store).
  *
- * The existing /api/upstox/notifier endpoint is reused here (same path). There
- * is no second notifier endpoint.
+ * There is no second notifier endpoint and no second callback route.
  */
 @Controller('api/upstox')
 export class UpstoxLivePaperTokenController {
   constructor(private readonly token: UpstoxLivePaperTokenService) {}
+
+  /**
+   * One-click portal login: mint the OAuth state server-side (5-minute TTL,
+   * single-use) and redirect the browser straight to Upstox's documented
+   * authorization dialog. Nothing but the broker's own login page runs in the
+   * browser; the secret never leaves the server.
+   */
+  @Get('login')
+  @BypassAuth()
+  async login(@Res() res: Response) {
+    try {
+      // returnTo: the FNF Trading portal page that hosts the button.
+      const { url } = await this.token.initiateTokenRequest('/fnf-trading');
+      return res.redirect(url);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.token.log(`[UPSTOX-LIVE-PAPER] login initiation failed: ${reason}`);
+      return res.redirect('/fnf-trading?upstox=error&reason=' + encodeURIComponent(reason));
+    }
+  }
 
   /** Initiate the OAuth authorization-code flow (manual/admin trigger). */
   @Get('token/init')
@@ -40,12 +67,16 @@ export class UpstoxLivePaperTokenController {
 
   /**
    * OAuth callback (Step 2 + 3 of Upstox's documented flow): receive the
-   * single-use authorization code, validate the state this desk minted, exchange
-   * the code server-side and persist the token.
+   * single-use authorization code, validate the state this app minted, exchange
+   * the code server-side and persist the token into the unified encrypted
+   * provider_tokens store (provider='upstox', environment='live').
    *
-   * Public by design — the redirect arrives from Upstox's domain — so the
-   * single-use, TTL-bounded state is what authorizes the exchange, never the
-   * caller's identity. The code and the token are never logged.
+   * The browser lands back on the page the flow was started from: the FNF
+   * Trading portal (/fnf-trading) when the portal button started it, otherwise
+   * the Upstox desk page. Public by design — the redirect arrives from Upstox's
+   * domain — so the single-use, TTL-bounded state is what authorizes the
+   * exchange, never the caller's identity. The code and the token are never
+   * logged.
    */
   @Get('callback')
   @BypassAuth()
@@ -54,11 +85,11 @@ export class UpstoxLivePaperTokenController {
     @Res() res: Response,
   ) {
     const desk = '/upstox-live-paper.html';
-    const finish = (outcome: Record<string, string>) => {
+    const finish = (outcome: Record<string, string>, base: string = desk) => {
       if (q.format === 'json') {
         return res.status(outcome.upstox === 'ok' ? 200 : 400).json(outcome);
       }
-      return res.redirect(`${desk}?${new URLSearchParams(outcome).toString()}`);
+      return res.redirect(`${base}?${new URLSearchParams(outcome).toString()}`);
     };
 
     if (q.error) {
@@ -74,18 +105,24 @@ export class UpstoxLivePaperTokenController {
       return finish({ upstox: 'error', reason: stateCheck.reason });
     }
 
+    // returnTo comes from the server-side state entry (never the query string):
+    // '/fnf-trading' for the FNF portal button, else the Upstox desk page.
+    const base = stateCheck.returnTo ?? desk;
     try {
       this.token.log(`[UPSTOX-LIVE-PAPER] OAuth callback: exchanging authorization code (length ${q.code.length})`);
       const stored = await this.token.completeAuthorization(q.code);
-      return finish({
-        upstox: 'ok',
-        client_id: stored.clientId,
-        expires: stored.expiresAt ? stored.expiresAt.toISOString() : '',
-      });
+      return finish(
+        {
+          upstox: 'ok',
+          client_id: stored.clientId,
+          expires: stored.expiresAt ? stored.expiresAt.toISOString() : '',
+        },
+        base,
+      );
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       this.token.log(`[UPSTOX-LIVE-PAPER] OAuth callback failed: ${reason}`);
-      return finish({ upstox: 'error', reason });
+      return finish({ upstox: 'error', reason }, base);
     }
   }
 
