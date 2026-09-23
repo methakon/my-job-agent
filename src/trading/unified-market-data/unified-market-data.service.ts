@@ -208,6 +208,19 @@ export class UnifiedMarketDataService {
   private consecutiveFlushTimeouts = 0;
   private poolReleases = 0;
   /**
+   * Retry backoff (A) for the write-behind flush: after a flush timeout the next
+   * attempts are gated exponentially (2s -> 4s -> ... -> 30s cap) and the gate
+   * clears on the first successful flush. Without it, a wedged write path keeps
+   * attracting fresh retries that queue getConnection waiters behind the dead
+   * sockets -- live on 2026-09-23 the pool's waiter queue grew past 119k entries
+   * while RSS climbed to 2.3GB (every abandoned waiter is retained until the
+   * process dies).
+   */
+  private flushBackoffStreak = 0;
+  private flushBackoffUntilMs = 0;
+  private readonly flushBackoffBaseMs = envInt('UNIFIED_FLUSH_BACKOFF_BASE_MS', 2_000);
+  private readonly flushBackoffCapMs = envInt('UNIFIED_FLUSH_BACKOFF_CAP_MS', 30_000);
+  /**
    * Idempotency window for repeated observations (source|instrument|source ts).
    * A producer that sends the same broker tick twice (doubled SDK subscription
    * after a token rebuild, or a restarted socket replaying its snapshot) must
@@ -374,6 +387,9 @@ export class UnifiedMarketDataService {
    * accumulated, so the pool never sees a burst.
    */
   async flushPending(): Promise<{ quotes: number; snapshots: number }> {
+    // Retry backoff (A): while a flush-timeout gate is armed, attempt nothing at
+    // all -- a wedged path must never attract a fresh round of queued waiters.
+    if (Date.now() < this.flushBackoffUntilMs) return { quotes: 0, snapshots: 0 };
     return { quotes: await this.flushQuoteRows(), snapshots: await this.flushSnapshotRows() };
   }
 
@@ -514,13 +530,37 @@ export class UnifiedMarketDataService {
       );
     }
     this.persistenceHealth.recordFailure(`write-behind ${kind} flush timeout (${this.flushTimeoutMs}ms)`);
+    this.armFlushBackoff();
     if (this.consecutiveFlushTimeouts >= this.recycleAfterTimeouts) this.releasePoolConnections();
   }
 
   /** A completed flush proves the database path is healthy again. */
   private noteFlushSuccess(): void {
     this.consecutiveFlushTimeouts = 0;
+    if (this.flushBackoffStreak > 0) {
+      this.logger.log(
+        `unified write-behind flush backoff cleared after a successful flush (was streak=${this.flushBackoffStreak})`,
+      );
+    }
+    this.flushBackoffStreak = 0;
+    this.flushBackoffUntilMs = 0;
     this.persistenceHealth.recordSuccess();
+  }
+
+  /** Exponential retry gate (A): base * 2^(n-1), capped -- pure so tests can pin it. */
+  private flushBackoffDelayMs(streak: number): number {
+    return Math.min(this.flushBackoffCapMs, this.flushBackoffBaseMs * 2 ** (streak - 1));
+  }
+
+  /** Arm the gate after a timeout: the NEXT attempt no earlier than `delay` from now. */
+  private armFlushBackoff(): void {
+    this.flushBackoffStreak += 1;
+    const delay = this.flushBackoffDelayMs(this.flushBackoffStreak);
+    this.flushBackoffUntilMs = Date.now() + delay;
+    this.logger.warn(
+      `unified write-behind flush backoff armed: next attempt in ${delay}ms ` +
+        `(streak=${this.flushBackoffStreak}, cap=${this.flushBackoffCapMs}ms)`,
+    );
   }
 
   /**
@@ -537,27 +577,68 @@ export class UnifiedMarketDataService {
    * Destroying the sockets makes the abandoned queries fail, which is what frees
    * the slots; mysql2 then replaces them on the next flush. This touches only the
    * write-behind path's own connection pool.
+   *
+   * Counting (B): a destroy is only a RELEASE when the PoolConnection left the
+   * pool's bookkeeping (its own destroy path detaches it from the pool queues
+   * first, freeing the slot). Entries already outside that bookkeeping
+   * (`_pool === null`, e.g. from a previous half-run release) are still destroyed
+   * -- they are wedged sockets -- but they free NO slot, so they are counted as
+   * `detached`, never as releases. The log carries the residual pool state
+   * (all/free/waiting) so a "released N" line can never again mask an un-freed
+   * pool.
    */
   private releasePoolConnections(): void {
-    const connection = this.quotes?.manager?.connection as unknown as { driver?: { pool?: { _allConnections?: unknown } } } | undefined;
+    type PoolConnectionLike = { _pool?: unknown; destroy?: () => void };
+    type PoolInternals = {
+      _allConnections?: { toArray?: () => unknown[] };
+      _freeConnections?: { length?: number };
+      _connectionQueue?: { length?: number };
+    };
+    const connection = this.quotes?.manager?.connection as unknown as { driver?: { pool?: PoolInternals } } | undefined;
     const pool = connection?.driver?.pool;
-    const sockets = pool?._allConnections as unknown as { toArray?: () => unknown[] } | undefined;
-    let released = 0;
+    const sockets = pool?._allConnections;
+    let destroyed = 0;
+    let detached = 0;
+    let errors = 0;
     if (sockets && typeof sockets.toArray === 'function') {
-      for (const socket of sockets.toArray() as Array<{ destroy?: () => void }>) {
+      for (const socket of sockets.toArray() as PoolConnectionLike[]) {
+        if (!socket || typeof socket.destroy !== 'function') {
+          // Plain handle, not a PoolConnection -- nothing to detach.
+          detached += 1;
+          continue;
+        }
+        if (socket._pool === null || socket._pool === undefined) {
+          // Residual case: already outside the pool's bookkeeping. Destroying it
+          // still kills a wedged socket, but it can NOT free a slot.
+          try {
+            socket.destroy();
+          } catch {
+            // A socket already gone is exactly the outcome we want.
+          }
+          detached += 1;
+          continue;
+        }
         try {
-          socket.destroy?.();
-          released += 1;
+          // PoolConnection's own path: _removeFromPool() detaches the connection
+          // from the pool's queues (freeing the slot / serving a waiter), then the
+          // socket dies. Count it ONLY when that detach actually happened.
+          socket.destroy();
+          if (socket._pool === null || socket._pool === undefined) destroyed += 1;
+          else errors += 1;
         } catch {
-          // A socket already gone is exactly the outcome we want.
+          errors += 1;
         }
       }
     }
+    const residualAll = sockets && typeof sockets.toArray === 'function' ? sockets.toArray().length : null;
+    const residualFree = pool?._freeConnections?.length ?? null;
+    const residualWaiting = pool?._connectionQueue?.length ?? null;
     this.poolReleases += 1;
     this.consecutiveFlushTimeouts = 0;
     this.logger.warn(
-      `unified write-behind: released ${released} pooled socket(s) after ${this.recycleAfterTimeouts} consecutive flush timeouts ` +
-        `(release #${this.poolReleases}) — wedged connections were holding every pool slot; the next flush reconnects`,
+      `unified write-behind: released ${destroyed} pooled connection(s) after ${this.recycleAfterTimeouts} consecutive flush timeouts ` +
+        `(release #${this.poolReleases}) — residual all=${residualAll ?? 'n/a'} free=${residualFree ?? 'n/a'} waiting=${residualWaiting ?? 'n/a'} ` +
+        `(detached=${detached}, errors=${errors}); the next flush reconnects`,
     );
   }
 

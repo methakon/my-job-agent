@@ -10,6 +10,7 @@
  *   F. no fabricated fallback
  */
 
+import { Logger } from '@nestjs/common';
 import { UnifiedMarketDataService, isDuplicateKeyError } from './unified-market-data.service';
 import { PersistenceHealthMachine } from '../../shared/persistence-state';
 
@@ -467,5 +468,174 @@ describe('UnifiedMarketDataService — quote flush idempotency (mirror of snapsh
     (svc as unknown as { duplicateQuotes: number }).duplicateQuotes = 5;
     await Promise.resolve((svc as unknown as { reset(): unknown }).reset());
     expect((svc as unknown as { duplicateQuoteCount(): number }).duplicateQuoteCount()).toBe(0);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Persistence-repair regression suite (A+B, 2026-09-23).
+ *
+ * A: flush retry backoff — after a flush timeout the next attempts are gated
+ *    exponentially (2s -> 4s -> ... -> 30s cap) and the gate clears on the first
+ *    successful flush. Without it a wedged write path keeps attracting retries
+ *    that queue getConnection waiters behind the dead sockets (live evidence:
+ *    pool waiter queue past ~119k entries, RSS climbing to 2.3GB).
+ * B: releasePoolConnections — destroys via the PoolConnection's own path,
+ *    counts ONLY verified removals (residual `_pool=null` entries free no slot
+ *    and are never counted), and reports the residual pool state (all/free/
+ *    waiting) so a "released N" line can no longer mask an un-freed pool.
+ * ------------------------------------------------------------------------- */
+
+describe('UnifiedMarketDataService — flush retry backoff (A)', () => {
+  it('backoff delay doubles per consecutive timeout and caps at 30s', () => {
+    const repo = fakeRepo();
+    const svc = makeService(repo);
+    const delayOf = (streak: number) =>
+      (svc as unknown as { flushBackoffDelayMs(streak: number): number }).flushBackoffDelayMs(streak);
+
+    expect(delayOf(1)).toBe(2_000);
+    expect(delayOf(2)).toBe(4_000);
+    expect(delayOf(3)).toBe(8_000);
+    expect(delayOf(4)).toBe(16_000);
+    expect(delayOf(5)).toBe(30_000); // 32s -> capped
+    expect(delayOf(9)).toBe(30_000);
+  });
+
+  it('a timeout arms the gate; a success clears it; the streak is tracked', () => {
+    const repo = fakeRepo();
+    const svc = makeService(repo);
+    const priv = svc as unknown as {
+      noteFlushTimeout(kind: string): void;
+      noteFlushSuccess(): void;
+      flushBackoffStreak: number;
+      flushBackoffUntilMs: number;
+    };
+
+    const t0 = Date.now();
+    priv.noteFlushTimeout('quote');
+    const firstDelay = priv.flushBackoffUntilMs - t0;
+    expect(firstDelay).toBeGreaterThanOrEqual(2_000);
+    expect(firstDelay).toBeLessThanOrEqual(2_100);
+    expect(priv.flushBackoffStreak).toBe(1);
+
+    priv.noteFlushTimeout('snapshot');
+    expect(priv.flushBackoffStreak).toBe(2);
+
+    priv.noteFlushSuccess();
+    expect(priv.flushBackoffStreak).toBe(0);
+    expect(priv.flushBackoffUntilMs).toBe(0);
+  });
+
+  it('gated flushPending() performs NO database attempt (no waiter flood)', async () => {
+    const repo = fakeRepo();
+    const svc = makeService(repo);
+    enqueueQuotes(svc, [makeQuoteRow({ id: 'bf-1' })]);
+    const priv = svc as unknown as {
+      noteFlushTimeout(kind: string): void;
+      flushBackoffUntilMs: number;
+      flushBackoffStreak: number;
+      flushPending(): Promise<{ quotes: number; snapshots: number }>;
+    };
+
+    // The in-flight attempt timed out -> the gate is armed.
+    priv.noteFlushTimeout('quote');
+    const attemptsBefore = repo.insert.mock.calls.length;
+
+    // Every call inside the gate must be a no-op: no getConnection, no INSERT.
+    const r1 = await priv.flushPending();
+    const r2 = await priv.flushPending();
+    expect(r1).toEqual({ quotes: 0, snapshots: 0 });
+    expect(r2).toEqual({ quotes: 0, snapshots: 0 });
+    expect(repo.insert.mock.calls.length).toBe(attemptsBefore);
+    expect(priv.flushBackoffStreak).toBe(1);
+
+    // Once the gate expires the next attempt runs — and its success clears it.
+    priv.flushBackoffUntilMs = Date.now() - 1;
+    const r3 = await priv.flushPending();
+    expect(r3).toEqual({ quotes: 1, snapshots: 0 });
+    expect(repo.insert.mock.calls.length).toBe(attemptsBefore + 1);
+    expect(priv.flushBackoffStreak).toBe(0);
+    expect(priv.flushBackoffUntilMs).toBe(0);
+  });
+});
+
+describe('UnifiedMarketDataService — pool release accounting (B)', () => {
+  /** Repo whose pool exposes mysql2-shaped connection lists. */
+  function fakeRepoWithPool(entries: unknown[], free = 0, waiting = 0) {
+    const repo = fakeRepo();
+    (repo as unknown as { manager: { connection: unknown } }).manager.connection = {
+      driver: {
+        pool: {
+          _allConnections: { toArray: () => entries },
+          _freeConnections: { length: free },
+          _connectionQueue: { length: waiting },
+        },
+      },
+    };
+    return repo;
+  }
+
+  function callRelease(svc: UnifiedMarketDataService): void {
+    (svc as unknown as { releasePoolConnections(): void }).releasePoolConnections();
+  }
+
+  it('counts only VERIFIED removals; residual _pool=null entries are detached, not released', () => {
+    // attached: behaves like a live PoolConnection — its own destroy detaches it (_pool -> null)
+    const attached: { _pool: unknown; destroy: jest.Mock } = { _pool: {}, destroy: jest.fn() };
+    attached.destroy.mockImplementation(() => {
+      attached._pool = null;
+    });
+    // residual: already outside pool bookkeeping — destroying frees NO slot
+    const residual: { _pool: unknown; destroy: jest.Mock } = { _pool: null, destroy: jest.fn() };
+    // plain: not a PoolConnection at all
+    const plain: Record<string, unknown> = {};
+
+    const repo = fakeRepoWithPool([attached, residual, plain]);
+    const svc = makeService(repo);
+    (svc as unknown as { consecutiveFlushTimeouts: number }).consecutiveFlushTimeouts = 3;
+
+    callRelease(svc);
+
+    expect(attached.destroy).toHaveBeenCalledTimes(1);
+    expect(residual.destroy).toHaveBeenCalledTimes(1); // wedged socket is still killed
+    expect((svc as unknown as { poolReleases: number }).poolReleases).toBe(1);
+    expect((svc as unknown as { consecutiveFlushTimeouts: number }).consecutiveFlushTimeouts).toBe(0);
+  });
+
+  it('reports the residual pool state (all/free/waiting) in the release log', () => {
+    const attached: { _pool: unknown; destroy: jest.Mock } = { _pool: {}, destroy: jest.fn() };
+    attached.destroy.mockImplementation(() => {
+      attached._pool = null;
+    });
+    const residual: { _pool: unknown; destroy: jest.Mock } = { _pool: null, destroy: jest.fn() };
+    const repo = fakeRepoWithPool([attached, residual], 0, 117_411);
+    const svc = makeService(repo);
+
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      callRelease(svc);
+      const line = warnSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('residual all='));
+      expect(line).toBeDefined();
+      expect(line).toContain('released 1 pooled connection(s)');
+      expect(line).toContain('residual all=2 free=0 waiting=117411');
+      expect(line).toContain('detached=1');
+      expect(line).toContain('errors=0');
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('release with no pool queue available is a safe no-op with n/a residual', () => {
+    const repo = fakeRepo(); // default pool: _allConnections is a plain array (no toArray())
+    const svc = makeService(repo);
+
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    try {
+      callRelease(svc);
+      const line = warnSpy.mock.calls.map((c) => String(c[0])).find((s) => s.includes('released 0'));
+      expect(line).toBeDefined();
+      expect(line).toContain('residual all=n/a free=n/a waiting=n/a');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
