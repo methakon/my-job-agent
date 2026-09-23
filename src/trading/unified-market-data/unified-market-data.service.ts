@@ -123,6 +123,25 @@ const wallClockStamp = (ms: number): string => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
 
+/**
+ * Detect a mysql2 duplicate-key error (ER_DUP_ENTRY, errno 1062).
+ *
+ * TypeORM's QueryFailedError preserves the mysql2 driver error as
+ * `.driverError`; raw mysql2 errors carry `.code` and `.errno` directly.
+ * This function checks both paths so callers don't depend on the exact
+ * wrapping layer.
+ */
+export function isDuplicateKeyError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as Record<string, unknown>;
+  // Direct mysql2 error: { code: 'ER_DUP_ENTRY', errno: 1062 }
+  if (e.code === 'ER_DUP_ENTRY' || e.errno === 1062) return true;
+  // TypeORM QueryFailedError wraps the original as .driverError
+  const driver = e.driverError as Record<string, unknown> | undefined;
+  if (driver && (driver.code === 'ER_DUP_ENTRY' || driver.errno === 1062)) return true;
+  return false;
+}
+
 /** Freshness of the common store (see storeFreshness()). */
 export type StoreFreshness = {
   lastTs: Date | null;
@@ -200,6 +219,16 @@ export class UnifiedMarketDataService {
   private readonly dedupeWindowMs: number;
   private duplicatesSuppressed = 0;
 
+  /**
+   * Persistent-storage idempotency: canonicalRowId is deterministic, so a
+   * replayed tick that survived ingest dedupe still hits the UNIQUE constraint.
+   * Counted separately from ingest duplicates; logged at info level.
+   */
+  private duplicateSnapshots = 0;
+
+  /** Persistent-storage duplicate quote rows encountered during flush (observability). */
+  private duplicateQuotes = 0;
+
   constructor(
     @InjectRepository(UnifiedOptionQuote)
     private readonly quotes: Repository<UnifiedOptionQuote>,
@@ -213,6 +242,16 @@ export class UnifiedMarketDataService {
   /** Repeated observations dropped by the ingest dedupe (observability). */
   duplicateCount(): number {
     return this.duplicatesSuppressed;
+  }
+
+  /** Persistent-storage duplicate snapshots encountered during flush (observability). */
+  duplicateSnapshotCount(): number {
+    return this.duplicateSnapshots;
+  }
+
+  /** Persistent-storage duplicate quote rows encountered during flush (observability). */
+  duplicateQuoteCount(): number {
+    return this.duplicateQuotes;
   }
 
   /** True when this exact observation was already written inside the window. */
@@ -381,6 +420,31 @@ export class UnifiedMarketDataService {
       this.noteFlushSuccess();
       return rows.length;
     } catch (error) {
+      if (isDuplicateKeyError(error)) {
+        // ── Idempotent duplicate: quote id already persisted ──
+        // Parse the conflicting ID from MySQL's error message so we can
+        // remove it from the pending queue.  Genuinely new rows in the
+        // same batch are requeued; the duplicate itself is NOT requeued.
+        const msg = (error as Error).message ?? '';
+        const match = msg.match(/Duplicate entry '([^']+)'/);
+        const conflictingId = match?.[1] ?? '';
+        this.duplicateQuotes += 1;
+        this.logger.log(
+          `unified write-behind quote idempotent duplicate ` +
+          `(id=${conflictingId || 'unknown'}, batch=${rows.length})`,
+        );
+        // Remove the conflicting row from the pending queue — it is
+        // already persisted and must NOT be requeued.
+        if (conflictingId) this.pendingQuoteRows.delete(conflictingId);
+        // Requeue genuinely new rows (excluding the known duplicate).
+        const remaining = rows.filter(r => String(r.id) !== conflictingId);
+        if (remaining.length) this.requeueQuoteRows(remaining);
+        // Do NOT call persistenceHealth.recordFailure() — this is not a
+        // genuine DB failure; it is expected idempotent behaviour.
+        // Do NOT call noteFlushSuccess() either — no new rows persisted.
+        return 0;
+      }
+      // ── Genuine DB error: existing behaviour ──
       this.logger.warn(`unified write-behind quote flush failed for ${rows.length} row(s); re-queueing: ${(error as Error).message}`);
       this.requeueQuoteRows(rows);
       return 0;
@@ -405,6 +469,31 @@ export class UnifiedMarketDataService {
       this.noteFlushSuccess();
       return rows.length;
     } catch (error) {
+      if (isDuplicateKeyError(error)) {
+        // ── Idempotent duplicate: canonicalRowId already persisted ──
+        // Parse the conflicting ID from MySQL's error message so we can
+        // remove it from the pending queue.  Genuinely new rows in the
+        // same batch are requeued; the duplicate itself is NOT requeued.
+        const msg = (error as Error).message ?? '';
+        const match = msg.match(/Duplicate entry '([^']+)'/);
+        const conflictingId = match?.[1] ?? '';
+        this.duplicateSnapshots += 1;
+        this.logger.log(
+          `unified write-behind snapshot idempotent duplicate ` +
+          `(canonicalRowId=${conflictingId || 'unknown'}, batch=${rows.length})`,
+        );
+        // Remove the conflicting row from the pending queue — it is
+        // already persisted and must NOT be requeued.
+        if (conflictingId) this.pendingSnapshotRows.delete(conflictingId);
+        // Requeue genuinely new rows (excluding the known duplicate).
+        const remaining = rows.filter(r => String(r.id) !== conflictingId);
+        if (remaining.length) this.requeueSnapshotRows(remaining);
+        // Do NOT call persistenceHealth.recordFailure() — this is not a
+        // genuine DB failure; it is expected idempotent behaviour.
+        // Do NOT call noteFlushSuccess() either — no new rows persisted.
+        return 0;
+      }
+      // ── Genuine DB error: existing behaviour ──
       this.logger.warn(`unified write-behind snapshot flush failed for ${rows.length} row(s); re-queueing: ${(error as Error).message}`);
       this.requeueSnapshotRows(rows);
       return 0;
@@ -975,5 +1064,7 @@ export class UnifiedMarketDataService {
     this.latestSnapshots.clear();
     this.recentIngestKeys.clear();
     this.duplicatesSuppressed = 0;
+    this.duplicateSnapshots = 0;
+    this.duplicateQuotes = 0;
   }
 }
