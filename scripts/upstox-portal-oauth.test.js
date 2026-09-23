@@ -453,6 +453,84 @@ const renderPage = async (controller, query = {}) => {
     assert.ok(!html.includes(SECRET), 'no secret anywhere');
   });
 
+  // ── N. notifier intake validation (Upstox → POST /api/upstox/notifier) ────
+  await ta('N1. notifier: valid payload persists encrypted; response never echoes the token', async () => {
+    const { service, providerStore, repo } = makeStack();
+    const controller = new UpstoxLivePaperTokenController(service);
+    const token = jwtWith({ sub: '87BKM6', exp: EXP });
+    const res = await controller.notifier({
+      client_id: CLIENT_ID,
+      user_id: '87BKM6',
+      access_token: token,
+      token_type: 'Bearer',
+      issued_at: new Date(EXP * 1000 - 3600_000).toISOString(),
+      expires_at: new Date(EXP * 1000).toISOString(),
+      message_type: 'access_token',
+    });
+    assert.equal(res.received, true);
+    assert.equal(res.stored, true);
+    assert.ok(!JSON.stringify(res).includes(token.slice(0, 24)), 'the response never carries the token');
+    const row = await providerStore.getCurrentToken('upstox', 'live');
+    assert.ok(row, 'a provider_tokens row was written');
+    assert.equal(row.provider, 'upstox');
+    assert.equal(row.environment, 'live');
+    assert.equal(row.status, 'active');
+    assert.equal(decryptWith(row.accessTokenEncrypted), token, 'stored value decrypts to the notifier token');
+    assert.notEqual(row.accessTokenEncrypted, token, 'never stored in plaintext');
+    assert.equal(repo.rows.filter((r) => r.status === 'active').length, 1, 'exactly one active row');
+  });
+
+  await ta('N2. notifier: unsupported message_type is ignored (nothing stored)', async () => {
+    const { service, repo } = makeStack();
+    const controller = new UpstoxLivePaperTokenController(service);
+    const res = await controller.notifier({
+      client_id: CLIENT_ID,
+      access_token: jwtWith({ exp: EXP }),
+      expires_at: new Date(EXP * 1000).toISOString(),
+      message_type: 'order_update',
+    });
+    assert.equal(res.received, true);
+    assert.equal(res.ignored, true);
+    assert.equal(repo.rows.length, 0);
+  });
+
+  await ta('N3. notifier: missing required fields are ignored (nothing stored)', async () => {
+    const { service, repo } = makeStack();
+    const controller = new UpstoxLivePaperTokenController(service);
+    const res = await controller.notifier({ client_id: CLIENT_ID, message_type: 'access_token' });
+    assert.equal(res.ignored, true);
+    assert.equal(repo.rows.length, 0);
+  });
+
+  await ta('N4. notifier: unknown client_id is rejected; nothing stored; no token echoed', async () => {
+    const { service, repo } = makeStack();
+    const controller = new UpstoxLivePaperTokenController(service);
+    const token = jwtWith({ exp: EXP });
+    const res = await controller.notifier({
+      client_id: 'EVIL-APP',
+      access_token: token,
+      expires_at: new Date(EXP * 1000).toISOString(),
+      message_type: 'access_token',
+    });
+    assert.equal(res.received, true);
+    assert.equal(res.stored, false);
+    assert.match(String(res.error), /unknown Upstox client_id/);
+    assert.ok(!JSON.stringify(res).includes(token.slice(0, 24)), 'no token material in the response');
+    assert.equal(repo.rows.length, 0);
+  });
+
+  await ta('N5. notifier: a second payload replaces the single active row (never two selectable rows)', async () => {
+    const { service, providerStore, repo } = makeStack();
+    const controller = new UpstoxLivePaperTokenController(service);
+    const t1 = jwtWith({ exp: EXP });
+    const t2 = jwtWith({ exp: EXP + 60 });
+    await controller.notifier({ client_id: CLIENT_ID, access_token: t1, token_type: 'Bearer', expires_at: new Date(EXP * 1000).toISOString(), message_type: 'access_token' });
+    await controller.notifier({ client_id: CLIENT_ID, access_token: t2, token_type: 'Bearer', expires_at: new Date((EXP + 60) * 1000).toISOString(), message_type: 'access_token' });
+    assert.equal(repo.rows.filter((r) => r.status === 'active').length, 1);
+    const current = await providerStore.getCurrentToken('upstox', 'live');
+    assert.equal(decryptWith(current.accessTokenEncrypted), t2, 'the fresh token is selected');
+  });
+
   // ── INTEGRATION: the full chain ───────────────────────────────────────────
   await ta('INTEGRATION: button → login route → callback → exchange → provider_tokens → retrieval → portal', async () => {
     const { service, providerStore, repo } = makeStack();

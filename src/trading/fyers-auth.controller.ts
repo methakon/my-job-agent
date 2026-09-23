@@ -151,10 +151,16 @@ export class FyersAuthController {
       }
 
       // Persist in DB (single active row, updated in place — no new rows).
+      // Explicit 6-argument form: access, refresh, clientId, PROVIDER,
+      // ENVIRONMENT, authCode. The legacy 4-argument call put the auth_code in
+      // the provider column, so those tokens were invisible to the runtime
+      // consumers (which select provider='fyers').
       await this.fyersTokenService.storeTokens(
         data.access_token,
         data.refresh_token || null,
         data.fy_id || null,
+        'fyers',
+        'live',
         authCodeValue,
       );
 
