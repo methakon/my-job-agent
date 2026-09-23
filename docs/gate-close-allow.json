@@ -818,6 +818,24 @@
       "recorded": "2026-09-23T12:52:45+05:30",
       "evidence": "Files (git show --stat d87a2d0): package.json, scripts/{fyers-token-lifecycle,token-supervisor,fyers-feed-recovery,upstox-portal-oauth}.test.js, src/trading-agent/{token-supervisor.service.ts,trading-agent.module.ts}, src/trading/{fno-market-data.service.ts,fyers-auth.controller.ts,provider-token.service.ts}. Merge cd07965 tree == d87a2d0 tree (git diff d87a2d0 HEAD empty).",
       "expires_hint": "Delete once d87a2d0 leaves the guard commit window (last 15 code commits of dev)."
+    },
+    "7cfdc73a0b870868166ff1697fd137eafdb989e1": {
+      "short": "7cfdc73",
+      "reason": "Trading Agent workstream \u2014 unified market-data: idempotent duplicate-key handling on the quotes write path (mirror of the snapshot handler), ending the duplicate-key error loop. Merged to dev via 0d12179.",
+      "workstream": "Trading Agent",
+      "authority": "operator directive 2026-09-23 (TRADING AGENT \u2014 P3 PERSISTENCE AUTHORIZED FIX CYCLE: implement the A+B fix exactly as proposed; commit on trading-agent-dev; merge to dev by the established procedure; do not bypass gate-close). Surfaced as guard-window drift because dev carries the separately-tracked Trading Agent workstream commit.",
+      "recorded": "2026-09-23T17:31:13+05:30",
+      "evidence": "Files (git show --stat 7cfdc73): unified-market-data.service.ts (+91), unified-market-data.service.test.ts (+471); 2 files changed, 562 insertions. Merge 0d12179 carries 7cfdc73's exact files (git diff 7cfdc73 0d12179 -- src/trading/unified-market-data/ = empty).",
+      "expires_hint": "Delete once 7cfdc73 leaves the guard commit window (last 15 code commits of dev)."
+    },
+    "e5d8ba7a18be4f08dfa0bb46f43c2288ed31010c": {
+      "short": "e5d8ba7",
+      "reason": "Trading Agent workstream \u2014 P3 persistence fix (A+B): flush retry exponential backoff (2s doubling to a 30s cap, reset on success) stops the waiter flood; releasePoolConnections() counts only verified removals and logs residual pool state. Merged to dev via 7f3cb2a (byte-identical).",
+      "workstream": "Trading Agent",
+      "authority": "operator directive 2026-09-23 (TRADING AGENT \u2014 P3 PERSISTENCE AUTHORIZED FIX CYCLE: implement the A+B fix exactly as proposed; commit on trading-agent-dev; merge to dev by the established procedure; do not bypass gate-close). Surfaced as guard-window drift because dev carries the separately-tracked Trading Agent workstream commit.",
+      "recorded": "2026-09-23T17:31:13+05:30",
+      "evidence": "Files (git show --stat e5d8ba7): unified-market-data.service.ts (+99/-9), unified-market-data.service.test.ts (+170); 2 files changed, 260 insertions(+), 9 deletions(-). Jest 26/26 (20 pre-existing + 6 new: backoff delays, gate arm/clear, no waiter flood, verified removal, residual reporting); ./node_modules/.bin/nest build exit 0. Merge 7f3cb2a carries e5d8ba7's exact files (git diff e5d8ba7 7f3cb2a -- src/trading/unified-market-data/ = empty).",
+      "expires_hint": "Delete once e5d8ba7 leaves the guard commit window (last 15 code commits of dev)."
     }
   }
 }
