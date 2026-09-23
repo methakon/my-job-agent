@@ -809,6 +809,15 @@
       "recorded": "2026-09-23T02:35:00+05:30",
       "evidence": "Merge commit bringing the job-agent-dev lineage onto dev. Not a Trading Agent commit — attributed to the JA workstream; must not be duplicated into project_checklist_items.",
       "expires_hint": "Delete once 7851eab leaves the guard commit window (last 15 code commits of trading-agent-dev)."
+    },
+    "d87a2d008db80e8c56b57a7401c7f6a5957a02b1": {
+      "short": "d87a2d0",
+      "reason": "Trading Agent workstream \u2014 automated broker token lifecycle: token supervisor service with scheduled renewal + feed recovery on refresh, FYERS auth token hook, provider-token getter alignment, updated lifecycle/OAuth/recovery suites (63 tests green). Merged to dev via cd07965.",
+      "workstream": "Trading Agent",
+      "authority": "operator directive 2026-09-23 (TRADING AGENT \u2014 PAPER TRADING READINESS GATE: commit-only on trading-agent-dev, then merge into dev). Surfaced as guard-window drift after merge cd07965 because dev now carries the separately-tracked Trading Agent workstream commit.",
+      "recorded": "2026-09-23T12:52:45+05:30",
+      "evidence": "Files (git show --stat d87a2d0): package.json, scripts/{fyers-token-lifecycle,token-supervisor,fyers-feed-recovery,upstox-portal-oauth}.test.js, src/trading-agent/{token-supervisor.service.ts,trading-agent.module.ts}, src/trading/{fno-market-data.service.ts,fyers-auth.controller.ts,provider-token.service.ts}. Merge cd07965 tree == d87a2d0 tree (git diff d87a2d0 HEAD empty).",
+      "expires_hint": "Delete once d87a2d0 leaves the guard commit window (last 15 code commits of dev)."
     }
   }
 }
