@@ -464,11 +464,14 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
 
     try {
       this.credentialsOk = true;
-      this.connectFyersSocket(accessToken);
-      // Watches for a NEW token landing in the DB (fresh login from the
-      // paper-desk "GET THE TOKEN" flow) while this socket is down, then
-      // rebuilds the socket — no process restart needed.
+      // Arm the retry watcher BEFORE the connection attempt: a synchronous
+      // connect failure must not permanently disable self-healing — the
+      // watcher is the only recovery path (Yahoo fallback is disabled).
+      // Regression pinned by scripts/fyers-feed-recovery.test.js.
       this.startFyersRetryWatcher();
+      // The watcher also rebuilds the socket when a NEW token lands in the DB
+      // (fresh login / automated refresh), so recovery never needs a restart.
+      this.connectFyersSocket(accessToken);
     } catch (error) {
       this.onError(error);
     }

@@ -9,6 +9,7 @@ import { FnfOptionChainService } from '../trading/fnf-option-chain.service';
 import { FnfTradingService } from '../trading/fnf-trading.service';
 import { FnoMarketDataService } from '../trading/fno-market-data.service';
 import { ProviderToken } from '../trading/provider-token.entity';
+import { UpstoxLivePaperToken } from '../trading/upstox-live-paper/upstox-live-paper-token.entity';
 import { MuhurtaWindow } from '../astro/muhurta-window.entity';
 import { FnfPortfolio } from '../trading/fnf-portfolio.entity';
 import { FnfTrade } from '../trading/fnf-trade.entity';
@@ -29,6 +30,7 @@ import { ResearchModule } from '../trading/research/research.module';
 import { AdaptationCandidate } from '../trading/research/adaptation-candidate.entity';
 // import { EventIntelModule } from '../trading/event-intel/event-intel.module';  // DISABLED: memory pressure on 8GB; re-enable after upgrade
 import { SessionDriverService } from './session-driver.service';
+import { TokenSupervisorService } from './token-supervisor.service';
 
 /**
  * Headless trading agent (runs on the always-on Dhargent VM).
@@ -61,6 +63,9 @@ import { SessionDriverService } from './session-driver.service';
       SandboxTick,
       ProviderToken,
       AdaptationCandidate,
+      // AWAITING_APPROVAL marker rows for the Upstox token-request flow —
+      // existing table, nullable token column by design, no schema change.
+      UpstoxLivePaperToken,
     ]),
     UnifiedMarketDataModule,
     ResearchModule,
@@ -79,6 +84,14 @@ import { SessionDriverService } from './session-driver.service';
     ProviderTokenService,
     // Upstox token DB store (reuses provider_tokens table with provider='upstox_sandbox').
     EncryptionService,
+    // Deterministic token-lifecycle supervisor: bootstrap + periodic health
+    // checks, FYERS refresh automation, Upstox request-state bookkeeping.
+    // No strategy/risk/execution responsibilities.
+    TokenSupervisorService,
+    // FYERS refresh PIN: RUNTIME ENVIRONMENT ONLY (operator decision
+    // 2026-09-23) — never source control, never the database, never logs.
+    // Empty string when unset → refresh reports AUTH_REQUIRED; no retries.
+    { provide: 'FYERS_PIN', useFactory: () => (process.env.FYERS_PIN ?? '').trim() },
   ],
 })
 export class TradingAgentModule {}

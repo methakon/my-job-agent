@@ -261,6 +261,8 @@ export class ProviderTokenService {
   /**
    * Attempt to refresh FYERS access token using stored refresh_token.
    * IMPORTANT: Requires FYERS PIN at runtime (cannot be persisted in DB).
+   * Uses the documented v3 endpoint (validate-refresh-token) and PRESERVES the
+   * stored refresh token when the response carries no replacement.
    * @returns true if refresh succeeded, false if PIN missing or refresh failed
    */
   async refreshAccessToken(): Promise<boolean> {
@@ -278,7 +280,10 @@ export class ProviderTokenService {
     const appIdHash = this.computeFyersAppIdHash();
 
     try {
-      const response = await fetch('https://api-t1.fyers.in/api/v3/refresh-token', {
+      // Documented v3 refresh endpoint: validate-refresh-token (the old
+      // /refresh-token path is not the documented endpoint). The response
+      // returns a new access_token only — never a new refresh_token.
+      const response = await fetch('https://api-t1.fyers.in/api/v3/validate-refresh-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -294,9 +299,15 @@ export class ProviderTokenService {
         throw new Error(data.message || `Refresh failed with status ${response.status}`);
       }
 
+      // PRESERVE the stored refresh token when the response carries no
+      // replacement (the documented v3 refresh returns access_token only).
+      // Passing null here would WIPE the stored value — storeTokens assigns the
+      // refresh field unconditionally — and break every future refresh.
+      const nextRefreshToken = data.refresh_token || refreshToken;
+
       await this.rotateTokens(
         data.access_token,
-        data.refresh_token || null,
+        nextRefreshToken,
         data.fy_id || null,
         'fyers',
         'live',
