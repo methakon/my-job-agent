@@ -13,9 +13,10 @@ public:
     void start();
     void stop();
 
-    std::string render_home_page();
+    std::string render_home_page(bool is_authenticated = false);
     std::string render_html_page(bool is_authenticated);
     std::string render_login_page(const std::string& error_msg = "");
+    std::string render_dashboard_page(bool is_authenticated, const std::string& user_id = "");
     std::string render_json_summary();
 
 private:

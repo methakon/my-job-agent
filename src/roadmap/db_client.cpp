@@ -117,3 +117,91 @@ bool RoadmapDbClient::update_item_note(int id, const std::string& note) {
     std::string out = exec_cmd(cmd);
     return out.empty() || out.find("ERROR") == std::string::npos;
 }
+
+UserProfile RoadmapDbClient::fetch_user_by_email_or_id(const std::string& identifier) {
+    UserProfile user;
+    std::string query = "SELECT id, email, name, role FROM portal_users WHERE id = " + escape_shell(identifier) + " OR email = " + escape_shell(identifier) + " LIMIT 1;";
+    std::string cmd = "MYSQL_PWD=" + escape_shell(password_) + " mysql -h " + escape_shell(host_) +
+                      " -P " + std::to_string(port_) + " -u " + escape_shell(user_) +
+                      " " + escape_shell(db_name_) + " -B -N -e " + escape_shell(query) + " 2>/dev/null";
+
+    std::string output = exec_cmd(cmd);
+    std::stringstream ss(output);
+    std::string line;
+    if (std::getline(ss, line) && !line.empty()) {
+        auto cols = split_tsv_line(line);
+        if (cols.size() >= 4) {
+            user.id = cols[0];
+            user.email = cols[1];
+            user.name = cols[2];
+            user.role = cols[3];
+        }
+    }
+    return user;
+}
+
+UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_id) {
+    UserPortfolioData p;
+    std::string query = "SELECT id, IFNULL(userId,''), capital, deployed, netPnl, autoTradeEnabled, executionProvider, executionMode FROM fnf_portfolios WHERE userId = " + escape_shell(user_id) + " OR userId IS NULL LIMIT 1;";
+    std::string cmd = "MYSQL_PWD=" + escape_shell(password_) + " mysql -h " + escape_shell(host_) +
+                      " -P " + std::to_string(port_) + " -u " + escape_shell(user_) +
+                      " " + escape_shell(db_name_) + " -B -N -e " + escape_shell(query) + " 2>/dev/null";
+
+    std::string output = exec_cmd(cmd);
+    std::stringstream ss(output);
+    std::string line;
+    if (std::getline(ss, line) && !line.empty()) {
+        auto cols = split_tsv_line(line);
+        if (cols.size() >= 8) {
+            p.portfolioId = cols[0];
+            p.userId = cols[1];
+            try {
+                p.capital = std::stod(cols[2]);
+                p.deployed = std::stod(cols[3]);
+                p.netPnl = std::stod(cols[4]);
+                p.autoTradeEnabled = std::stoi(cols[5]);
+            } catch (...) {}
+            p.executionProvider = cols[6];
+            p.executionMode = cols[7];
+        }
+    }
+    return p;
+}
+
+std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string& user_id, int limit) {
+    std::vector<UserTradeData> trades;
+    std::string query = "SELECT t.id, t.instrument, t.side, t.quantity, t.entryPrice, t.exitPrice, t.netPnl, t.status, IFNULL(t.orderedAt,'') "
+                        "FROM fnf_trades t "
+                        "LEFT JOIN fnf_portfolios p ON t.portfolioId = p.id "
+                        "WHERE p.userId = " + escape_shell(user_id) + " OR p.userId IS NULL "
+                        "ORDER BY t.orderedAt DESC LIMIT " + std::to_string(limit) + ";";
+
+    std::string cmd = "MYSQL_PWD=" + escape_shell(password_) + " mysql -h " + escape_shell(host_) +
+                      " -P " + std::to_string(port_) + " -u " + escape_shell(user_) +
+                      " " + escape_shell(db_name_) + " -B -N -e " + escape_shell(query) + " 2>/dev/null";
+
+    std::string output = exec_cmd(cmd);
+    std::stringstream ss(output);
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (line.empty()) continue;
+        auto cols = split_tsv_line(line);
+        if (cols.size() >= 9) {
+            UserTradeData tr;
+            tr.id = cols[0];
+            tr.instrument = cols[1];
+            tr.side = cols[2];
+            try {
+                tr.quantity = std::stoi(cols[3]);
+                tr.entryPrice = std::stod(cols[4]);
+                tr.exitPrice = std::stod(cols[5]);
+                tr.netPnl = std::stod(cols[6]);
+            } catch (...) {}
+            tr.status = cols[7];
+            tr.orderedAt = cols[8];
+            trades.push_back(tr);
+        }
+    }
+    return trades;
+}
+

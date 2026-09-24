@@ -25,6 +25,38 @@ struct RoadmapOverview {
     int pct = 0;
 };
 
+struct UserProfile {
+    std::string id;
+    std::string email;
+    std::string name;
+    std::string role;
+};
+
+struct UserPortfolioData {
+    std::string portfolioId;
+    std::string userId;
+    double capital = 0.0;
+    double deployed = 0.0;
+    double netPnl = 0.0;
+    double unrealisedPnl = 0.0;
+    int autoTradeEnabled = 0;
+    int openPositionCount = 0;
+    std::string executionProvider;
+    std::string executionMode;
+};
+
+struct UserTradeData {
+    std::string id;
+    std::string instrument;
+    std::string side;
+    int quantity = 0;
+    double entryPrice = 0.0;
+    double exitPrice = 0.0;
+    double netPnl = 0.0;
+    std::string status;
+    std::string orderedAt;
+};
+
 class RoadmapDbClient {
 public:
     RoadmapDbClient(std::string host, int port, std::string user, std::string password, std::string db_name);
@@ -35,6 +67,10 @@ public:
     RoadmapOverview compute_overview(const std::vector<ChecklistItem>& items);
     bool update_item_status(int id, const std::string& status);
     bool update_item_note(int id, const std::string& note);
+
+    UserProfile fetch_user_by_email_or_id(const std::string& identifier);
+    UserPortfolioData fetch_user_portfolio(const std::string& user_id);
+    std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 10);
 
 private:
     std::string host_;
