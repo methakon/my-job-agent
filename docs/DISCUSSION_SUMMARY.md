@@ -94,8 +94,31 @@
 
 ---
 
-## 10. Status
-- **Worktree & Branch Created**: `/home/swarna-sekhar-dhar/projects/cpp-trading-agent` on `feat/cpp-trading-agent`.
-- **CI/CD Pipeline Workflow Created**: `.github/workflows/cpp-agent-ci-cd.yml`
-- **Documentation Complete**: All requirements, architectural principles, Option 3 stack choice, Option Chain instrument scope, canonical tick schema, data preservation plan, security hardening, self-learning mission, CI/CD pipeline, and hardware strategies stored in `docs/`.
-- **Standby Mode**: Waiting for explicit user instruction before writing C++ source code.
+## 11. Multi-Tenant User Isolation & Data Privacy Schema
+- **Database Evolution**: Evolved `fnf_portfolios` and `upstox_live_paper_portfolios` tables in Oracle Cloud MySQL (`127.0.0.1:3307`) with `userId` (`varchar(36)`) columns.
+- **Data Preservation**: Backfilled existing user portfolio records to point to user `e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee` (`bapay.9@gmail.com`) with 100% data preservation.
+- **User Dashboard (`/dashboard`)**: Authenticated users access personalized dashboard displaying total capital, deployed margin, realized net PnL, auto-trade engine status, and isolated option trades table (`WHERE userId = ?`).
+
+---
+
+## 12. Native C++ Thread-Safe Connection Pool & ACID TransactionGuard
+- **Native MySQL Client**: Integrated native `libmysqlclient` (`<mysql/mysql.h>`).
+- **Connection Pool (`MySQLConnectionPool`)**: Thread-safe connection pool with pre-allocated connection queue, mutex locks, and auto-reconnect ping checks.
+- **ACID TransactionGuard**: RAII `TransactionGuard` enforcing explicit `START TRANSACTION`, `COMMIT`, and auto-rollback on failure.
+- **Zero-Trust Parameter Escaping**: Parameterized escaping via `mysql_real_escape_string` preventing SQL injection.
+
+---
+
+## 13. Embedded OpenAPI 3.0 & Interactive Swagger UI (`/docs`)
+- **OpenAPI 3.0 Spec (`/api/v1/openapi.json`)**: Embedded C++ spec endpoint documenting all routes, parameters, request bodies, and responses.
+- **Swagger UI Dashboard (`/docs` & `/swagger`)**: Interactive dark-themed API playground embedded into the C++ server.
+
+---
+
+## 14. Status
+- **Worktree & Branch**: `/home/swarna-sekhar-dhar/projects/cpp-trading-agent` on `feat/cpp-trading-agent`.
+- **Executable**: `bin/cpp-trading-agent` compiled with `g++ -O3 -std=c++20 -pthread -lmysqlclient`.
+- **Drift Guard Status**: `IN SYNC` (`npm run gate:check`).
+- **Knowledge Base**: Recorded learnings to cross-session SQLite KB (`kb.py`).
+- **State**: All project changes committed to git. System ready for session resume.
+
