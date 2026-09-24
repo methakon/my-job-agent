@@ -1,0 +1,92 @@
+name: C++ Autonomous Trading Agent CI/CD Pipeline
+
+on:
+  push:
+    branches: [ feat/cpp-trading-agent, main, dev ]
+  pull_request:
+    branches: [ feat/cpp-trading-agent, main, dev ]
+
+jobs:
+  build-and-test:
+    name: C++ Matrix Build, Security Scan & Regression Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        compiler: [ g++-13, clang-17 ]
+        build_type: [ Release ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install C++ Dependencies & Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build build-essential libssl-dev libmysqlcppconn-dev cppcheck clang-tidy
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DENABLE_HARDENING=ON \
+            -DENABLE_TESTS=ON
+
+      - name: Run Static Analysis & Security Audit (Cppcheck)
+        run: |
+          cppcheck --enable=warning,style,performance,portability --error-exitcode=1 src/
+
+      - name: Build C++ Binary & Unit Tests
+        run: |
+          cmake --build build --config ${{ matrix.build_type }} -j $(nproc)
+
+      - name: Run C++ Unit & Regression Test Suite
+        run: |
+          cd build && ctest --output-on-failure --verbose
+
+      - name: Run Latency Benchmark Gate (< 15µs P99 Target)
+        run: |
+          ./build/bin/latency_benchmark --max-p99-us 15
+
+      - name: Upload Binary Artifact
+        if: matrix.compiler == 'g++-13' && github.ref == 'refs/heads/feat/cpp-trading-agent'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp-trading-agent-linux-x64
+          path: build/bin/cpp-trading-agent
+
+  deploy-to-oracle-vm:
+    name: Deploy Executable to Oracle Cloud VM (Dhargent)
+    needs: build-and-test
+    if: github.ref == 'refs/heads/feat/cpp-trading-agent' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Built Binary Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cpp-trading-agent-linux-x64
+          path: ./dist
+
+      - name: Deploy Binary via SSH to Oracle Cloud VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ORACLE_VM_HOST }}
+          username: ubuntu
+          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
+          source: "./dist/cpp-trading-agent"
+          target: "/home/ubuntu/trading-agent/bin"
+
+      - name: Hot-Restart Agent Service & Run Post-Deploy Health Check
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_VM_HOST }}
+          username: ubuntu
+          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
+          script: |
+            sudo systemctl restart cpp-trading-agent.service
+            sleep 2
+            curl --fail http://localhost:8080/health || (echo "Health check failed!" && exit 1)
