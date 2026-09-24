@@ -3,6 +3,11 @@
 
 #include <string>
 #include <vector>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <memory>
+#include <mysql/mysql.h>
 
 struct ChecklistItem {
     int id;
@@ -57,6 +62,42 @@ struct UserTradeData {
     std::string orderedAt;
 };
 
+class MySQLConnectionPool {
+public:
+    MySQLConnectionPool(std::string host, int port, std::string user, std::string password, std::string db_name, size_t pool_size = 5);
+    ~MySQLConnectionPool();
+
+    MYSQL* acquire();
+    void release(MYSQL* conn);
+
+private:
+    MYSQL* create_connection();
+
+    std::string host_;
+    int port_;
+    std::string user_;
+    std::string password_;
+    std::string db_name_;
+    size_t pool_size_;
+
+    std::queue<MYSQL*> pool_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+};
+
+class TransactionGuard {
+public:
+    explicit TransactionGuard(MYSQL* conn);
+    ~TransactionGuard();
+
+    bool commit();
+    void rollback();
+
+private:
+    MYSQL* conn_;
+    bool committed_;
+};
+
 class RoadmapDbClient {
 public:
     RoadmapDbClient(std::string host, int port, std::string user, std::string password, std::string db_name);
@@ -73,11 +114,7 @@ public:
     std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 10);
 
 private:
-    std::string host_;
-    int port_;
-    std::string user_;
-    std::string password_;
-    std::string db_name_;
+    std::shared_ptr<MySQLConnectionPool> pool_;
 };
 
 #endif // ROADMAP_DB_CLIENT_HPP

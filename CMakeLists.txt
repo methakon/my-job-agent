@@ -13,6 +13,6 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 
 add_executable(cpp-trading-agent ${SOURCES})
 
-target_link_libraries(cpp-trading-agent PRIVATE pthread)
+target_link_libraries(cpp-trading-agent PRIVATE pthread mysqlclient)
 
 message(STATUS "C++ Trading Agent Target Built Successfully")
