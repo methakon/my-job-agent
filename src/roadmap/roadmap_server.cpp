@@ -39,7 +39,8 @@ static std::string render_nav_header(bool is_authenticated) {
        << "  <div class=\"nav-brand\">⚡ C++ Autonomous Agent Platform</div>"
        << "  <div class=\"nav-links\">"
        << "    <a href=\"/\" class=\"nav-item\">🏠 Home</a>"
-       << "    <a href=\"/project-status\" class=\"nav-item\">📋 Project Roadmap</a>";
+       << "    <a href=\"/project-status\" class=\"nav-item\">📋 Project Roadmap</a>"
+       << "    <a href=\"/docs\" class=\"nav-item\">📖 API Docs (Swagger)</a>";
 
     if (is_authenticated) {
         ss << "    <a href=\"/dashboard\" class=\"nav-item\" style=\"color:#58a6ff;\">📊 User Dashboard</a>"
@@ -200,6 +201,137 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "<div class=\"footer\">C++ Autonomous Trading Engine · Multi-Tenant User Isolation · Oracle Cloud MySQL (3307)</div>"
        << "</div></body></html>";
 
+    return ss.str();
+}
+
+std::string RoadmapServer::render_openapi_json() {
+    return R"({
+  "openapi": "3.0.3",
+  "info": {
+    "title": "C++ Autonomous Trading Agent API",
+    "description": "Ultra-Low Latency (<10µs) C++ Options Chain Trading & Self-Learning Engine API with Zero-Trust Security, Multi-Tenant Data Privacy, and ACID Database Integrity.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8080",
+      "description": "Local C++ Engine Web Server"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "System Health Status",
+        "description": "Returns engine status and live MySQL connectivity check",
+        "responses": {
+          "200": {
+            "description": "System Healthy",
+            "content": {
+              "application/json": {
+                "example": { "status": "OK", "engine": "C++20", "db_connected": true }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/user/portfolio": {
+      "get": {
+        "summary": "User Portfolio & Margins",
+        "description": "Returns isolated portfolio, capital, deployed margin, and PnL for the authenticated user",
+        "responses": {
+          "200": {
+            "description": "Portfolio Data Returned",
+            "content": {
+              "application/json": {
+                "example": { "status": "OK", "user_id": "e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee", "capital": 10000, "deployed": 0, "net_pnl": 1659.58, "auto_trade": 1 }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized Access"
+          }
+        }
+      }
+    },
+    "/project-status/json": {
+      "get": {
+        "summary": "Roadmap Summary Metrics",
+        "description": "Returns total completion metrics and gate counts for the C++ trading agent roadmap",
+        "responses": {
+          "200": {
+            "description": "Roadmap Metrics Returned",
+            "content": {
+              "application/json": {
+                "example": { "total": 236, "done": 235, "in_progress": 1, "pct": 99 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Operator Login",
+        "description": "Authenticates operator and sets session cookie",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "303": { "description": "Authenticated & Redirected to Dashboard" },
+          "200": { "description": "Invalid credentials" }
+        }
+      }
+    }
+  }
+})";
+}
+
+std::string RoadmapServer::render_swagger_ui_page(bool is_authenticated) {
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>Swagger API Docs — C++ Autonomous Trading Agent</title>"
+       << "<link rel=\"stylesheet\" href=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui.css\" />"
+       << "<style>"
+       << "body{margin:0;background:#0d1117;color:#e6edf3;font-family:sans-serif}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn-link,.nav-btn{background:#238636;color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:#30363d;color:#8b949e}.badge.ok{background:rgba(63,185,111,.16);color:#3fb96f}"
+       << ".swagger-ui .topbar{display:none}"
+       << ".swagger-ui{background:#0d1117;color:#e6edf3}"
+       << ".swagger-ui .info .title{color:#e0a83c}"
+       << ".swagger-ui .scheme-container{background:#161b22;box-shadow:none;border-bottom:1px solid #30363d}"
+       << ".swagger-ui .opblock{border-radius:8px}"
+       << ".container{max-width:1200px;margin:20px auto;padding:0 20px}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\"><div id=\"swagger-ui\"></div></div>"
+       << "<script src=\"https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js\"></script>"
+       << "<script>"
+       << "window.onload = function() {"
+       << "  SwaggerUIBundle({"
+       << "    url: '/api/v1/openapi.json',"
+       << "    dom_id: '#swagger-ui',"
+       << "    deepLinking: true,"
+       << "    presets: [SwaggerUIBundle.presets.apis]"
+       << "  });"
+       << "};"
+       << "</script></body></html>";
     return ss.str();
 }
 
@@ -484,6 +616,11 @@ void RoadmapServer::start() {
                     status_code = 401;
                     body = "{\"error\":\"Unauthorized access\"}";
                 }
+                content_type = "application/json";
+            } else if (req.find("GET /docs") != std::string::npos || req.find("GET /swagger") != std::string::npos) {
+                body = render_swagger_ui_page(is_auth);
+            } else if (req.find("GET /api/v1/openapi.json") != std::string::npos) {
+                body = render_openapi_json();
                 content_type = "application/json";
             } else if (req.find("GET /project-status/json") != std::string::npos) {
                 body = render_json_summary();

@@ -18,6 +18,8 @@ public:
     std::string render_login_page(const std::string& error_msg = "");
     std::string render_dashboard_page(bool is_authenticated, const std::string& user_id = "");
     std::string render_json_summary();
+    std::string render_swagger_ui_page(bool is_authenticated = false);
+    std::string render_openapi_json();
 
 private:
     int port_;
