@@ -16,6 +16,7 @@
 #include "../src/engine/gate10_regime_machine.hpp"
 #include "../src/engine/gate11_strategy_taxonomy.hpp"
 #include "../src/engine/gate12_ml_pipeline.hpp"
+#include "../src/engine/gate13_validation_harness.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -835,6 +836,47 @@ void run_solid_and_acid_test_suite() {
         BaselineComparisonRecord rec_fail = MLFeaturePipelineEngine::evaluate_baseline_vs_tree_model(false, 0.525, 0.612);
 
         TEST("Gate G12-03 & G12-04: Tree model approved only after passing leakage test and proving >5% accuracy lift", rec_pass.tree_model_approved && !rec_fail.tree_model_approved && rec_pass.accuracy_lift >= 0.05);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 17: GATE 13 VALIDATION HARNESS, CPCV, DSR & PROMOTION GATE
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 17: Gate 13 Validation Harness, CPCV, DSR & Promotion Gate ---\n";
+
+    // Item G13-01: Walk-Forward Purged & Embargoed Split Generation
+    {
+        uint64_t start_ms = 1727443800000ULL;
+        // 100m train, 30m purge, 45m test, 60m embargo
+        WalkForwardSplit split = ValidationHarnessEngine::generate_purged_embargo_split(
+            start_ms, 100 * 60 * 1000, 30 * 60 * 1000, 45 * 60 * 1000, 60 * 60 * 1000
+        );
+
+        TEST("Gate G13-01: Walk-forward purged (30m) & embargoed (60m) splits generated without leakage", !split.has_leakage && split.purge_end_ms == split.train_end_ms + (30 * 60 * 1000) && split.test_start_ms == split.purge_end_ms);
+    }
+
+    // Item G13-02 & G13-03: CPCV Cross-Validation & Deflated Sharpe Ratio (DSR) Diagnostic
+    {
+        std::vector<double> train_pnls = {15.0, 20.0, -5.0, 30.0, 10.0};
+        std::vector<double> test_pnls = {12.0, 18.0, -2.0, 25.0, 14.0};
+
+        CPCVFoldResult res = ValidationHarnessEngine::evaluate_cpcv_fold(1, train_pnls, test_pnls, 20);
+
+        TEST("Gate G13-02 & G13-03: CPCV fold evaluated and DSR diagnostic computed cleanly", res.passed_fold && res.test_sharpe > 1.0 && res.deflated_sharpe_ratio > 0.0);
+    }
+
+    // Item G13-04: Full Production Promotion Gate (Blocks if any single test fails)
+    {
+        // Case A: All pass -> Promotion Approved
+        PromotionGateResult res_pass = ValidationHarnessEngine::evaluate_production_promotion(
+            "EXP-PROMO-001", "GapFadeP0Strategy", true, true, true, true, 0.85
+        );
+
+        // Case B: Untouched Holdout fails -> PROMOTION VISIBLY BLOCKED
+        PromotionGateResult res_fail = ValidationHarnessEngine::evaluate_production_promotion(
+            "EXP-PROMO-002", "FragileStrategy", true, true, true, false, 0.40
+        );
+
+        TEST("Gate G13-04: Production promotion gate approves verified strategies while visibly blocking failing ones", res_pass.promotion_approved && !res_fail.promotion_approved && res_fail.blocking_reason == "PROMOTION_BLOCKED_UNTOUCHED_HOLDOUT_FAILED");
     }
 
     std::cout << "===================================================================\n";
