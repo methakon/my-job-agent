@@ -391,37 +391,57 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
 }
 
 std::string RoadmapServer::render_json_summary() {
+    auto cpp_items = db_client_->fetch_cpp_roadmap_items();
+    auto cpp_ov = db_client_->compute_cpp_overview(cpp_items);
+
     auto items = db_client_->fetch_all_items();
     auto ov = db_client_->compute_overview(items);
 
     std::stringstream ss;
     ss << "{\n"
-       << "  \"total\": " << ov.total << ",\n"
-       << "  \"done\": " << ov.done << ",\n"
-       << "  \"in_progress\": " << ov.in_progress << ",\n"
-       << "  \"pending\": " << ov.pending << ",\n"
-       << "  \"blocked\": " << ov.blocked << ",\n"
-       << "  \"pct\": " << ov.pct << "\n"
+       << "  \"cpp_roadmap\": {\n"
+       << "    \"total\": " << cpp_ov.total << ",\n"
+       << "    \"done\": " << cpp_ov.done << ",\n"
+       << "    \"in_progress\": " << cpp_ov.in_progress << ",\n"
+       << "    \"pending\": " << cpp_ov.pending << ",\n"
+       << "    \"blocked\": " << cpp_ov.blocked << ",\n"
+       << "    \"pct\": " << cpp_ov.pct << "\n"
+       << "  },\n"
+       << "  \"legacy_checklist\": {\n"
+       << "    \"total\": " << ov.total << ",\n"
+       << "    \"done\": " << ov.done << ",\n"
+       << "    \"in_progress\": " << ov.in_progress << ",\n"
+       << "    \"pending\": " << ov.pending << ",\n"
+       << "    \"blocked\": " << ov.blocked << ",\n"
+       << "    \"pct\": " << ov.pct << "\n"
+       << "  }\n"
        << "}";
     return ss.str();
 }
 
 std::string RoadmapServer::render_html_page(bool is_authenticated) {
-    auto items = db_client_->fetch_all_items();
-    auto ov = db_client_->compute_overview(items);
+    auto cpp_items = db_client_->fetch_cpp_roadmap_items();
+    auto cpp_ov = db_client_->compute_cpp_overview(cpp_items);
 
-    std::map<std::string, std::vector<ChecklistItem>> groups;
-    for (const auto& it : items) {
-        groups[it.grp].push_back(it);
+    std::map<std::string, std::vector<CppRoadmapItem>> cpp_phases;
+    for (const auto& it : cpp_items) {
+        cpp_phases[it.phase_name].push_back(it);
+    }
+
+    auto legacy_items = db_client_->fetch_all_items();
+    auto legacy_ov = db_client_->compute_overview(legacy_items);
+    std::map<std::string, std::vector<ChecklistItem>> legacy_groups;
+    for (const auto& it : legacy_items) {
+        legacy_groups[it.grp].push_back(it);
     }
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
-       << "<title>Project Status — C++ Trading Agent Roadmap</title>"
+       << "<title>Project Roadmap & Status — C++ Autonomous Trading Agent</title>"
        << "<style>"
-       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--clarify:#f2c94c}"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
        << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:0}"
        << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
        << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
@@ -456,62 +476,81 @@ std::string RoadmapServer::render_html_page(bool is_authenticated) {
        << render_nav_header(is_authenticated)
        << "<div class=\"container\">"
        << "<div class=\"masthead\">"
-       << "  <h1>📋 Project Status — C++ Trading Agent Roadmap (Public View)</h1>"
-       << "  <div class=\"meta\">Public DB-driven checklist · Source: Oracle Cloud MySQL (<code>project_checklist_items</code>)</div>"
+       << "  <h1>⚡ C++ Autonomous Trading Agent Master Roadmap</h1>"
+       << "  <div class=\"meta\">Dedicated DB Table: <code>cpp_agent_roadmap_items</code> · Synthesized & Verified from 7 Reference F&amp;O Trading Manuals</div>"
        << "</div>"
        << "<div class=\"card summary\">"
-       << "  <div><div class=\"meta\">Overall Progress</div><b>" << ov.done << "<span class=\"dim\">/" << ov.total << "</span></b> <span class=\"dim\">(" << ov.pct << "%)</span></div>"
-       << "  <div><div class=\"meta\">In Progress</div><b class=\"warn\">" << ov.in_progress << "</b></div>"
-       << "  <div><div class=\"meta\">Blocked</div><b class=\"bad\">" << ov.blocked << "</b></div>"
-       << "  <div><div class=\"meta\">Pending</div><b class=\"dim\">" << ov.pending << "</b></div>"
-       << "  <div><div class=\"pbar\"><div class=\"pfill\" style=\"width:" << ov.pct << "%\"></div></div></div>"
+       << "  <div><div class=\"meta\">Overall C++ Progress</div><b>" << cpp_ov.done << "<span class=\"dim\">/" << cpp_ov.total << "</span></b> <span class=\"dim\">(" << cpp_ov.pct << "%)</span></div>"
+       << "  <div><div class=\"meta\">In Progress</div><b class=\"warn\">" << cpp_ov.in_progress << "</b></div>"
+       << "  <div><div class=\"meta\">Blocked</div><b class=\"bad\">" << cpp_ov.blocked << "</b></div>"
+       << "  <div><div class=\"meta\">Pending</div><b class=\"dim\">" << cpp_ov.pending << "</b></div>"
+       << "  <div><div class=\"pbar\"><div class=\"pfill\" style=\"width:" << cpp_ov.pct << "%\"></div></div></div>"
        << "</div>";
 
-    for (const auto& [grp, g_items] : groups) {
+    for (const auto& [phase, items] : cpp_phases) {
+        int p_done = 0;
+        for (const auto& it : items) if (it.status == "done") p_done++;
+        int p_pct = items.empty() ? 0 : (p_done * 100) / items.size();
+
+        ss << "<details class=\"gate\" open>"
+           << "<summary><div class=\"ghead\">"
+           << "<span class=\"gtitle\">" << html_escape(phase) << "</span>"
+           << "<span class=\"gmeta\">" << p_done << "/" << items.size() << " done (" << p_pct << "%)</span>"
+           << "</div></summary>"
+           << "<table>"
+           << "<thead><tr><th>#</th><th>Roadmap Item & Criteria</th><th>Source Manual</th><th>Status</th><th>Evidence / Verification Note</th></tr></thead>"
+           << "<tbody>";
+
+        for (const auto& it : items) {
+            std::string badge_cls = (it.status == "done") ? "ok" : (it.status == "in_progress") ? "warn" : (it.status == "blocked") ? "bad" : "dim";
+            ss << "<tr id=\"cpp-item-" << it.id << "\">"
+               << "<td class=\"num\">" << it.id << "</td>"
+               << "<td><b>" << html_escape(it.item_title) << "</b>";
+            if (!it.done_when.empty()) {
+                ss << "<br/><span class=\"meta\"><b>Done when:</b> " << html_escape(it.done_when) << "</span>";
+            }
+            ss << "</td>"
+               << "<td><code>" << html_escape(it.source_guide) << "</code></td>"
+               << "<td class=\"nowrap\"><span class=\"badge " << badge_cls << "\">" << html_escape(it.status) << "</span></td>"
+               << "<td><span class=\"meta\">" << (it.evidence_note.empty() ? "—" : html_escape(it.evidence_note)) << "</span></td>"
+               << "</tr>";
+        }
+        ss << "</tbody></table></details>";
+    }
+
+    ss << "<div class=\"masthead\" style=\"margin-top:40px;\">"
+       << "  <h2>📋 Legacy Global Checklist Items (Consideration Input)</h2>"
+       << "  <div class=\"meta\">Historical overall project checklist (`project_checklist_items` table: " << legacy_ov.done << "/" << legacy_ov.total << " - " << legacy_ov.pct << "%)</div>"
+       << "</div>";
+
+    for (const auto& [grp, g_items] : legacy_groups) {
         int g_done = 0;
         for (const auto& it : g_items) if (it.status == "done") g_done++;
         int g_pct = g_items.empty() ? 0 : (g_done * 100) / g_items.size();
 
-        ss << "<details class=\"gate\" open>"
+        ss << "<details class=\"gate\">"
            << "<summary><div class=\"ghead\">"
            << "<span class=\"gtitle\">" << html_escape(grp) << "</span>"
            << "<span class=\"gmeta\">" << g_done << "/" << g_items.size() << " done (" << g_pct << "%)</span>"
            << "</div></summary>"
            << "<table>"
-           << "<thead><tr><th>#</th><th>Checklist Item</th><th>Status</th><th>Evidence / Note</th>"
-           << (is_authenticated ? "<th>Operator Action</th>" : "")
-           << "</tr></thead>"
+           << "<thead><tr><th>#</th><th>Checklist Item</th><th>Status</th><th>Evidence / Note</th></tr></thead>"
            << "<tbody>";
 
         for (const auto& it : g_items) {
             std::string badge_cls = (it.status == "done") ? "ok" : (it.status == "in_progress") ? "warn" : (it.status == "blocked") ? "bad" : "dim";
-            ss << "<tr id=\"item-" << it.id << "\">"
+            ss << "<tr id=\"legacy-item-" << it.id << "\">"
                << "<td class=\"num\">" << it.item_order << "</td>"
-               << "<td><b>" << html_escape(it.item) << "</b>";
-            if (!it.doneWhen.empty()) {
-                ss << "<br/><span class=\"meta\"><b>Done when:</b> " << html_escape(it.doneWhen) << "</span>";
-            }
-            ss << "</td>"
+               << "<td><b>" << html_escape(it.item) << "</b></td>"
                << "<td class=\"nowrap\"><span class=\"badge " << badge_cls << "\">" << html_escape(it.status) << "</span></td>"
-               << "<td><span class=\"meta\">" << (it.note.empty() ? "—" : html_escape(it.note)) << "</span></td>";
-
-            if (is_authenticated) {
-                ss << "<td class=\"nowrap\">"
-                   << "<form class=\"inline\" method=\"post\" action=\"/project-status/item/" << it.id << "/status\">"
-                   << "<input type=\"hidden\" name=\"status\" value=\"in_progress\"/>"
-                   << "<button type=\"submit\" class=\"mini\">In Progress</button></form>"
-                   << "<form class=\"inline\" method=\"post\" action=\"/project-status/item/" << it.id << "/status\">"
-                   << "<input type=\"hidden\" name=\"status\" value=\"done\"/>"
-                   << "<button type=\"submit\" class=\"mini ok\">Mark Done</button></form>"
-                   << "</td>";
-            }
-            ss << "</tr>";
+               << "<td><span class=\"meta\">" << (it.note.empty() ? "—" : html_escape(it.note)) << "</span></td>"
+               << "</tr>";
         }
-        ss << "tbody></table></details>";
+        ss << "</tbody></table></details>";
     }
 
     ss << "<div class=\"footer\">"
-       << "C++ Autonomous Trading Agent Engine · C++ POSIX Web Server · Direct Connection to Oracle Cloud MySQL (3307)"
+       << "C++ Autonomous Trading Agent Engine · Dedicated C++ Roadmap (`cpp_agent_roadmap_items`) · Oracle Cloud MySQL (3307)"
        << "</div>"
        << "</div></body></html>";
 

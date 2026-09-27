@@ -179,6 +179,55 @@ RoadmapOverview RoadmapDbClient::compute_overview(const std::vector<ChecklistIte
     return ov;
 }
 
+std::vector<CppRoadmapItem> RoadmapDbClient::fetch_cpp_roadmap_items() {
+    std::vector<CppRoadmapItem> items;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return items;
+
+    const char* query = "SELECT id, phase_order, phase_name, item_title, status, source_guide, IFNULL(done_when,''), IFNULL(evidence_note,'') FROM cpp_agent_roadmap_items ORDER BY phase_order ASC, id ASC;";
+    if (mysql_query(conn, query) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                CppRoadmapItem item;
+                try {
+                    item.id = row[0] ? std::stoi(row[0]) : 0;
+                    item.phase_order = row[1] ? std::stoi(row[1]) : 0;
+                } catch (...) { continue; }
+                item.phase_name = row[2] ? row[2] : "";
+                item.item_title = row[3] ? row[3] : "";
+                item.status = row[4] ? row[4] : "";
+                item.source_guide = row[5] ? row[5] : "";
+                item.done_when = row[6] ? row[6] : "";
+                item.evidence_note = row[7] ? row[7] : "";
+                items.push_back(item);
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_cpp_roadmap_items query error: " << mysql_error(conn) << "\n";
+    }
+
+    pool_->release(conn);
+    return items;
+}
+
+RoadmapOverview RoadmapDbClient::compute_cpp_overview(const std::vector<CppRoadmapItem>& items) {
+    RoadmapOverview ov;
+    ov.total = items.size();
+    for (const auto& it : items) {
+        if (it.status == "done") ov.done++;
+        else if (it.status == "in_progress") ov.in_progress++;
+        else if (it.status == "blocked") ov.blocked++;
+        else ov.pending++;
+    }
+    if (ov.total > 0) {
+        ov.pct = (ov.done * 100) / ov.total;
+    }
+    return ov;
+}
+
 bool RoadmapDbClient::update_item_status(int id, const std::string& status) {
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;

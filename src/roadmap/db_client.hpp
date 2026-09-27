@@ -21,6 +21,17 @@ struct ChecklistItem {
     std::string doneWhen;
 };
 
+struct CppRoadmapItem {
+    int id;
+    int phase_order;
+    std::string phase_name;
+    std::string item_title;
+    std::string status;
+    std::string source_guide;
+    std::string done_when;
+    std::string evidence_note;
+};
+
 struct RoadmapOverview {
     int total = 0;
     int done = 0;
@@ -115,6 +126,8 @@ public:
     bool test_connection();
     std::vector<ChecklistItem> fetch_all_items();
     RoadmapOverview compute_overview(const std::vector<ChecklistItem>& items);
+    std::vector<CppRoadmapItem> fetch_cpp_roadmap_items();
+    RoadmapOverview compute_cpp_overview(const std::vector<CppRoadmapItem>& items);
     bool update_item_status(int id, const std::string& status);
     bool update_item_note(int id, const std::string& note);
 
