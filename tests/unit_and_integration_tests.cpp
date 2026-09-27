@@ -12,6 +12,7 @@
 #include "../src/engine/gate6_volume_profile.hpp"
 #include "../src/engine/gate7_gex_options.hpp"
 #include "../src/engine/gate8_stat_arb.hpp"
+#include "../src/engine/gate9_fill_sim_stress.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -669,6 +670,39 @@ void run_solid_and_acid_test_suite() {
         StatArbResult r_risk = engine.evaluate_position(pos, entry_ms + (10 * 60 * 1000), 24435.0, true);
 
         TEST("Gate G8-03: Hard risk cap (₹2,000) and max holding period (45m) trigger explicit force exits", r_time.signal == StatArbSignal::FORCE_EXIT_TIME_EXPIRED && r_risk.signal == StatArbSignal::FORCE_EXIT_RISK_CAP_EXCEEDED);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 13: GATE 9 FILL SIMULATOR & COST/LATENCY STRESS TESTING
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 13: Gate 9 Fill Simulator & Cost/Latency Stress Testing ---\n";
+
+    // Item G9-01 & G9-02: Bid/Ask crossing fill simulator & calibrated latency model
+    {
+        FillSimulationEngine sim_engine(25.0, 0.50);
+
+        // Buy order: Ask = 24305.0, Ask Qty = 100.0, Requesting 50.0
+        SimulatedFillResult fill_buy = sim_engine.simulate_order_fill(
+            "ORD-BUY-101", "NIFTY", OrderSide::BUY, 50.0, 24300.0, 200.0, 24305.0, 100.0, 24302.5
+        );
+
+        TEST("Gate G9-01: Bid/Ask crossing fill simulator fills BUY at Ask + slippage without LTP fallback", !fill_buy.ltp_fallback_used && fill_buy.avg_fill_price > 24305.0 && fill_buy.is_full_fill);
+        TEST("Gate G9-02: Latency & slippage model incorporates market impact and calibration metadata", fill_buy.total_latency_ms >= 25 && fill_buy.calibration_source == "ARCHIVED_QUOTES_2026_Q3");
+    }
+
+    // Item G9-03: Cost & latency stress test rejecting non-surviving strategies
+    {
+        FillSimulationEngine sim_engine;
+
+        // Fragile strategy with marginal positive trades (+3.0 pts per trade)
+        std::vector<double> fragile_pnls = {3.0, 2.5, 3.5, 4.0, 2.0, 3.0};
+        CostStressTestResult r_fragile = sim_engine.run_cost_latency_stress_test("EXP-STRESS-001", "FRAGILE_GAP_SCALPER", fragile_pnls, 2.0);
+
+        // Robust strategy with strong positive trades (+25.0 pts per trade)
+        std::vector<double> robust_pnls = {25.0, 30.0, 20.0, 35.0, 28.0, 22.0};
+        CostStressTestResult r_robust = sim_engine.run_cost_latency_stress_test("EXP-STRESS-002", "ROBUST_FADE_REGIME", robust_pnls, 2.0);
+
+        TEST("Gate G9-03: Cost & latency stress test rejects fragile strategy while passing robust strategy", !r_fragile.passed_stress_test && r_fragile.rejection_reason.find("REJECT_STRATEGY_FAILED_COST_LATENCY_STRESS_TEST") != std::string::npos && r_robust.passed_stress_test);
     }
 
     std::cout << "===================================================================\n";
