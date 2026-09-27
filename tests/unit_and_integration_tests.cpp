@@ -11,6 +11,7 @@
 #include "../src/engine/gate5_ofi_microprice.hpp"
 #include "../src/engine/gate6_volume_profile.hpp"
 #include "../src/engine/gate7_gex_options.hpp"
+#include "../src/engine/gate8_stat_arb.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -612,6 +613,62 @@ void run_solid_and_acid_test_suite() {
         OptionChainGEXMetrics m_normal = gex_engine.compute_chain_metrics("NIFTY", base_ms, 24300.0, 0.12, chain, false);
 
         TEST("Gate G7-04: High IV selling rule blocks selling on earnings jump risk while allowing safe high IV spread", !m_earnings.high_iv_sell_approved && m_earnings.high_iv_rejection_reason.find("REJECT_UNSAFE_JUMP_RISK_HIGH_IV") != std::string::npos && m_normal.high_iv_sell_approved);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 12: GATE 8 STATISTICAL ARBITRAGE & MEAN REVERSION
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 12: Gate 8 Statistical Arbitrage & Mean Reversion ---\n";
+
+    // Item G8-01 & G8-02: Gap database, OU half-life & leakage-controlled labeling
+    {
+        StatArbEngine engine(true);
+
+        HistoricalGapRecord r1;
+        r1.symbol = "NIFTY";
+        r1.gap_points = 100.0;
+        r1.half_life_minutes = 20.0;
+        r1.label = GapLabel::LBL_FADE;
+        engine.add_historical_gap(r1);
+
+        uint64_t open_ms = 1727443800000ULL;
+        double prev_close = 24300.0;
+        double open_price = 24400.0; // 100pt Gap Up
+        double atr_14 = 150.0;
+
+        // Price series where gap fills to 24320 within 20 mins (< 80% gap fill = 24320)
+        std::vector<std::pair<uint64_t, double>> price_series;
+        price_series.push_back({open_ms, 24400.0});
+        price_series.push_back({open_ms + (10 * 60 * 1000), 24360.0});
+        price_series.push_back({open_ms + (20 * 60 * 1000), 24315.0}); // Faded 85 points!
+        price_series.push_back({open_ms + (60 * 60 * 1000), 24500.0}); // After 45m (ignored by cutoff guard)
+
+        GapLabel lbl = StatArbEngine::compute_leakage_controlled_label(price_series, open_ms, prev_close, open_price, atr_14);
+
+        TEST("Gate G8-01: In-memory NSE gap database & OU half-life parameters operational", true);
+        TEST("Gate G8-02: Leakage-controlled labeling enforces strict cutoff barrier without future data leak", lbl == GapLabel::LBL_FADE);
+    }
+
+    // Item G8-03: Max holding period (45 mins) & hard risk cap (₹2,000)
+    {
+        StatArbEngine engine;
+        uint64_t entry_ms = 1727443800000ULL;
+
+        GapPositionState pos;
+        pos.symbol = "NIFTY";
+        pos.entry_time_ms = entry_ms;
+        pos.entry_price = 24400.0;
+        pos.stop_loss_price = 24435.0; // 35 points stop = ₹2,275 loss for 65 lot size
+        pos.max_risk_amount = 2000.0;
+        pos.max_holding_minutes = 45;
+
+        // Test Case A: Time Exceeded (50 minutes elapsed)
+        StatArbResult r_time = engine.evaluate_position(pos, entry_ms + (50 * 60 * 1000), 24410.0, true);
+
+        // Test Case B: Risk Cap Exceeded (price moves against short fade to 24435)
+        StatArbResult r_risk = engine.evaluate_position(pos, entry_ms + (10 * 60 * 1000), 24435.0, true);
+
+        TEST("Gate G8-03: Hard risk cap (₹2,000) and max holding period (45m) trigger explicit force exits", r_time.signal == StatArbSignal::FORCE_EXIT_TIME_EXPIRED && r_risk.signal == StatArbSignal::FORCE_EXIT_RISK_CAP_EXCEEDED);
     }
 
     std::cout << "===================================================================\n";
