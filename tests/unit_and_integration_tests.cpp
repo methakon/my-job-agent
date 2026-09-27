@@ -13,6 +13,7 @@
 #include "../src/engine/gate7_gex_options.hpp"
 #include "../src/engine/gate8_stat_arb.hpp"
 #include "../src/engine/gate9_fill_sim_stress.hpp"
+#include "../src/engine/gate10_regime_machine.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -703,6 +704,50 @@ void run_solid_and_acid_test_suite() {
         CostStressTestResult r_robust = sim_engine.run_cost_latency_stress_test("EXP-STRESS-002", "ROBUST_FADE_REGIME", robust_pnls, 2.0);
 
         TEST("Gate G9-03: Cost & latency stress test rejects fragile strategy while passing robust strategy", !r_fragile.passed_stress_test && r_fragile.rejection_reason.find("REJECT_STRATEGY_FAILED_COST_LATENCY_STRESS_TEST") != std::string::npos && r_robust.passed_stress_test);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 14: GATE 10 REGIME STATE MACHINE & FALSE-VETO GUARD
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 14: Gate 10 Regime State Machine & False-Veto Guard ---\n";
+
+    // Item G10-01: Deterministic regime classification state machine
+    {
+        RegimeStateMachine machine;
+
+        // Test 1: Volatile Breakout (ATR Ratio 1.5, RVOL 2.0)
+        RegimeClassificationResult r1 = machine.classify_regime(180.0, 120.0, 0.0001, 5.0, 2.0);
+
+        // Test 2: Trending Bull (VWAP slope +0.08%, OFI +25.0)
+        RegimeClassificationResult r2 = machine.classify_regime(120.0, 120.0, 0.0008, 25.0, 1.1);
+
+        TEST("Gate G10-01: Deterministic regime machine classifies VOLATILE_BREAKOUT & TRENDING_BULL carrying confidence", r1.regime == MarketRegime::VOLATILE_BREAKOUT && r2.regime == MarketRegime::TRENDING_BULL && r1.confidence > 0.8 && r2.confidence > 0.6);
+    }
+
+    // Item G10-02 & G10-03: Per-regime skill measurement & False-Veto stability guard
+    {
+        RegimeStateMachine machine(30); // 30 sample threshold
+
+        // Record 10 losing trades in CHOPPY_HIGH_NOISE regime
+        for (int i = 0; i < 10; ++i) {
+            machine.record_trade_outcome(MarketRegime::CHOPPY_HIGH_NOISE, -15.0);
+        }
+
+        // Test A: 10 trades (<30 required) -> Stay in SHADOW MODE without hard veto
+        RegimeVetoResult veto_shadow = machine.evaluate_regime_veto(MarketRegime::CHOPPY_HIGH_NOISE);
+
+        TEST("Gate G10-03: False-veto stability guard enforces SHADOW MODE when sample size < 30", veto_shadow.shadow_mode && !veto_shadow.veto_active && veto_shadow.veto_reason.find("REGIME_VETO_SHADOW_MODE") != std::string::npos);
+
+        // Record 25 more losing trades (total 35 trades > 30 sample threshold)
+        for (int i = 0; i < 25; ++i) {
+            machine.record_trade_outcome(MarketRegime::CHOPPY_HIGH_NOISE, -15.0);
+        }
+
+        // Test B: 35 trades (>30 required) -> HARD VETO ACTIVE
+        RegimeVetoResult veto_hard = machine.evaluate_regime_veto(MarketRegime::CHOPPY_HIGH_NOISE);
+        RegimeSkillPerformance perf = machine.get_regime_performance(MarketRegime::CHOPPY_HIGH_NOISE);
+
+        TEST("Gate G10-02 & G10-03: Per-regime skill performance measured and HARD VETO triggers once sample size satisfied", perf.trade_count == 35 && perf.win_rate == 0.0 && veto_hard.veto_active && !veto_hard.shadow_mode);
     }
 
     std::cout << "===================================================================\n";
