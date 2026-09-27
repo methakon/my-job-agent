@@ -9,6 +9,7 @@
 #include "../src/engine/gate3_feature_health.hpp"
 #include "../src/engine/gate4_gap_taxonomy.hpp"
 #include "../src/engine/gate5_ofi_microprice.hpp"
+#include "../src/engine/gate6_volume_profile.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -500,6 +501,47 @@ void run_solid_and_acid_test_suite() {
         OFIMicropriceResult res = engine.process_snapshot(t1);
 
         TEST("Gate G5-03: Stacked imbalance & passive volume absorption scores evaluated as candidate hypothesis", res.stacked_imbalance_score == 1.0 && res.absorption_hypothesis_score > 0.5);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 10: GATE 6 VOLUME PROFILE & AUCTION MARKET THEORY (AMT)
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 10: Gate 6 Volume Profile & Auction Market Theory (AMT) ---\n";
+
+    // Item G6-01: POC, VAH, VAL, HVN, LVN calculation & versioned VA algorithm
+    {
+        VolumeProfileEngine vp_engine(5.0, 0.70);
+        uint64_t base_ms = 1727443800000ULL;
+
+        // Build volume profile: peak at 24300 (POC), distributed between 24250 and 24350
+        vp_engine.add_trade(24300.0, 5000.0); // POC
+        vp_engine.add_trade(24305.0, 2000.0);
+        vp_engine.add_trade(24295.0, 2000.0);
+        vp_engine.add_trade(24310.0, 500.0);
+        vp_engine.add_trade(24290.0, 500.0);
+        vp_engine.add_trade(24350.0, 50.0);  // Low volume node (LVN)
+        vp_engine.add_trade(24250.0, 50.0);  // Low volume node (LVN)
+
+        VolumeProfileMetrics m = vp_engine.compute_profile("NIFTY", base_ms);
+
+        TEST("Gate G6-01: POC/VAH/VAL/HVN/LVN calculated with versioned VA algorithm", m.poc == 24300.0 && m.vah == 24305.0 && m.val == 24295.0 && m.va_method_version == "VA_METHOD_V1_70_PERCENT" && !m.hvn_nodes.empty() && !m.lvn_nodes.empty());
+    }
+
+    // Item G6-02: Failed-auction detection + value migration tracking
+    {
+        VolumeProfileEngine vp_engine(5.0, 0.70);
+        uint64_t base_ms = 1727443800000ULL;
+
+        // Session trades below previous VAL (24280) but POC stays higher (24295) -> Failed auction below VAL
+        vp_engine.add_trade(24295.0, 3000.0); // POC
+        vp_engine.add_trade(24290.0, 1500.0);
+        vp_engine.add_trade(24300.0, 1500.0);
+        vp_engine.add_trade(24270.0, 200.0);  // Spike below prev VAL (24280)
+
+        // Previous session VA: VAL=24280, VAH=24320
+        VolumeProfileMetrics m = vp_engine.compute_profile("NIFTY", base_ms, 24320.0, 24280.0);
+
+        TEST("Gate G6-02: Failed-auction detection + value migration tracked accurately", m.migration_state == ValueMigrationState::OVERLAPPING_LOW && m.failed_auction_type == FailedAuctionType::FAILED_BREAKOUT_BELOW_VAL && m.failed_auction_confidence > 0.8);
     }
 
     std::cout << "===================================================================\n";
