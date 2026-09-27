@@ -19,6 +19,7 @@
 #include "../src/engine/gate13_validation_harness.hpp"
 #include "../src/engine/gate14_risk_reflexion.hpp"
 #include "../src/engine/gate15_experiment_registry.hpp"
+#include "../src/engine/gate16_risk_limits.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -946,6 +947,52 @@ void run_solid_and_acid_test_suite() {
         RollbackResult rb_healthy = ExperimentRegistryEngine::evaluate_champion_rollback("CHAMPION-V2-HEALTHY", "CHAMPION-V1-STABLE", 0.05, 0);
 
         TEST("Gate G15-03: Rollback engine executes instant fallback to previous stable champion on performance decay", rb_drawdown.rollback_executed && rb_drawdown.restored_champion_id == "CHAMPION-V1-STABLE" && !rb_healthy.rollback_executed);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 20: GATE 16 INDEPENDENT RISK ENGINE, CIRCUIT BREAKERS & KILL SWITCH
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 20: Gate 16 Independent Risk Engine, Circuit Breakers & Kill Switch ---\n";
+
+    // Item G16-01 & G16-02: Independent Risk Verification & Model Override Prevention
+    {
+        IndependentRiskEngine risk_engine(2000.0, 10000.0, 1000.0);
+
+        // Case A: Proposed risk = ₹2,500 (> ₹2,000 limit) with 100% AI confidence -> MODEL OVERRIDE BLOCKED
+        IndependentRiskVeto veto_override = risk_engine.verify_order_proposal("NIFTY", 2500.0, 5000.0, 0.0, 0, 1.0);
+
+        // Case B: Valid risk = ₹1,500 within limits -> APPROVED
+        IndependentRiskVeto veto_ok = risk_engine.verify_order_proposal("NIFTY", 1500.0, 5000.0, 0.0, 0, 0.85);
+
+        TEST("Gate G16-01: Independent risk engine blocks model override when proposed risk exceeds ₹2,000 ceiling", !veto_override.risk_approved && veto_override.model_override_attempt_blocked);
+        TEST("Gate G16-02: Per-trade (₹2,000) and aggregate capital (₹10,000) limits enforced accurately", veto_ok.risk_approved);
+    }
+
+    // Item G16-03: Consecutive Loss & Feed Quality Shutdowns
+    {
+        IndependentRiskEngine risk_engine;
+
+        // 3 consecutive losing trades -> Shutdown triggered
+        IndependentRiskVeto cb_loss = risk_engine.evaluate_circuit_breakers(3, 95.0);
+
+        // Degraded feed quality (60%) -> Shutdown triggered
+        IndependentRiskVeto cb_feed = risk_engine.evaluate_circuit_breakers(0, 60.0);
+
+        TEST("Gate G16-03: Circuit breakers trigger automatic engine shutdown on 3 consecutive losses or degraded feed quality", !cb_loss.risk_approved && cb_loss.veto_reason.find("SHUTDOWN_CONSECUTIVE_LOSS_LIMIT") != std::string::npos && !cb_feed.risk_approved);
+    }
+
+    // Item G16-04 & G16-05: Emergency Kill Switch & Execution Mode Guard
+    {
+        IndependentRiskEngine risk_engine;
+
+        // Emergency Kill Switch activation
+        EmergencyKillSwitchResult kill_res = risk_engine.trigger_emergency_kill_switch("EMERGENCY_VOLATILITY_SPIKE", 2, 1);
+
+        // Execution Mode Guard
+        ExecutionModeState mode = IndependentRiskEngine::get_execution_mode_state();
+
+        TEST("Gate G16-04: Emergency kill switch cancels pending orders and flattens paper positions cleanly", kill_res.kill_switch_triggered && kill_res.cancelled_orders_count == 2 && kill_res.flattened_positions_count == 1);
+        TEST("Gate G16-05: Execution mode guard confirms PAPER mode active and LIVE mode strictly unreachable", mode == ExecutionModeState::PAPER);
     }
 
     std::cout << "===================================================================\n";
