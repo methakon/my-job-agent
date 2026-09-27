@@ -8,6 +8,7 @@
 #include "../src/engine/feed_arbiter.hpp"
 #include "../src/engine/gate3_feature_health.hpp"
 #include "../src/engine/gate4_gap_taxonomy.hpp"
+#include "../src/engine/gate5_ofi_microprice.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -413,6 +414,92 @@ void run_solid_and_acid_test_suite() {
         TEST("Gate G4-02: Microstructure confirmation & catalyst gate evaluate in shadow mode without production blockage", m.is_shadow_mode && m.microstructure_confirmed && m.event_catalyst_gate_passed);
         TEST("Gate G4-03: FADE/FOLLOW/NO_TRADE output includes net expected value after realistic costs", m.proposed_strategy == GapStrategyProposal::FADE_GAP && m.net_expected_value == (m.raw_expected_pnl - m.realistic_cost_friction) && m.net_expected_value > 0.0);
         TEST("Gate G4-04: Old US benchmark stats kept purely as metadata without hardcoded decision rules", m.us_benchmark_reference_note.find("METADATA_ONLY") != std::string::npos);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 9: GATE 5 ORDER FLOW IMBALANCE (OFI) & MICROPRICE PIPELINE
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 9: Gate 5 Order Flow Imbalance (OFI) & Microprice Pipeline ---\n";
+    using namespace hermes;
+
+    // Item G5-01: Microprice calculation, MLOFI, & L1 degradation fallback
+    {
+        MicrostructureEngine engine;
+
+        // L5 Depth Snapshot
+        OrderBookSnapshot snap_l5;
+        snap_l5.symbol = "NIFTY";
+        snap_l5.timestamp_ms = 1727443800000ULL;
+        snap_l5.levels_available = 5;
+        snap_l5.levels[0] = {24300.0, 500.0, 24305.0, 200.0};
+        snap_l5.levels[1] = {24295.0, 400.0, 24310.0, 300.0};
+        snap_l5.levels[2] = {24290.0, 300.0, 24315.0, 400.0};
+        snap_l5.levels[3] = {24285.0, 200.0, 24320.0, 500.0};
+        snap_l5.levels[4] = {24280.0, 100.0, 24325.0, 600.0};
+
+        OFIMicropriceResult res_l5 = engine.process_snapshot(snap_l5);
+
+        // Expected microprice = (24300*200 + 24305*500) / 700 = 24303.5714
+        TEST("Gate G5-01: Microprice & MLOFI compute accurately on L5 depth", !res_l5.l1_degradation_active && std::abs(res_l5.microprice - 24303.5714) < 0.01 && res_l5.obi_l1 > 0.0);
+
+        // L1 Only Degraded Snapshot
+        OrderBookSnapshot snap_l1;
+        snap_l1.symbol = "NIFTY";
+        snap_l1.timestamp_ms = 1727443801000ULL;
+        snap_l1.levels_available = 1;
+        snap_l1.levels[0] = {24300.0, 600.0, 24305.0, 150.0};
+
+        OFIMicropriceResult res_l1 = engine.process_snapshot(snap_l1);
+        TEST("Gate G5-01: Graceful L1 degradation mode computes single-level microprice without crashing", res_l1.l1_degradation_active && res_l1.levels_used == 1 && res_l1.microprice > 24300.0);
+    }
+
+    // Item G5-02: Spread shock, cancellation, replenishment & order intensity tracking
+    {
+        MicrostructureEngine engine;
+        
+        OrderBookSnapshot t0;
+        t0.symbol = "NIFTY";
+        t0.timestamp_ms = 1727443800000ULL;
+        t0.levels_available = 1;
+        t0.levels[0] = {24300.0, 500.0, 24305.0, 500.0}; // Spread = 5.0
+
+        engine.process_snapshot(t0);
+
+        OrderBookSnapshot t1;
+        t1.symbol = "NIFTY";
+        t1.timestamp_ms = 1727443801000ULL; // 1s later
+        t1.levels_available = 1;
+        t1.levels[0] = {24290.0, 300.0, 24315.0, 300.0}; // Spread expanded to 25.0 (Spread Shock!)
+
+        OFIMicropriceResult res = engine.process_snapshot(t1);
+
+        TEST("Gate G5-02: Spread shock, cancellation, replenishment & order intensity tracked", res.spread_shock_ratio > 2.0 && res.order_intensity == 1.0);
+    }
+
+    // Item G5-03: Stacked imbalance & passive volume absorption hypothesis scoring
+    {
+        MicrostructureEngine engine;
+
+        OrderBookSnapshot t0;
+        t0.symbol = "NIFTY";
+        t0.timestamp_ms = 1727443800000ULL;
+        t0.levels_available = 5;
+        // Stacked bid imbalance (3:1 ratio across all 5 levels)
+        for (size_t i = 0; i < 5; ++i) {
+            t0.levels[i] = {24300.0 - static_cast<double>(i * 5), 900.0, 24305.0 + static_cast<double>(i * 5), 100.0};
+        }
+        t0.last_traded_price = 24300.0;
+        t0.last_traded_qty = 300.0; // Passive absorption at bid
+
+        engine.process_snapshot(t0);
+
+        OrderBookSnapshot t1 = t0;
+        t1.timestamp_ms = 1727443801000ULL;
+        t1.last_traded_qty = 400.0; // Additional absorption at bid
+
+        OFIMicropriceResult res = engine.process_snapshot(t1);
+
+        TEST("Gate G5-03: Stacked imbalance & passive volume absorption scores evaluated as candidate hypothesis", res.stacked_imbalance_score == 1.0 && res.absorption_hypothesis_score > 0.5);
     }
 
     std::cout << "===================================================================\n";
