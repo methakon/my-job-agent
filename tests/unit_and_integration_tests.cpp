@@ -17,6 +17,7 @@
 #include "../src/engine/gate11_strategy_taxonomy.hpp"
 #include "../src/engine/gate12_ml_pipeline.hpp"
 #include "../src/engine/gate13_validation_harness.hpp"
+#include "../src/engine/gate14_risk_reflexion.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -877,6 +878,34 @@ void run_solid_and_acid_test_suite() {
         );
 
         TEST("Gate G13-04: Production promotion gate approves verified strategies while visibly blocking failing ones", res_pass.promotion_approved && !res_fail.promotion_approved && res_fail.blocking_reason == "PROMOTION_BLOCKED_UNTOUCHED_HOLDOUT_FAILED");
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 18: GATE 14 RISK REFLEXION & ANTI-OVERFIT RULE ENGINE
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 18: Gate 14 Risk Reflexion & Anti-Overfit Rule Engine ---\n";
+
+    // Item G14-01 & G14-02: Outcome Failure Taxonomy & Off-Hot-Path LLM Reflexion
+    {
+        TradeOutcomeTaxonomy out_slippage = RiskReflexionEngine::classify_outcome(-25.0, 3.5, 20, false, false);
+        TradeOutcomeTaxonomy out_catalyst = RiskReflexionEngine::classify_outcome(-50.0, 0.5, 20, false, true);
+
+        TEST("Gate G14-01: Trade outcome taxonomy classifies FAIL_SLIPPAGE_EXCESS & FAIL_CATALYST_JUMP accurately", out_slippage == TradeOutcomeTaxonomy::FAIL_SLIPPAGE_EXCESS && out_catalyst == TradeOutcomeTaxonomy::FAIL_CATALYST_JUMP);
+
+        ReflexionRecord reflexion = RiskReflexionEngine::generate_off_path_reflexion("TRD-9901", "NIFTY", out_slippage, -25.0);
+
+        TEST("Gate G14-02: Off-hot-path LLM reflexion service executes decoupled without blocking C++ decision loop", reflexion.is_off_hot_path && reflexion.llm_reflexion_summary.find("OFF_HOT_PATH_REFLEXION_V1") != std::string::npos);
+    }
+
+    // Item G14-03 & G14-04: Knowledge Rule Pipeline & Single-Trade Anti-Overfit Safeguard
+    {
+        // Case A: Single trade critique (sample_count = 1) -> PROMOTION BLOCKED
+        KnowledgeRulePipelineRecord rule_single = RiskReflexionEngine::evaluate_knowledge_rule_promotion("RULE-001", "Reduce lot size on 3.5pt slippage", 1, 1.0);
+
+        // Case B: Validated across 35 trades (win rate 68%) -> PROMOTED TO PRODUCTION
+        KnowledgeRulePipelineRecord rule_validated = RiskReflexionEngine::evaluate_knowledge_rule_promotion("RULE-002", "Shadow fade on gap > 1.5 ATR", 35, 0.68);
+
+        TEST("Gate G14-03 & G14-04: Knowledge pipeline blocks single-trade promotion while approving rules validated on N>=30 trades", !rule_single.is_promoted_to_production && rule_single.status_reason.find("REJECT_INSUFFICIENT_SAMPLE_SIZE_SINGLE_TRADE_PROMOTION_BLOCKED") != std::string::npos && rule_validated.is_promoted_to_production);
     }
 
     std::cout << "===================================================================\n";
