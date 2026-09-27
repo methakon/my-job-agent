@@ -32,6 +32,39 @@ struct CppRoadmapItem {
     std::string evidence_note;
 };
 
+struct HermesCppStage {
+    std::string stage_id;
+    std::string stage_label;
+    std::string goal;
+    int order_index = 0;
+    int total_items = 0;
+    int done_items = 0;
+    int blocked_items = 0;
+    int in_progress_items = 0;
+    double pct_complete = 0.0;
+};
+
+struct HermesCppItem {
+    std::string item_id;
+    std::string stage_id;
+    std::string description;
+    std::string instruction;
+    std::string done_when;
+    std::string status;
+    std::string note;
+};
+
+struct HermesCppClarification {
+    long long clarification_id = 0;
+    std::string item_id;
+    std::string stage_label;
+    std::string question;
+    std::string answer;
+    std::string status;
+    std::string created_at;
+    std::string answered_at;
+};
+
 struct RoadmapOverview {
     int total = 0;
     int done = 0;
@@ -142,6 +175,18 @@ public:
 
     BrokerTokenInfo fetch_broker_token_status(const std::string& provider);
     bool save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at);
+
+    // Hermes-CPP Zero-Progress Roadmap & Clarifications Methods
+    std::vector<HermesCppStage> fetch_hermes_cpp_stages();
+    std::vector<HermesCppItem> fetch_hermes_cpp_items();
+    std::vector<HermesCppClarification> fetch_hermes_cpp_clarifications();
+    bool update_hermes_cpp_item_status_and_note(const std::string& item_id, const std::string& status, const std::string& note);
+    bool add_hermes_cpp_clarification(const std::string& item_id, const std::string& stage_label, const std::string& question);
+    bool answer_hermes_cpp_clarification(long long id, const std::string& answer);
+
+    // Gate 1: Decision Journal ACID Methods
+    bool log_decision_journal_record(const std::string& uuid, const std::string& session_id, const std::string& git_sha, const std::string& version, const std::string& symbol, const std::string& action, double confidence, double margin, const std::string& reason, const std::string& snapshot_json);
+    bool fetch_decision_journal_record(const std::string& uuid, std::string& out_session_id, std::string& out_git_sha, std::string& out_version, std::string& out_symbol, std::string& out_action, double& out_confidence, double& out_margin, std::string& out_reason, std::string& out_snapshot_json);
 
 private:
     std::shared_ptr<MySQLConnectionPool> pool_;

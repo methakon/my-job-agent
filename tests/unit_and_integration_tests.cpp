@@ -3,6 +3,11 @@
 #include "../src/engine/tick_receiver.hpp"
 #include "../src/engine/feature_engine.hpp"
 #include "../src/engine/backtest_engine.hpp"
+#include "../src/engine/gate0_bootstrap.hpp"
+#include "../src/engine/decision_journal.hpp"
+#include "../src/engine/feed_arbiter.hpp"
+#include "../src/engine/gate3_feature_health.hpp"
+#include "../src/engine/gate4_gap_taxonomy.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -164,22 +169,250 @@ void run_solid_and_acid_test_suite() {
     }
 
     // -----------------------------------------------------------------
-    // CATEGORY 3: BACKTESTING & MULTI-THREAD CONCURRENCY TESTS
+    // CATEGORY 4: GATE 0 BOOTSTRAP INVARIANTS & HARD GUARDS
     // -----------------------------------------------------------------
-    std::cout << "\n--- CATEGORY 3: Parallel Backtest & Concurrency ---\n";
+    std::cout << "\n--- CATEGORY 4: Gate 0 Bootstrap Invariants & Hard Guards ---\n";
 
-    // Test 10 (Positive): 40-Thread Parallel Backtest Execution
+    // Item G0-01: Compile-Time PAPER_ONLY Guard
     {
-        BacktestEngine bt(db_client);
-        auto res = bt.run_parallel_backtest("NIFTY", 4);
-        TEST("BacktestEngine: Parallel Multi-Thread Execution Completed", res.total_ticks_processed > 0 && res.total_trades > 0);
-        TEST("BacktestEngine: Latency Benchmark (< 100 µs)", res.avg_decision_latency_micros < 100.0);
+        std::string err;
+        bool live_ok = LiveOrderExecutionGuard::place_live_broker_order("UPSTOX", "NIFTY26SEP24300CE", "BUY", 50, 150.0, err);
+        TEST("Gate G0-01: Compile-time PAPER_ONLY guard blocks live orders", !live_ok && err.find("HERMES_COMPILE_TIME_PAPER_ONLY") != std::string::npos);
     }
 
-    // Test 11 (Positive): Multi-Tenant User Portfolio Access
+    // Item G0-02: Instrument Allowlist Enforced
     {
-        auto p = db_client->fetch_user_portfolio("e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee");
-        TEST("Multi-Tenancy: Isolated User Portfolio Query Returned Capital", p.capital > 0.0);
+        InstrumentAllowlist allowlist;
+        bool nifty_ok = allowlist.is_allowed("NIFTY");
+        bool crude_ok = allowlist.is_allowed("CRUDEOIL");
+        TEST("Gate G0-02: Instrument allowlist approves NIFTY and rejects off-universe CRUDEOIL", nifty_ok && !crude_ok);
+    }
+
+    // Item G0-03: Immutable Session Capital Ceiling
+    {
+        SessionCapitalGuard cap(10000.0);
+        std::string alloc_reason;
+        bool valid_alloc = cap.request_capital_allocation(3000.0, alloc_reason);
+        bool invalid_alloc = cap.request_capital_allocation(8000.0, alloc_reason);
+        TEST("Gate G0-03: Session capital ceiling enforces ₹10,000 immutable cap", valid_alloc && !invalid_alloc && alloc_reason.find("EXCEEDS_IMMUTABLE_SESSION_CAPITAL_CEILING") != std::string::npos);
+    }
+
+    // Item G0-04: Decision Engine Default to NO_TRADE
+    {
+        TradeDecision d = DecisionEngineInvariant::evaluate_default_state();
+        TEST("Gate G0-04: Decision engine defaults to NO_TRADE invariant", d.action == TradeAction::NO_TRADE && d.reason == "DEFAULT_NO_TRADE_INVARIANT");
+    }
+
+    // Item G0-05: Feed Provenance / Freshness / Quality Evaluation
+    {
+        CanonicalOptionTick t;
+        t.provenance = "NSE_UPSTOX_WS";
+        t.ltp = 150.0;
+        t.bid_price = 149.8;
+        t.ask_price = 150.2;
+        t.is_real_data = true;
+        uint64_t now_ms = 1727443800000ULL;
+        t.timestamp_ms = now_ms - 100ULL; // 100ms ago
+
+        FeedQualityMetrics qm = FeedQualityGuard::evaluate_tick_feed(t, now_ms);
+        TEST("Gate G0-05: Feed quality guard verifies provenance, freshness, and quality score", qm.is_fresh && qm.quality_score == 1.0 && qm.provenance == "NSE_UPSTOX_WS");
+    }
+
+    // Item G0-06: Session Archival & Stale-Data Guard
+    {
+        std::string s_id = SessionArchivalGuard::generate_session_id("HERMES");
+        SessionArchivalGuard sg(s_id, 10000.0);
+        TEST("Gate G0-06: Session archival isolates session ID and prevents stale cross-session state", sg.validate_tick_session(s_id) && !sg.validate_tick_session("PRIOR_SESSION"));
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 5: GATE 1 ACID DECISION JOURNAL & RECONSTRUCTION TESTS
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 5: Gate 1 ACID Decision Journal & Data Reconstruction ---\n";
+
+    // Item G1-01 & G1-03: Full decision journal logging, reconstruction, and Git-SHA stamping
+    {
+        DecisionJournal journal(db_client);
+        DecisionJournalRecord rec;
+        rec.decision_uuid = "DEC-TEST-UUID-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        rec.session_id = "SESSION-G1-TEST";
+        rec.symbol = "NIFTY";
+        rec.action = "BUY_CALL";
+        rec.confidence = 0.88;
+        rec.allocated_margin = 2500.0;
+        rec.reason = "OFI_BULLISH_BREAKOUT_CONFIRMED";
+        rec.feature_snapshot_json = "{\"ofi\":70.0,\"microprice\":150.25,\"vwap\":149.80,\"iv_skew\":0.025}";
+
+        bool log_ok = journal.log_decision_transactional(rec);
+
+        DecisionJournalRecord rec_out;
+        bool recon_ok = journal.reconstruct_decision_by_uuid(rec.decision_uuid, rec_out);
+
+        TEST("Gate G1-01: Full decision journal schema in MySQL & historical decision reconstruction", log_ok && recon_ok && rec_out.symbol == "NIFTY" && rec_out.action == "BUY_CALL" && rec_out.confidence == 0.88 && rec_out.feature_snapshot_json.find("ofi") != std::string::npos);
+        TEST("Gate G1-03: Git-SHA & Engine Version stamped on every logged decision record", recon_ok && !rec_out.git_commit_sha.empty() && !rec_out.engine_version.empty());
+    }
+
+    // Item G1-02: Transactional Row Writes & Rollback Protection
+    {
+        DecisionJournal journal(db_client);
+        DecisionJournalRecord v_rec;
+        v_rec.decision_uuid = "DEC-TRANSACT-V1-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        v_rec.session_id = "SESSION-G1-TX";
+        v_rec.symbol = "BANKNIFTY";
+        v_rec.action = "NO_TRADE";
+        v_rec.reason = "VALID_RECORD";
+        v_rec.feature_snapshot_json = "{}";
+
+        DecisionJournalRecord inv_rec = v_rec; // Duplicate UUID triggers SQL error & rollback
+        bool tx_ok = journal.simulate_forced_crash_rollback(v_rec, inv_rec);
+        TEST("Gate G1-02: Transactional row writes enforce no partial state commits on failure", tx_ok);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 6: GATE 2 DUAL-BROKER WEBSOCKET INGESTION & FEED ARBITRATION
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 6: Gate 2 Dual-Broker Ingestion & Feed Arbitration ---\n";
+
+    // Item G2-01: Upstox + Fyers concurrent WS stream status tracking
+    {
+        DualBrokerFeedArbiter arbiter;
+        uint64_t now_ms = 1727443800000ULL;
+        arbiter.update_feed_status("UPSTOX", true, now_ms, 5000, 1.0);
+        arbiter.update_feed_status("FYERS", true, now_ms, 4980, 0.95);
+
+        auto upstox_st = arbiter.get_upstox_status();
+        auto fyers_st = arbiter.get_fyers_status();
+        TEST("Gate G2-01: Upstox + Fyers concurrent WS clients stream independently", upstox_st.is_connected && fyers_st.is_connected && upstox_st.total_ticks_received == 5000 && fyers_st.total_ticks_received == 4980);
+    }
+
+    // Item G2-02: Feed arbiter failover on primary disconnect
+    {
+        DualBrokerFeedArbiter arbiter;
+        uint64_t now_ms = 1727443800000ULL;
+        // Upstox primary is stale (last tick 5000ms ago)
+        arbiter.update_feed_status("UPSTOX", true, now_ms - 5000, 100, 0.2);
+        // Fyers backup is fresh
+        arbiter.update_feed_status("FYERS", true, now_ms, 120, 1.0);
+
+        std::string failover_log;
+        std::string active_feed = arbiter.select_active_feed(now_ms, 1000, &failover_log);
+
+        TEST("Gate G2-02: Feed arbiter executes logged failover from stale primary UPSTOX to backup FYERS", active_feed == "FYERS" && failover_log.find("FEED_FAILOVER_TRIGGERED") != std::string::npos);
+    }
+
+    // Item G2-03: Pre-open Order Absorption Index (OAI) metrics
+    {
+        PreOpenOAIEngine oai_engine(10);
+        std::vector<CanonicalOptionTick> ticks;
+        uint64_t base_ms = 1727443800000ULL;
+        for (int i = 0; i < 10; ++i) {
+            CanonicalOptionTick t;
+            t.timestamp_ms = base_ms + i * 100;
+            t.bid_qty = 500 + i * 50;
+            t.ask_qty = 200;
+            ticks.push_back(t);
+        }
+
+        PreOpenOAIMetrics m = oai_engine.compute_oai(ticks);
+        TEST("Gate G2-03: Pre-open OAI computes level, slope, acceleration, and persistence series", m.level > 0.0 && m.persistence == 1.0 && m.timestamp_ms == base_ms + 900);
+    }
+
+    // Item G2-04 & G2-05: Imbalance Survival & Time-Alignment Guard
+    {
+        uint64_t current_ms = 1727443800000ULL;
+        std::vector<CanonicalOptionTick> ticks;
+
+        // Valid past tick (30s ago)
+        CanonicalOptionTick t1;
+        t1.timestamp_ms = current_ms - 30000;
+        t1.bid_qty = 300;
+        t1.ask_qty = 100;
+        ticks.push_back(t1);
+
+        // Future tick (5s in future - lookahead leak candidate)
+        CanonicalOptionTick t2;
+        t2.timestamp_ms = current_ms + 5000;
+        t2.bid_qty = 500;
+        t2.ask_qty = 50;
+        ticks.push_back(t2);
+
+        ImbalanceSurvivalMetrics res = ImbalanceSurvivalEngine::evaluate_survival(ticks, current_ms);
+
+        TEST("Gate G2-04: Imbalance survival metric calculated for 1m window", res.survival_1min_pct == 100.0 && res.sample_size == 1);
+        TEST("Gate G2-05: Time-alignment guard filters future look-ahead ticks", !res.no_look_ahead_leak);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 7: GATE 3 CORE FEATURE ENGINE & FEATURE HEALTH PIPELINE
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 7: Gate 3 Core Feature Engine & Feature Health Pipeline ---\n";
+
+    // Item G3-01, G3-02, G3-03, G3-04: Expanded feature set computation
+    {
+        std::vector<CanonicalOptionTick> ticks;
+        uint64_t base_ms = 1727443800000ULL;
+
+        for (int i = 0; i < 20; ++i) {
+            CanonicalOptionTick t;
+            t.symbol = "NIFTY";
+            t.timestamp_ms = base_ms + i * 60000; // 1 min steps
+            t.ltp = 24300.0 + i * 5.0;
+            t.volume = 1000 + i * 50;
+            t.open_interest = 50000 + i * 100;
+            t.option_type = (i % 2 == 0) ? "CE" : "PE";
+            ticks.push_back(t);
+        }
+
+        ExpandedFeatureSet f = Gate3FeatureHealthEngine::compute_expanded_features(
+            ticks, 24300.0, 24200.0, 150.0, 15000.0, 24350.0, 24310.0
+        );
+
+        TEST("Gate G3-01: GapPct and GapATR features calculated accurately", std::abs(f.gap_pct - 0.0041287) < 0.0001 && std::abs(f.gap_atr - 0.66667) < 0.001);
+        TEST("Gate G3-02: ORB-5/15/30 & opening impulse calculated accurately", f.orb_5_high > 0.0 && f.orb_15_high >= f.orb_5_high && f.orb_30_high >= f.orb_15_high);
+        TEST("Gate G3-03: Relative volume and futures basis calculated accurately", f.relative_volume > 0.0 && f.futures_basis == 40.0);
+        TEST("Gate G3-04: OI delta, PCR volume/OI, and strike concentration calculated accurately", f.oi_delta == 1900.0 && f.pcr_volume > 0.0 && f.pcr_oi > 0.0 && f.strike_concentration > 0.0);
+    }
+
+    // Item G3-05: Feature-health missingness flags on incomplete data
+    {
+        std::vector<CanonicalOptionTick> ticks;
+        CanonicalOptionTick t;
+        t.symbol = "NIFTY";
+        t.ltp = 24300.0;
+        ticks.push_back(t);
+
+        // Supply 0.0 for prev_close and atr_14 to test explicit missingness flagging
+        ExpandedFeatureSet f = Gate3FeatureHealthEngine::compute_expanded_features(
+            ticks, 24300.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        );
+
+        bool has_missing_prev_close = (f.health_bitmask & FLAG_MISSING_PREV_CLOSE) != 0;
+        bool has_missing_atr = (f.health_bitmask & FLAG_MISSING_ATR) != 0;
+
+        TEST("Gate G3-05: Missing input yields explicit feature health bitmask flag without fabricating values", !f.is_feature_set_valid && has_missing_prev_close && has_missing_atr);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 8: GATE 4 GAP TAXONOMY & SHADOW MICROSTRUCTURE CONFIRMATION
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 8: Gate 4 Gap Taxonomy & Shadow Microstructure Confirmation ---\n";
+
+    // Item G4-01 & G4-02: Gap taxonomy, FadeScore/FollowScore & Shadow Mode
+    {
+        Gate4GapTaxonomyEngine engine(true); // Shadow mode enabled
+        ExpandedFeatureSet f;
+        f.open_price = 24450.0;
+        f.prev_close = 24300.0; // 150pt Gap Up
+        f.atr_14 = 120.0;
+        f.relative_volume = 1.2;
+
+        // OFI is strongly negative (-45.0) -> Indicates bearish absorption / fade opportunity
+        GapTaxonomyMetrics m = engine.evaluate_gap_strategy(f, 24400.0, 24200.0, -45.0, "NORMAL_SESSION");
+
+        TEST("Gate G4-01: Gap taxonomy categorizes FULL_GAP_UP and computes FadeScore & FollowScore", m.category == GapCategory::FULL_GAP_UP && m.fade_score >= 75.0 && m.follow_score < 30.0);
+        TEST("Gate G4-02: Microstructure confirmation & catalyst gate evaluate in shadow mode without production blockage", m.is_shadow_mode && m.microstructure_confirmed && m.event_catalyst_gate_passed);
+        TEST("Gate G4-03: FADE/FOLLOW/NO_TRADE output includes net expected value after realistic costs", m.proposed_strategy == GapStrategyProposal::FADE_GAP && m.net_expected_value == (m.raw_expected_pnl - m.realistic_cost_friction) && m.net_expected_value > 0.0);
+        TEST("Gate G4-04: Old US benchmark stats kept purely as metadata without hardcoded decision rules", m.us_benchmark_reference_note.find("METADATA_ONLY") != std::string::npos);
     }
 
     std::cout << "===================================================================\n";

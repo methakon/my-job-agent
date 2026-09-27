@@ -24,6 +24,9 @@ struct CanonicalOptionTick {
     int change_oi = 0;
     double iv = 0.0;
     uint64_t timestamp_ms = 0;
+    std::string provenance = "NSE_FEED"; // "UPSTOX_WS", "FYERS_WS", "NSE_SIMULATOR"
+    bool is_real_data = true;
+    uint64_t received_timestamp_ms = 0;
 };
 
 class LockFreeTickRingBuffer {

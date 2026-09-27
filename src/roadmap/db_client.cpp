@@ -423,3 +423,227 @@ UpstoxTokenInfo RoadmapDbClient::fetch_upstox_token_status() {
 bool RoadmapDbClient::save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at) {
     return save_broker_access_token("upstox", token, client_id, expires_at);
 }
+
+std::vector<HermesCppStage> RoadmapDbClient::fetch_hermes_cpp_stages() {
+    std::vector<HermesCppStage> stages;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return stages;
+
+    const char* query = "SELECT s.stage_id, s.stage_label, IFNULL(s.goal,''), s.order_index, IFNULL(p.total_items,0), IFNULL(p.done_items,0), IFNULL(p.blocked_items,0), IFNULL(p.in_progress_items,0), IFNULL(p.pct_complete,0.0) FROM hermes_cpp_project_stages s LEFT JOIN hermes_cpp_stage_progress p ON s.stage_id = p.stage_id ORDER BY s.order_index ASC;";
+    if (mysql_query(conn, query) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                HermesCppStage st;
+                st.stage_id = row[0] ? row[0] : "";
+                st.stage_label = row[1] ? row[1] : "";
+                st.goal = row[2] ? row[2] : "";
+                try {
+                    st.order_index = row[3] ? std::stoi(row[3]) : 0;
+                    st.total_items = row[4] ? std::stoi(row[4]) : 0;
+                    st.done_items = row[5] ? std::stoi(row[5]) : 0;
+                    st.blocked_items = row[6] ? std::stoi(row[6]) : 0;
+                    st.in_progress_items = row[7] ? std::stoi(row[7]) : 0;
+                    st.pct_complete = row[8] ? std::stod(row[8]) : 0.0;
+                } catch (...) {}
+                stages.push_back(st);
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_hermes_cpp_stages error: " << mysql_error(conn) << "\n";
+    }
+    pool_->release(conn);
+    return stages;
+}
+
+std::vector<HermesCppItem> RoadmapDbClient::fetch_hermes_cpp_items() {
+    std::vector<HermesCppItem> items;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return items;
+
+    const char* query = "SELECT item_id, stage_id, description, IFNULL(instruction,''), done_when, status, IFNULL(note,'') FROM hermes_cpp_project_checklist_items;";
+    if (mysql_query(conn, query) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                HermesCppItem item;
+                item.item_id = row[0] ? row[0] : "";
+                item.stage_id = row[1] ? row[1] : "";
+                item.description = row[2] ? row[2] : "";
+                item.instruction = row[3] ? row[3] : "";
+                item.done_when = row[4] ? row[4] : "";
+                item.status = row[5] ? row[5] : "";
+                item.note = row[6] ? row[6] : "";
+                items.push_back(item);
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_hermes_cpp_items error: " << mysql_error(conn) << "\n";
+    }
+    pool_->release(conn);
+    return items;
+}
+
+std::vector<HermesCppClarification> RoadmapDbClient::fetch_hermes_cpp_clarifications() {
+    std::vector<HermesCppClarification> list;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return list;
+
+    const char* query = "SELECT id, IFNULL(item_id,''), IFNULL(stage_label,''), question, IFNULL(answer,''), status, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s IST'), IFNULL(DATE_FORMAT(answered_at, '%Y-%m-%d %H:%i:%s IST'),'') FROM hermes_cpp_project_clarifications ORDER BY created_at DESC;";
+    if (mysql_query(conn, query) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                HermesCppClarification cl;
+                try { cl.clarification_id = row[0] ? std::stoll(row[0]) : 0; } catch(...) {}
+                cl.item_id = row[1] ? row[1] : "";
+                cl.stage_label = row[2] ? row[2] : "";
+                cl.question = row[3] ? row[3] : "";
+                cl.answer = row[4] ? row[4] : "";
+                cl.status = row[5] ? row[5] : "";
+                cl.created_at = row[6] ? row[6] : "";
+                cl.answered_at = row[7] ? row[7] : "";
+                list.push_back(cl);
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_hermes_cpp_clarifications error: " << mysql_error(conn) << "\n";
+    }
+    pool_->release(conn);
+    return list;
+}
+
+bool RoadmapDbClient::update_hermes_cpp_item_status_and_note(const std::string& item_id, const std::string& status, const std::string& note) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_id = escape_string(conn, item_id);
+    std::string safe_status = escape_string(conn, status);
+    std::string safe_note = escape_string(conn, note);
+
+    std::string query;
+    if (!safe_note.empty()) {
+        query = "UPDATE hermes_cpp_project_checklist_items SET status = '" + safe_status + "', note = CONCAT(IFNULL(note,''), IF(note IS NULL OR note='', '', '\n'), '" + safe_note + "') WHERE item_id = '" + safe_id + "';";
+    } else {
+        query = "UPDATE hermes_cpp_project_checklist_items SET status = '" + safe_status + "' WHERE item_id = '" + safe_id + "';";
+    }
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] update_hermes_cpp_item error: " << mysql_error(conn) << "\n";
+        return false;
+    }
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}
+
+bool RoadmapDbClient::add_hermes_cpp_clarification(const std::string& item_id, const std::string& stage_label, const std::string& question) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_item = escape_string(conn, item_id);
+    std::string safe_stage = escape_string(conn, stage_label);
+    std::string safe_q = escape_string(conn, question);
+
+    std::string query = "INSERT INTO hermes_cpp_project_clarifications (item_id, stage_label, question, status, created_at) "
+                        "VALUES (" + (safe_item.empty() ? "NULL" : "'" + safe_item + "'") + ", "
+                        + (safe_stage.empty() ? "NULL" : "'" + safe_stage + "'") + ", '" + safe_q + "', 'pending', NOW());";
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] add_hermes_cpp_clarification error: " << mysql_error(conn) << "\n";
+        return false;
+    }
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}
+
+bool RoadmapDbClient::answer_hermes_cpp_clarification(long long id, const std::string& answer) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_ans = escape_string(conn, answer);
+
+    std::string query = "UPDATE hermes_cpp_project_clarifications SET answer = '" + safe_ans + "', status = 'answered', answered_at = NOW() WHERE id = " + std::to_string(id) + ";";
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] answer_hermes_cpp_clarification error: " << mysql_error(conn) << "\n";
+        return false;
+    }
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}
+
+bool RoadmapDbClient::log_decision_journal_record(const std::string& uuid, const std::string& session_id, const std::string& git_sha, const std::string& version, const std::string& symbol, const std::string& action, double confidence, double margin, const std::string& reason, const std::string& snapshot_json) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string s_uuid = escape_string(conn, uuid);
+    std::string s_sess = escape_string(conn, session_id);
+    std::string s_git  = escape_string(conn, git_sha);
+    std::string s_ver  = escape_string(conn, version);
+    std::string s_sym  = escape_string(conn, symbol);
+    std::string s_act  = escape_string(conn, action);
+    std::string s_rsn  = escape_string(conn, reason);
+    std::string s_json = escape_string(conn, snapshot_json);
+
+    std::string query = "INSERT INTO hermes_cpp_decision_journal (decision_uuid, session_id, git_commit_sha, engine_version, symbol, action, confidence, allocated_margin, reason, feature_snapshot_json, created_at) "
+                        "VALUES ('" + s_uuid + "', '" + s_sess + "', '" + s_git + "', '" + s_ver + "', '" + s_sym + "', '" + s_act + "', "
+                        + std::to_string(confidence) + ", " + std::to_string(margin) + ", '" + s_rsn + "', '" + s_json + "', NOW());";
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] log_decision_journal_record error: " << mysql_error(conn) << "\n";
+        return false;
+    }
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}
+
+bool RoadmapDbClient::fetch_decision_journal_record(const std::string& uuid, std::string& out_session_id, std::string& out_git_sha, std::string& out_version, std::string& out_symbol, std::string& out_action, double& out_confidence, double& out_margin, std::string& out_reason, std::string& out_snapshot_json) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    std::string s_uuid = escape_string(conn, uuid);
+    std::string query = "SELECT session_id, git_commit_sha, engine_version, symbol, action, confidence, allocated_margin, reason, feature_snapshot_json FROM hermes_cpp_decision_journal WHERE decision_uuid = '" + s_uuid + "';";
+
+    bool found = false;
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                out_session_id = row[0] ? row[0] : "";
+                out_git_sha = row[1] ? row[1] : "";
+                out_version = row[2] ? row[2] : "";
+                out_symbol = row[3] ? row[3] : "";
+                out_action = row[4] ? row[4] : "";
+                try {
+                    out_confidence = row[5] ? std::stod(row[5]) : 0.0;
+                    out_margin = row[6] ? std::stod(row[6]) : 0.0;
+                } catch(...) {}
+                out_reason = row[7] ? row[7] : "";
+                out_snapshot_json = row[8] ? row[8] : "";
+                found = true;
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return found;
+}

@@ -685,55 +685,56 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
 }
 
 std::string RoadmapServer::render_json_summary() {
-    auto cpp_items = db_client_->fetch_cpp_roadmap_items();
-    auto cpp_ov = db_client_->compute_cpp_overview(cpp_items);
-
-    auto items = db_client_->fetch_all_items();
-    auto ov = db_client_->compute_overview(items);
+    auto items = db_client_->fetch_hermes_cpp_items();
+    int total = items.size();
+    int done = 0, in_progress = 0, pending = 0, blocked = 0;
+    for (const auto& it : items) {
+        if (it.status == "done") done++;
+        else if (it.status == "in_progress") in_progress++;
+        else if (it.status == "blocked") blocked++;
+        else pending++;
+    }
+    int pct = total > 0 ? (done * 100) / total : 0;
 
     std::stringstream ss;
     ss << "{\n"
-       << "  \"cpp_roadmap\": {\n"
-       << "    \"total\": " << cpp_ov.total << ",\n"
-       << "    \"done\": " << cpp_ov.done << ",\n"
-       << "    \"in_progress\": " << cpp_ov.in_progress << ",\n"
-       << "    \"pending\": " << cpp_ov.pending << ",\n"
-       << "    \"blocked\": " << cpp_ov.blocked << ",\n"
-       << "    \"pct\": " << cpp_ov.pct << "\n"
-       << "  },\n"
-       << "  \"legacy_checklist\": {\n"
-       << "    \"total\": " << ov.total << ",\n"
-       << "    \"done\": " << ov.done << ",\n"
-       << "    \"in_progress\": " << ov.in_progress << ",\n"
-       << "    \"pending\": " << ov.pending << ",\n"
-       << "    \"blocked\": " << ov.blocked << ",\n"
-       << "    \"pct\": " << ov.pct << "\n"
+       << "  \"hermes_cpp_roadmap\": {\n"
+       << "    \"total\": " << total << ",\n"
+       << "    \"done\": " << done << ",\n"
+       << "    \"in_progress\": " << in_progress << ",\n"
+       << "    \"pending\": " << pending << ",\n"
+       << "    \"blocked\": " << blocked << ",\n"
+       << "    \"pct\": " << pct << "\n"
        << "  }\n"
        << "}";
     return ss.str();
 }
 
 std::string RoadmapServer::render_html_page(bool is_authenticated) {
-    auto cpp_items = db_client_->fetch_cpp_roadmap_items();
-    auto cpp_ov = db_client_->compute_cpp_overview(cpp_items);
+    auto stages = db_client_->fetch_hermes_cpp_stages();
+    auto items = db_client_->fetch_hermes_cpp_items();
+    auto clarifications = db_client_->fetch_hermes_cpp_clarifications();
 
-    std::map<std::string, std::vector<CppRoadmapItem>> cpp_phases;
-    for (const auto& it : cpp_items) {
-        cpp_phases[it.phase_name].push_back(it);
+    int total_cnt = items.size();
+    int done_cnt = 0, in_prog_cnt = 0, blocked_cnt = 0, pending_cnt = 0;
+    for (const auto& it : items) {
+        if (it.status == "done") done_cnt++;
+        else if (it.status == "in_progress") in_prog_cnt++;
+        else if (it.status == "blocked") blocked_cnt++;
+        else pending_cnt++;
     }
+    int overall_pct = total_cnt > 0 ? (done_cnt * 100) / total_cnt : 0;
 
-    auto legacy_items = db_client_->fetch_all_items();
-    auto legacy_ov = db_client_->compute_overview(legacy_items);
-    std::map<std::string, std::vector<ChecklistItem>> legacy_groups;
-    for (const auto& it : legacy_items) {
-        legacy_groups[it.grp].push_back(it);
+    std::map<std::string, std::vector<HermesCppItem>> stage_items;
+    for (const auto& it : items) {
+        stage_items[it.stage_id].push_back(it);
     }
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
-       << "<title>Project Roadmap & Status — C++ Autonomous Trading Agent</title>"
+       << "<title>Hermes-CPP Zero-Progress Roadmap Board — C++ Autonomous Trading Agent</title>"
        << "<style>"
        << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
        << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:0}"
@@ -742,7 +743,7 @@ std::string RoadmapServer::render_html_page(bool is_authenticated) {
        << ".nav-links{display:flex;gap:16px;align-items:center}"
        << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
        << ".nav-btn-link,.nav-btn{background:#238636;color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
-       << ".container{max-width:1200px;margin:20px auto;padding:0 20px}"
+       << ".container{max-width:1250px;margin:20px auto;padding:0 20px}"
        << "h1{font-size:22px;margin:0 0 4px}.masthead{margin-bottom:14px}.meta{color:var(--dim);font-size:12.5px}"
        << ".card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}"
        << ".summary{display:flex;gap:22px;flex-wrap:wrap;align-items:center}.summary b{font-size:20px}"
@@ -755,96 +756,115 @@ std::string RoadmapServer::render_html_page(bool is_authenticated) {
        << ".gtitle{font-weight:700;font-size:15px;color:var(--text)}"
        << ".gmeta{color:var(--dim);font-size:13px;white-space:nowrap}"
        << "table{border-collapse:collapse;width:100%;font-size:13px}"
-       << "td,th{border-top:1px solid var(--line);padding:8px 12px;text-align:left;vertical-align:middle}"
+       << "td,th{border-top:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}"
        << "th{background:rgba(0,0,0,.25);color:var(--dim);font-weight:600;text-transform:uppercase;font-size:11px;letter-spacing:.04em}"
-       << "td.num{color:var(--dim);width:40px;text-align:right}"
+       << "td.num{color:var(--dim);width:70px;font-weight:bold}"
        << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:var(--line);color:var(--dim);display:inline-block}"
-       << ".badge.ok{background:rgba(63,185,111,.16);color:var(--ok)}.badge.warn{background:rgba(224,168,60,.16);color:var(--warn)}.badge.bad{background:rgba(248,81,73,.16);color:var(--bad)}"
+       << ".badge.ok{background:rgba(63,185,111,.16);color:var(--ok)}.badge.warn{background:rgba(224,168,60,.16);color:var(--warn)}.badge.bad{background:rgba(248,81,73,.16);color:var(--bad)}.badge.pending{background:rgba(139,148,158,.16);color:var(--dim)}"
        << "form.inline{display:inline-block;margin-right:4px}"
        << "button{background:var(--line);color:var(--text);border:1px solid transparent;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}"
        << "button:hover{border-color:var(--dim)}"
-       << "input[type=text]{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px;width:220px}"
+       << "input[type=text],textarea{background:var(--bg);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:6px 10px;font-size:12px;width:100%}"
        << "code{font:12px ui-monospace,monospace;color:#e0a83c}"
-       << ".footer{margin-top:20px;padding-top:14px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px;text-align:center}"
+       << ".footer{margin-top:30px;padding-top:14px;border-top:1px solid var(--line);color:var(--dim);font-size:12.5px;text-align:center}"
+       << ".clarification-box{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-top:30px}"
        << "</style></head><body>"
        << render_nav_header(is_authenticated)
        << "<div class=\"container\">"
        << "<div class=\"masthead\">"
-       << "  <h1>⚡ C++ Autonomous Trading Agent Master Roadmap</h1>"
-       << "  <div class=\"meta\">Dedicated DB Table: <code>cpp_agent_roadmap_items</code> · Synthesized & Verified from 7 Reference F&amp;O Trading Manuals</div>"
+       << "  <h1>⚡ Hermes-CPP Zero-Progress Master Roadmap Board</h1>"
+       << "  <div class=\"meta\">MySQL Database Tables: <code>hermes_cpp_project_stages</code> · <code>hermes_cpp_project_checklist_items</code> · <code>hermes_cpp_project_clarifications</code></div>"
        << "</div>"
        << "<div class=\"card summary\">"
-       << "  <div><div class=\"meta\">Overall C++ Progress</div><b>" << cpp_ov.done << "<span class=\"dim\">/" << cpp_ov.total << "</span></b> <span class=\"dim\">(" << cpp_ov.pct << "%)</span></div>"
-       << "  <div><div class=\"meta\">In Progress</div><b class=\"warn\">" << cpp_ov.in_progress << "</b></div>"
-       << "  <div><div class=\"meta\">Blocked</div><b class=\"bad\">" << cpp_ov.blocked << "</b></div>"
-       << "  <div><div class=\"meta\">Pending</div><b class=\"dim\">" << cpp_ov.pending << "</b></div>"
-       << "  <div><div class=\"pbar\"><div class=\"pfill\" style=\"width:" << cpp_ov.pct << "%\"></div></div></div>"
+       << "  <div><div class=\"meta\">Overall Hermes-CPP Progress</div><b>" << done_cnt << "<span class=\"dim\">/" << total_cnt << "</span></b> <span class=\"dim\">(" << overall_pct << "%)</span></div>"
+       << "  <div><div class=\"meta\">In Progress</div><b class=\"warn\">" << in_prog_cnt << "</b></div>"
+       << "  <div><div class=\"meta\">Blocked</div><b class=\"bad\">" << blocked_cnt << "</b></div>"
+       << "  <div><div class=\"meta\">Pending</div><b class=\"dim\">" << pending_cnt << "</b></div>"
+       << "  <div><div class=\"pbar\"><div class=\"pfill\" style=\"width:" << overall_pct << "%\"></div></div></div>"
        << "</div>";
 
-    for (const auto& [phase, items] : cpp_phases) {
-        int p_done = 0;
-        for (const auto& it : items) if (it.status == "done") p_done++;
-        int p_pct = items.empty() ? 0 : (p_done * 100) / items.size();
-
+    for (const auto& st : stages) {
+        auto s_items = stage_items[st.stage_id];
         ss << "<details class=\"gate\" open>"
            << "<summary><div class=\"ghead\">"
-           << "<span class=\"gtitle\">" << html_escape(phase) << "</span>"
-           << "<span class=\"gmeta\">" << p_done << "/" << items.size() << " done (" << p_pct << "%)</span>"
+           << "<div><span class=\"gtitle\">" << html_escape(st.stage_label) << "</span>";
+        if (!st.goal.empty()) {
+            ss << " <span class=\"meta\">(" << html_escape(st.goal) << ")</span>";
+        }
+        ss << "</div>"
+           << "<span class=\"gmeta\">" << st.done_items << "/" << st.total_items << " done (" << st.pct_complete << "%)</span>"
            << "</div></summary>"
            << "<table>"
-           << "<thead><tr><th>#</th><th>Roadmap Item & Criteria</th><th>Source Manual</th><th>Status</th><th>Evidence / Verification Note</th></tr></thead>"
+           << "<thead><tr><th>Item ID</th><th>Description &amp; Verification Criteria</th><th>Instruction</th><th>Status</th><th>Timestamped Evidence Log</th></tr></thead>"
            << "<tbody>";
 
-        for (const auto& it : items) {
-            std::string badge_cls = (it.status == "done") ? "ok" : (it.status == "in_progress") ? "warn" : (it.status == "blocked") ? "bad" : "dim";
-            ss << "<tr id=\"cpp-item-" << it.id << "\">"
-               << "<td class=\"num\">" << it.id << "</td>"
-               << "<td><b>" << html_escape(it.item_title) << "</b>";
-            if (!it.done_when.empty()) {
-                ss << "<br/><span class=\"meta\"><b>Done when:</b> " << html_escape(it.done_when) << "</span>";
+        if (s_items.empty()) {
+            ss << "<tr><td colspan=\"5\" style=\"color:var(--dim);text-align:center;\">No checklist items seeded for stage " << html_escape(st.stage_id) << "</td></tr>";
+        } else {
+            for (const auto& it : s_items) {
+                std::string badge_cls = (it.status == "done") ? "ok" : (it.status == "in_progress") ? "warn" : (it.status == "blocked") ? "bad" : "pending";
+                ss << "<tr id=\"item-" << html_escape(it.item_id) << "\">"
+                   << "<td class=\"num\"><code>" << html_escape(it.item_id) << "</code></td>"
+                   << "<td><b>" << html_escape(it.description) << "</b>";
+                if (!it.done_when.empty()) {
+                    ss << "<br/><span class=\"meta\"><b>Done when:</b> " << html_escape(it.done_when) << "</span>";
+                }
+                ss << "</td>"
+                   << "<td><span class=\"meta\">" << html_escape(it.instruction) << "</span></td>"
+                   << "<td class=\"nowrap\"><span class=\"badge " << badge_cls << "\">" << html_escape(it.status) << "</span></td>"
+                   << "<td><pre style=\"margin:0;font:11.5px monospace;color:var(--dim);white-space:pre-wrap;\">" << (it.note.empty() ? "—" : html_escape(it.note)) << "</pre></td>"
+                   << "</tr>";
             }
-            ss << "</td>"
-               << "<td><code>" << html_escape(it.source_guide) << "</code></td>"
-               << "<td class=\"nowrap\"><span class=\"badge " << badge_cls << "\">" << html_escape(it.status) << "</span></td>"
-               << "<td><span class=\"meta\">" << (it.evidence_note.empty() ? "—" : html_escape(it.evidence_note)) << "</span></td>"
-               << "</tr>";
         }
         ss << "</tbody></table></details>";
     }
 
-    ss << "<div class=\"masthead\" style=\"margin-top:40px;\">"
-       << "  <h2>📋 Legacy Global Checklist Items (Consideration Input)</h2>"
-       << "  <div class=\"meta\">Historical overall project checklist (`project_checklist_items` table: " << legacy_ov.done << "/" << legacy_ov.total << " - " << legacy_ov.pct << "%)</div>"
-       << "</div>";
+    // Clarifications Panel
+    ss << "<div class=\"clarification-box\" id=\"clarifications\">"
+       << "  <h3 style=\"margin-top:0;color:#e0a83c;\">❓ Hermes-CPP Clarifications Panel</h3>"
+       << "  <p class=\"meta\">Submit questions or clarification requests regarding any stage or item in the Hermes-CPP roadmap.</p>";
 
-    for (const auto& [grp, g_items] : legacy_groups) {
-        int g_done = 0;
-        for (const auto& it : g_items) if (it.status == "done") g_done++;
-        int g_pct = g_items.empty() ? 0 : (g_done * 100) / g_items.size();
+    if (is_authenticated) {
+        ss << "  <form method=\"post\" action=\"/api/roadmap/clarification/ask\" style=\"margin-bottom:20px;\">"
+           << "    <div style=\"display:flex;gap:10px;margin-bottom:10px;\">"
+           << "      <input type=\"text\" name=\"item_id\" placeholder=\"Item ID (optional, e.g. R-001)\" style=\"max-width:200px;\"/>"
+           << "      <input type=\"text\" name=\"stage_label\" placeholder=\"Stage Label (optional, e.g. Gate 0)\" style=\"max-width:250px;\"/>"
+           << "    </div>"
+           << "    <textarea name=\"question\" placeholder=\"Enter your clarification question here...\" rows=\"3\" required style=\"margin-bottom:10px;\"></textarea>"
+           << "    <button type=\"submit\" style=\"background:#238636;color:#fff;padding:6px 14px;font-weight:600;\">❓ Post Clarification Question</button>"
+           << "  </form>";
+    } else {
+        ss << "  <p class=\"meta\" style=\"color:#e0a83c;\">🔐 <a href=\"/login\" style=\"color:#58a6ff;\">Login as Operator</a> to post or answer clarification questions.</p>";
+    }
 
-        ss << "<details class=\"gate\">"
-           << "<summary><div class=\"ghead\">"
-           << "<span class=\"gtitle\">" << html_escape(grp) << "</span>"
-           << "<span class=\"gmeta\">" << g_done << "/" << g_items.size() << " done (" << g_pct << "%)</span>"
-           << "</div></summary>"
-           << "<table>"
-           << "<thead><tr><th>#</th><th>Checklist Item</th><th>Status</th><th>Evidence / Note</th></tr></thead>"
-           << "<tbody>";
+    if (clarifications.empty()) {
+        ss << "  <p class=\"meta\" style=\"color:var(--dim);\">No clarifications logged yet. Table <code>hermes_cpp_project_clarifications</code> is currently empty.</p>";
+    } else {
+        ss << "  <table><thead><tr><th>ID</th><th>Target</th><th>Question</th><th>Status</th><th>Answer</th><th>Timestamps</th></tr></thead><tbody>";
+        for (const auto& cl : clarifications) {
+            std::string target = cl.item_id;
+            if (!cl.stage_label.empty()) {
+                if (!target.empty()) target += " / ";
+                target += cl.stage_label;
+            }
+            if (target.empty()) target = "General";
 
-        for (const auto& it : g_items) {
-            std::string badge_cls = (it.status == "done") ? "ok" : (it.status == "in_progress") ? "warn" : (it.status == "blocked") ? "bad" : "dim";
-            ss << "<tr id=\"legacy-item-" << it.id << "\">"
-               << "<td class=\"num\">" << it.item_order << "</td>"
-               << "<td><b>" << html_escape(it.item) << "</b></td>"
-               << "<td class=\"nowrap\"><span class=\"badge " << badge_cls << "\">" << html_escape(it.status) << "</span></td>"
-               << "<td><span class=\"meta\">" << (it.note.empty() ? "—" : html_escape(it.note)) << "</span></td>"
+            ss << "<tr>"
+               << "<td>#" << cl.clarification_id << "</td>"
+               << "<td><code>" << html_escape(target) << "</code></td>"
+               << "<td><b>" << html_escape(cl.question) << "</b></td>"
+               << "<td><span class=\"badge " << (cl.status == "answered" ? "ok" : "warn") << "\">" << html_escape(cl.status) << "</span></td>"
+               << "<td>" << (cl.answer.empty() ? "<span class=\"dim\">Awaiting response</span>" : html_escape(cl.answer)) << "</td>"
+               << "<td class=\"meta\">Asked: " << html_escape(cl.created_at) << (cl.answered_at.empty() ? "" : "<br/>Answered: " + html_escape(cl.answered_at)) << "</td>"
                << "</tr>";
         }
-        ss << "</tbody></table></details>";
+        ss << "</tbody></table>";
     }
+
+    ss << "</div>";
 
     ss << "<div class=\"footer\">"
-       << "C++ Autonomous Trading Agent Engine · Dedicated C++ Roadmap (`cpp_agent_roadmap_items`) · Oracle Cloud MySQL (3307)"
+       << "Hermes-CPP Autonomous Options Trading Agent · Database-Driven Roadmap · Oracle Cloud MySQL (3307)"
        << "</div>"
        << "</div></body></html>";
 
@@ -963,6 +983,37 @@ void RoadmapServer::start() {
                 status_code = 303;
                 extra_headers = "Set-Cookie: auth_token=; Path=/; Max-Age=0\r\nLocation: /\r\n";
                 body = "Redirecting...";
+            } else if (req.find("POST /api/roadmap/item/update") != std::string::npos) {
+                auto body_pos = req.find("\r\n\r\n");
+                std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
+                std::string item_id = extract_post_param(post_body, "item_id");
+                std::string status = extract_post_param(post_body, "status");
+                std::string note = extract_post_param(post_body, "note");
+                db_client_->update_hermes_cpp_item_status_and_note(item_id, status, note);
+                status_code = 303;
+                extra_headers = "Location: /project-status#item-" + item_id + "\r\n";
+                body = "Updated item successfully";
+            } else if (req.find("POST /api/roadmap/clarification/ask") != std::string::npos) {
+                auto body_pos = req.find("\r\n\r\n");
+                std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
+                std::string item_id = extract_post_param(post_body, "item_id");
+                std::string stage_label = extract_post_param(post_body, "stage_label");
+                std::string question = extract_post_param(post_body, "question");
+                db_client_->add_hermes_cpp_clarification(item_id, stage_label, question);
+                status_code = 303;
+                extra_headers = "Location: /project-status#clarifications\r\n";
+                body = "Clarification posted successfully";
+            } else if (req.find("POST /api/roadmap/clarification/answer") != std::string::npos) {
+                auto body_pos = req.find("\r\n\r\n");
+                std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
+                std::string id_str = extract_post_param(post_body, "clarification_id");
+                std::string answer = extract_post_param(post_body, "answer");
+                long long id = 0;
+                try { id = std::stoll(id_str); } catch(...) {}
+                if (id > 0) db_client_->answer_hermes_cpp_clarification(id, answer);
+                status_code = 303;
+                extra_headers = "Location: /project-status#clarifications\r\n";
+                body = "Clarification answered successfully";
             } else if (req.find("GET /api/user/portfolio") != std::string::npos) {
                 if (is_auth) {
                     auto p = db_client_->fetch_user_portfolio("e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee");
