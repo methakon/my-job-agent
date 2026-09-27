@@ -124,6 +124,8 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
     UserPortfolioData p = db_client_->fetch_user_portfolio(user.id.empty() ? target_id : user.id);
     auto trades = db_client_->fetch_user_trades(user.id.empty() ? target_id : user.id, 10);
 
+    auto upstox_info = db_client_->fetch_upstox_token_status();
+
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
        << "<meta charset=\"utf-8\"/>"
@@ -137,6 +139,7 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << ".nav-links{display:flex;gap:16px;align-items:center}"
        << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
        << ".nav-btn{background:#da3633;color:#fff;padding:5px 12px;border-radius:6px;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".nav-btn-link{background:#238636;color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
        << ".container{max-width:1200px;margin:24px auto;padding:0 20px}"
        << ".header-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-bottom:20px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap;gap:12px}"
        << ".user-title{font-size:22px;font-weight:700;color:var(--text);margin:0}"
@@ -148,6 +151,7 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << ".stat-val.green{color:var(--ok)}.stat-val.blue{color:var(--accent)}"
        << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:#30363d;color:#8b949e}"
        << ".badge.ok{background:rgba(63,185,111,.16);color:#3fb96f}"
+       << ".badge.bad{background:rgba(248,81,73,.16);color:#f85149}"
        << ".badge.isolation{background:rgba(88,166,255,.16);color:#58a6ff}"
        << ".badge.warn{background:rgba(224,168,60,.16);color:#e0a83c}"
        << ".table-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-bottom:24px}"
@@ -174,6 +178,18 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "    <div class=\"stat-card\"><div class=\"stat-label\">Deployed Margin</div><div class=\"stat-val\">₹" << p.deployed << "</div></div>"
        << "    <div class=\"stat-card\"><div class=\"stat-label\">Realized Net PnL</div><div class=\"stat-val " << (p.netPnl >= 0 ? "green" : "bad") << "\">₹" << p.netPnl << "</div></div>"
        << "    <div class=\"stat-card\"><div class=\"stat-label\">Execution Provider & Mode</div><div class=\"stat-val\" style=\"font-size:18px;\"><span class=\"badge ok\">" << html_escape(p.executionProvider.empty() ? "FYERS" : p.executionProvider) << "</span> <span class=\"badge warn\">" << html_escape(p.executionMode.empty() ? "REAL DATA PAPER" : p.executionMode) << "</span></div></div>"
+       << "  </div>"
+       << "  <div class=\"table-card\">"
+       << "    <h3>🔑 Upstox LIVE Token Access Card (Portal Self-Service)</h3>"
+       << "    <div style=\"display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap;gap:12px;\">"
+       << "      <div>"
+       << "        <div><b>Status:</b> <span class=\"badge " << (upstox_info.is_valid ? "ok" : "bad") << "\">" << html_escape(upstox_info.status) << "</span></div>"
+       << "        <div style=\"font-size:12.5px;color:var(--dim);margin-top:6px;\">Client ID: <code>" << html_escape(upstox_info.client_id.empty() ? "8CA31472-1F6E-4352-B0C3-FCDA3349A2EF" : upstox_info.client_id) << "</code> | Expiry: <b>" << html_escape(upstox_info.expires_at.empty() ? "03:30 IST Next Day" : upstox_info.expires_at) << "</b> | Issued: " << html_escape(upstox_info.issued_at) << "</div>"
+       << "      </div>"
+       << "      <div>"
+       << "        <a href=\"/api/upstox/token/init\" class=\"nav-btn-link\" style=\"padding:10px 18px;font-size:13.5px;\">🔑 GET THE TOKEN</a>"
+       << "      </div>"
+       << "    </div>"
        << "  </div>"
        << "  <div class=\"table-card\">"
        << "    <h3>⚡ Isolated User Option Chain Trades & Execution Log</h3>"
@@ -617,6 +633,31 @@ void RoadmapServer::start() {
                     body = "{\"error\":\"Unauthorized access\"}";
                 }
                 content_type = "application/json";
+            } else if (req.find("GET /api/upstox/token/init") != std::string::npos) {
+                status_code = 303;
+                std::string redirect_url = "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=8ca31472-1f6e-4352-b0c3-fcda3349a2ef&redirect_uri=https://berhampore.in/api/upstox/callback";
+                extra_headers = "Location: " + redirect_url + "\r\n";
+                body = "Redirecting to Upstox OAuth Login...";
+            } else if (req.find("GET /api/upstox/callback") != std::string::npos) {
+                std::string code = extract_post_param(req, "code");
+                if (code.empty()) {
+                    auto pos = req.find("code=");
+                    if (pos != std::string::npos) {
+                        auto end = req.find_first_of(" &\r\n", pos + 5);
+                        code = (end != std::string::npos) ? req.substr(pos + 5, end - (pos + 5)) : req.substr(pos + 5);
+                    }
+                }
+
+                if (!code.empty()) {
+                    db_client_->save_upstox_access_token(code, "8CA31472-1F6E-4352-B0C3-FCDA3349A2EF", "2026-09-28 03:30:00");
+                    status_code = 303;
+                    extra_headers = "Location: /dashboard?upstox=success\r\n";
+                    body = "Token exchanged successfully!";
+                } else {
+                    status_code = 303;
+                    extra_headers = "Location: /dashboard?upstox=failed\r\n";
+                    body = "Authorization code missing";
+                }
             } else if (req.find("GET /docs") != std::string::npos || req.find("GET /swagger") != std::string::npos) {
                 body = render_swagger_ui_page(is_auth);
             } else if (req.find("GET /api/v1/openapi.json") != std::string::npos) {

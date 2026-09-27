@@ -317,3 +317,49 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
     pool_->release(conn);
     return trades;
 }
+
+UpstoxTokenInfo RoadmapDbClient::fetch_upstox_token_status() {
+    UpstoxTokenInfo info;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return info;
+
+    const char* query = "SELECT clientId, status, IFNULL(expiresAt,''), IFNULL(issuedAt,'') FROM provider_tokens WHERE provider = 'upstox' ORDER BY issuedAt DESC LIMIT 1;";
+    if (mysql_query(conn, query) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                info.client_id = row[0] ? row[0] : "";
+                info.status = row[1] ? row[1] : "EXPIRED";
+                info.expires_at = row[2] ? row[2] : "";
+                info.issued_at = row[3] ? row[3] : "";
+                info.is_valid = (info.status == "active" || info.status == "TOKEN_VALID");
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return info;
+}
+
+bool RoadmapDbClient::save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_token = escape_string(conn, token);
+    std::string safe_cid = escape_string(conn, client_id);
+    std::string safe_exp = escape_string(conn, expires_at);
+
+    std::string query = "INSERT INTO provider_tokens (id, provider, environment, clientId, accessTokenEncrypted, status, issuedAt, expiresAt) "
+                        "VALUES (UUID(), 'upstox', 'live', '" + safe_cid + "', '" + safe_token + "', 'active', NOW(), '" + safe_exp + "');";
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] save_upstox_token error: " << mysql_error(conn) << "\n";
+        return false;
+    }
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}

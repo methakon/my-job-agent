@@ -98,6 +98,15 @@ private:
     bool committed_;
 };
 
+struct UpstoxTokenInfo {
+    std::string provider = "upstox";
+    std::string client_id;
+    std::string status = "EXPIRED";
+    std::string expires_at;
+    std::string issued_at;
+    bool is_valid = false;
+};
+
 class RoadmapDbClient {
 public:
     RoadmapDbClient(std::string host, int port, std::string user, std::string password, std::string db_name);
@@ -112,6 +121,9 @@ public:
     UserProfile fetch_user_by_email_or_id(const std::string& identifier);
     UserPortfolioData fetch_user_portfolio(const std::string& user_id);
     std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 10);
+
+    UpstoxTokenInfo fetch_upstox_token_status();
+    bool save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at);
 
 private:
     std::shared_ptr<MySQLConnectionPool> pool_;
