@@ -10,6 +10,7 @@
 #include "../src/engine/gate4_gap_taxonomy.hpp"
 #include "../src/engine/gate5_ofi_microprice.hpp"
 #include "../src/engine/gate6_volume_profile.hpp"
+#include "../src/engine/gate7_gex_options.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -542,6 +543,75 @@ void run_solid_and_acid_test_suite() {
         VolumeProfileMetrics m = vp_engine.compute_profile("NIFTY", base_ms, 24320.0, 24280.0);
 
         TEST("Gate G6-02: Failed-auction detection + value migration tracked accurately", m.migration_state == ValueMigrationState::OVERLAPPING_LOW && m.failed_auction_type == FailedAuctionType::FAILED_BREAKOUT_BELOW_VAL && m.failed_auction_confidence > 0.8);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 11: GATE 7 GAMMA EXPOSURE (GEX) & OPTION CHAIN DYNAMICS
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 11: Gate 7 Gamma Exposure (GEX) & Option Chain Dynamics ---\n";
+
+    // Item G7-01: Native Black-Scholes Greeks & Broker Greek discrepancy detection
+    {
+        // Compute native Greeks for ATM Call (S=24300, K=24300, T=7/365, r=6.5%, sigma=15%)
+        OptionGreeks native_g = BlackScholesEngine::calculate_greeks(true, 24300.0, 24300.0, 7.0 / 365.0, 0.065, 0.15);
+
+        // Positive test: Native Delta ~ 0.51, Vega > 0
+        TEST("Gate G7-01: Native Black-Scholes analytical Greeks calculated accurately", native_g.delta > 0.50 && native_g.delta < 0.55 && native_g.gamma > 0.0 && native_g.vega > 0.0);
+
+        // Mismatched broker Greeks (deliberately skewed delta=0.75)
+        BrokerGreekComparison comp = BlackScholesEngine::verify_broker_greeks(native_g, 0.75, native_g.vega);
+
+        TEST("Gate G7-01: Broker-Greek discrepancy flag fires on deliberately mismatched test case", comp.has_discrepancy && comp.discrepancy_reason.find("FLAG_BROKER_GREEK_DISCREPANCY") != std::string::npos);
+    }
+
+    // Item G7-02: IV-RV spread, IV surface skew & term structure
+    {
+        OptionChainGEXEngine gex_engine(0.065);
+        uint64_t base_ms = 1727443800000ULL;
+
+        std::vector<OptionContractData> chain;
+        // ATM Call & Put
+        chain.push_back({24300.0, true, 120.0, 10000.0, 0.16, 7.0 / 365.0});
+        chain.push_back({24300.0, false, 110.0, 12000.0, 0.16, 7.0 / 365.0});
+        // 25D OTM Put (K=24000) & Call (K=24600)
+        chain.push_back({24000.0, false, 45.0, 20000.0, 0.20, 7.0 / 365.0});
+        chain.push_back({24600.0, true, 40.0, 15000.0, 0.15, 7.0 / 365.0});
+
+        OptionChainGEXMetrics m = gex_engine.compute_chain_metrics("NIFTY", base_ms, 24300.0, 0.12, chain);
+
+        TEST("Gate G7-02: IV-RV spread, surface skew, & term-structure calculated reproducibly", std::abs(m.iv_rv_spread - 0.04) < 0.001 && m.vol_skew_25d > 0.0);
+    }
+
+    // Item G7-03: GEX / Gamma Flip calculation with explicit assumption record
+    {
+        OptionChainGEXEngine gex_engine(0.065);
+        uint64_t base_ms = 1727443800000ULL;
+
+        std::vector<OptionContractData> chain;
+        chain.push_back({24300.0, true, 120.0, 50000.0, 0.15, 7.0 / 365.0});
+        chain.push_back({24300.0, false, 110.0, 20000.0, 0.15, 7.0 / 365.0});
+
+        OptionChainGEXMetrics m = gex_engine.compute_chain_metrics("NIFTY", base_ms, 24300.0, 0.12, chain);
+
+        TEST("Gate G7-03: Net GEX & Gamma Flip computed carrying explicit assumption record", m.net_gex > 0.0 && m.gamma_flip_level > 0.0 && m.assumption_record.confidence_score == 0.85 && m.assumption_record.dealer_positioning_assumption == "DEALERS_LONG_CALLS_SHORT_PUTS");
+    }
+
+    // Item G7-04: High IV selling safety rule ("High IV = sell" is NEVER a universal rule)
+    {
+        OptionChainGEXEngine gex_engine(0.065);
+        uint64_t base_ms = 1727443800000ULL;
+
+        std::vector<OptionContractData> chain;
+        // High IV (45%) contracts
+        chain.push_back({24300.0, true, 350.0, 10000.0, 0.45, 7.0 / 365.0});
+
+        // Test 1: During earnings event, high IV selling MUST be rejected for jump risk
+        OptionChainGEXMetrics m_earnings = gex_engine.compute_chain_metrics("NIFTY", base_ms, 24300.0, 0.12, chain, true);
+
+        // Test 2: Normal session, high IV selling approved if IV-RV spread > 5%
+        OptionChainGEXMetrics m_normal = gex_engine.compute_chain_metrics("NIFTY", base_ms, 24300.0, 0.12, chain, false);
+
+        TEST("Gate G7-04: High IV selling rule blocks selling on earnings jump risk while allowing safe high IV spread", !m_earnings.high_iv_sell_approved && m_earnings.high_iv_rejection_reason.find("REJECT_UNSAFE_JUMP_RISK_HIGH_IV") != std::string::npos && m_normal.high_iv_sell_approved);
     }
 
     std::cout << "===================================================================\n";
