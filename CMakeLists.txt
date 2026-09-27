@@ -9,10 +9,17 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -Wextra -pthread -fstack-protector-strong
 
 include_directories(src)
 
-file(GLOB_RECURSE SOURCES "src/*.cpp")
+file(GLOB_RECURSE ENGINE_SOURCES "src/engine/*.cpp" "src/roadmap/*.cpp" "src/common/*.cpp")
 
-add_executable(cpp-trading-agent ${SOURCES})
-
+# Main Executable Target
+add_executable(cpp-trading-agent src/main.cpp ${ENGINE_SOURCES})
 target_link_libraries(cpp-trading-agent PRIVATE pthread mysqlclient)
 
-message(STATUS "C++ Trading Agent Target Built Successfully")
+# Test Suite Executable Target
+enable_testing()
+add_executable(unit_and_integration_tests tests/unit_and_integration_tests.cpp ${ENGINE_SOURCES})
+target_link_libraries(unit_and_integration_tests PRIVATE pthread mysqlclient)
+
+add_test(NAME SOLID_ACID_TestSuite COMMAND unit_and_integration_tests)
+
+message(STATUS "C++ Trading Agent & SOLID/ACID Test Suite Built Successfully")
