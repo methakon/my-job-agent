@@ -15,6 +15,7 @@
 #include "../src/engine/gate9_fill_sim_stress.hpp"
 #include "../src/engine/gate10_regime_machine.hpp"
 #include "../src/engine/gate11_strategy_taxonomy.hpp"
+#include "../src/engine/gate12_ml_pipeline.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -795,6 +796,45 @@ void run_solid_and_acid_test_suite() {
         TEST("Gate G11-02: P1 Strategy marked shadow-mode only without affecting production", p1_gamma && p1_gamma->is_shadow_only);
         TEST("Gate G11-03: P2 Strategy gated pending baseline-plateau evidence while allowed once proven", p2_unproven && p2_unproven->is_gated_pending_evidence && p2_proven && !p2_proven->is_gated_pending_evidence);
         TEST("Gate G11-04: Market making strategy strictly excluded from V1 production execution", mm_excluded && mm_excluded->is_excluded_from_v1 && mm_excluded->action == StrategyAction::NO_ACTION);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 16: GATE 12 ML PIPELINES & MULTI-HORIZON LEAKAGE GUARD
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 16: Gate 12 ML Pipelines & Multi-Horizon Leakage Guard ---\n";
+
+    // Item G12-01 & G12-02: Point-in-Time integrity & Multi-Horizon Labels
+    {
+        uint64_t snapshot_ms = 1727443800000ULL;
+
+        // Valid past tick (10s before snapshot)
+        bool past_ok = MLFeaturePipelineEngine::verify_point_in_time_integrity(snapshot_ms, snapshot_ms - 10000);
+        // Future tick (5s after snapshot) -> Leak violation!
+        bool future_fail = MLFeaturePipelineEngine::verify_point_in_time_integrity(snapshot_ms, snapshot_ms + 5000);
+
+        TEST("Gate G12-01: Point-in-time feature reconstruction verifies timestamp barrier", past_ok && !future_fail);
+
+        // Build price series for 5m, 15m, 30m multi-horizon label calculation
+        std::vector<std::pair<uint64_t, double>> series;
+        series.push_back({snapshot_ms, 24300.0});
+        series.push_back({snapshot_ms + (5 * 60 * 1000), 24380.0});  // +0.33% => label_5m = +1
+        series.push_back({snapshot_ms + (15 * 60 * 1000), 24400.0}); // +0.41% => label_15m = +1
+        series.push_back({snapshot_ms + (30 * 60 * 1000), 24200.0}); // -0.41% => label_30m = -1
+
+        MultiHorizonLabel lbls = MLFeaturePipelineEngine::compute_multi_horizon_labels(series, 0, 0.002);
+
+        TEST("Gate G12-02: Multi-horizon labels (5m/15m/30m) computed with leakage control", lbls.label_5m == 1 && lbls.label_15m == 1 && lbls.label_30m == -1);
+    }
+
+    // Item G12-03 & G12-04: Baseline vs Tree Model Comparison & Approval Gate
+    {
+        // Case A: Leakage test passed & Tree Model achieves +8.7% lift over simple baseline
+        BaselineComparisonRecord rec_pass = MLFeaturePipelineEngine::evaluate_baseline_vs_tree_model(true, 0.525, 0.612);
+
+        // Case B: Leakage test failed -> Tree model MUST be rejected
+        BaselineComparisonRecord rec_fail = MLFeaturePipelineEngine::evaluate_baseline_vs_tree_model(false, 0.525, 0.612);
+
+        TEST("Gate G12-03 & G12-04: Tree model approved only after passing leakage test and proving >5% accuracy lift", rec_pass.tree_model_approved && !rec_fail.tree_model_approved && rec_pass.accuracy_lift >= 0.05);
     }
 
     std::cout << "===================================================================\n";
