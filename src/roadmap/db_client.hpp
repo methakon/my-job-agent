@@ -118,6 +118,8 @@ struct UpstoxTokenInfo {
     bool is_valid = false;
 };
 
+typedef UpstoxTokenInfo BrokerTokenInfo;
+
 class RoadmapDbClient {
 public:
     RoadmapDbClient(std::string host, int port, std::string user, std::string password, std::string db_name);
@@ -137,6 +139,9 @@ public:
 
     UpstoxTokenInfo fetch_upstox_token_status();
     bool save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at);
+
+    BrokerTokenInfo fetch_broker_token_status(const std::string& provider);
+    bool save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at);
 
 private:
     std::shared_ptr<MySQLConnectionPool> pool_;

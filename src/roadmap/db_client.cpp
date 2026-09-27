@@ -367,13 +367,15 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
     return trades;
 }
 
-UpstoxTokenInfo RoadmapDbClient::fetch_upstox_token_status() {
-    UpstoxTokenInfo info;
+BrokerTokenInfo RoadmapDbClient::fetch_broker_token_status(const std::string& provider) {
+    BrokerTokenInfo info;
+    info.provider = provider;
     MYSQL* conn = pool_->acquire();
     if (!conn) return info;
 
-    const char* query = "SELECT clientId, status, IFNULL(expiresAt,''), IFNULL(issuedAt,'') FROM provider_tokens WHERE provider = 'upstox' ORDER BY issuedAt DESC LIMIT 1;";
-    if (mysql_query(conn, query) == 0) {
+    std::string safe_prov = escape_string(conn, provider);
+    std::string query = "SELECT clientId, status, IFNULL(expiresAt,''), IFNULL(issuedAt,'') FROM provider_tokens WHERE provider = '" + safe_prov + "' ORDER BY issuedAt DESC LIMIT 1;";
+    if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
             MYSQL_ROW row = mysql_fetch_row(res);
@@ -382,7 +384,7 @@ UpstoxTokenInfo RoadmapDbClient::fetch_upstox_token_status() {
                 info.status = row[1] ? row[1] : "EXPIRED";
                 info.expires_at = row[2] ? row[2] : "";
                 info.issued_at = row[3] ? row[3] : "";
-                info.is_valid = (info.status == "active" || info.status == "TOKEN_VALID");
+                info.is_valid = (info.status == "active" || info.status == "TOKEN_VALID" || info.status == "ACTIVE");
             }
             mysql_free_result(res);
         }
@@ -391,24 +393,33 @@ UpstoxTokenInfo RoadmapDbClient::fetch_upstox_token_status() {
     return info;
 }
 
-bool RoadmapDbClient::save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at) {
+bool RoadmapDbClient::save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at) {
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
 
     TransactionGuard tx(conn);
+    std::string safe_prov = escape_string(conn, provider);
     std::string safe_token = escape_string(conn, token);
     std::string safe_cid = escape_string(conn, client_id);
     std::string safe_exp = escape_string(conn, expires_at);
 
     std::string query = "INSERT INTO provider_tokens (id, provider, environment, clientId, accessTokenEncrypted, status, issuedAt, expiresAt) "
-                        "VALUES (UUID(), 'upstox', 'live', '" + safe_cid + "', '" + safe_token + "', 'active', NOW(), '" + safe_exp + "');";
+                        "VALUES (UUID(), '" + safe_prov + "', 'live', '" + safe_cid + "', '" + safe_token + "', 'active', NOW(), '" + safe_exp + "');";
 
     if (mysql_query(conn, query.c_str()) != 0) {
-        std::cerr << "❌ [RoadmapDbClient] save_upstox_token error: " << mysql_error(conn) << "\n";
+        std::cerr << "❌ [RoadmapDbClient] save_broker_access_token error: " << mysql_error(conn) << "\n";
         return false;
     }
 
     bool ok = tx.commit();
     pool_->release(conn);
     return ok;
+}
+
+UpstoxTokenInfo RoadmapDbClient::fetch_upstox_token_status() {
+    return fetch_broker_token_status("upstox");
+}
+
+bool RoadmapDbClient::save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at) {
+    return save_broker_access_token("upstox", token, client_id, expires_at);
 }
