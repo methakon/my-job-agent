@@ -14,6 +14,7 @@
 #include "../src/engine/gate8_stat_arb.hpp"
 #include "../src/engine/gate9_fill_sim_stress.hpp"
 #include "../src/engine/gate10_regime_machine.hpp"
+#include "../src/engine/gate11_strategy_taxonomy.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -748,6 +749,52 @@ void run_solid_and_acid_test_suite() {
         RegimeSkillPerformance perf = machine.get_regime_performance(MarketRegime::CHOPPY_HIGH_NOISE);
 
         TEST("Gate G10-02 & G10-03: Per-regime skill performance measured and HARD VETO triggers once sample size satisfied", perf.trade_count == 35 && perf.win_rate == 0.0 && veto_hard.veto_active && !veto_hard.shadow_mode);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 15: GATE 11 STRATEGY TAXONOMY & PRIORITY LEVELS (P0/P1/P2/EXCLUDED)
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 15: Gate 11 Strategy Taxonomy & Priority Levels ---\n";
+
+    // Item G11-01, G11-02, G11-03, G11-04: Strategy Evaluation & Priority Gating
+    {
+        StrategyTaxonomyEngine taxonomy;
+
+        // Register P0, P1, P2 (unproven), P2 (proven), and Market Maker (excluded)
+        taxonomy.register_strategy(std::make_shared<GapFadeP0Strategy>());
+        taxonomy.register_strategy(std::make_shared<GammaScalpP1Strategy>());
+        taxonomy.register_strategy(std::make_shared<CalendarSpreadP2Strategy>(false, "")); // Unproven P2
+        taxonomy.register_strategy(std::make_shared<CalendarSpreadP2Strategy>(true, "EXP-PLATEAU-2026-09")); // Proven P2
+        taxonomy.register_strategy(std::make_shared<HFTMarketMakerStrategy>());
+
+        StrategyInput input;
+        input.symbol = "NIFTY";
+        input.open_price = 24400.0;
+        input.prev_close = 24300.0; // 100pt Gap Up
+        input.atr_14 = 150.0;
+        input.relative_volume = 1.5;
+
+        std::vector<StrategyProposal> proposals = taxonomy.evaluate_all(input);
+
+        // Find individual strategy proposals
+        const StrategyProposal* p0_gap = nullptr;
+        const StrategyProposal* p1_gamma = nullptr;
+        const StrategyProposal* p2_unproven = nullptr;
+        const StrategyProposal* p2_proven = nullptr;
+        const StrategyProposal* mm_excluded = nullptr;
+
+        for (const auto& p : proposals) {
+            if (p.strategy_name == "GapFadeP0Strategy") p0_gap = &p;
+            if (p.strategy_name == "GammaScalpP1Strategy") p1_gamma = &p;
+            if (p.strategy_name == "CalendarSpreadP2Strategy" && p.is_gated_pending_evidence) p2_unproven = &p;
+            if (p.strategy_name == "CalendarSpreadP2Strategy" && !p.is_gated_pending_evidence) p2_proven = &p;
+            if (p.strategy_name == "HFTMarketMakerStrategy") mm_excluded = &p;
+        }
+
+        TEST("Gate G11-01: P0 Core Gap Fade Strategy generates valid trade proposal", p0_gap && p0_gap->action == StrategyAction::SELL_CALL_FADE && p0_gap->confidence_score >= 0.85);
+        TEST("Gate G11-02: P1 Strategy marked shadow-mode only without affecting production", p1_gamma && p1_gamma->is_shadow_only);
+        TEST("Gate G11-03: P2 Strategy gated pending baseline-plateau evidence while allowed once proven", p2_unproven && p2_unproven->is_gated_pending_evidence && p2_proven && !p2_proven->is_gated_pending_evidence);
+        TEST("Gate G11-04: Market making strategy strictly excluded from V1 production execution", mm_excluded && mm_excluded->is_excluded_from_v1 && mm_excluded->action == StrategyAction::NO_ACTION);
     }
 
     std::cout << "===================================================================\n";
