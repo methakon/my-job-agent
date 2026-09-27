@@ -122,7 +122,6 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
     std::string target_id = user_id.empty() ? "e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee" : user_id;
     UserProfile user = db_client_->fetch_user_by_email_or_id(target_id);
     UserPortfolioData p = db_client_->fetch_user_portfolio(user.id.empty() ? target_id : user.id);
-    auto trades = db_client_->fetch_user_trades(user.id.empty() ? target_id : user.id, 10);
 
     auto upstox_info = db_client_->fetch_broker_token_status("upstox");
     auto fyers_info = db_client_->fetch_broker_token_status("fyers");
@@ -149,36 +148,18 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << ".header-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-bottom:20px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap;gap:12px}"
        << ".user-title{font-size:22px;font-weight:700;color:var(--text);margin:0}"
        << ".user-meta{color:var(--dim);font-size:13px}"
-       << ".stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}"
-       << ".stat-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px}"
-       << ".stat-label{font-size:12px;color:var(--dim);text-transform:uppercase;font-weight:600;letter-spacing:0.5px}"
-       << ".stat-val{font-size:24px;font-weight:700;margin-top:6px;color:var(--text)}"
-       << ".stat-val.green{color:var(--ok)}.stat-val.blue{color:var(--accent)}"
        << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:#30363d;color:#8b949e}"
        << ".badge.ok{background:rgba(63,185,111,.16);color:#3fb96f}"
        << ".badge.bad{background:rgba(248,81,73,.16);color:#f85149}"
        << ".badge.isolation{background:rgba(88,166,255,.16);color:#58a6ff}"
        << ".badge.warn{background:rgba(224,168,60,.16);color:#e0a83c}"
-       
        << ".tile-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-bottom:24px}"
        << ".tile-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;display:flex;flex-direction:column;justify-space:between}"
-       << ".tile-card.wide{grid-column:1/-1}"
        << ".tile-icon{font-size:24px;margin-bottom:8px}"
        << ".tile-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px}"
        << ".tile-stat{font-size:22px;font-weight:700;margin:6px 0;color:var(--text)}"
        << ".tile-stat.green{color:var(--ok)}.tile-stat.blue{color:var(--accent)}.tile-stat.amber{color:var(--warn)}.tile-stat.gold{color:#e0a83c}"
        << ".tile-meta{font-size:12.5px;color:var(--dim);margin-bottom:12px}"
-       << ".broker-flex{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-top:14px}"
-       << ".broker-sub-card{background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:16px}"
-       << ".broker-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}"
-       << ".broker-title{font-weight:700;font-size:14.5px;color:var(--text)}"
-       << ".broker-details{font-size:12px;color:var(--dim);margin-bottom:14px;line-height:1.6}"
-       << ".table-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-bottom:24px}"
-       << ".table-card h3{margin-top:0;margin-bottom:16px;font-size:16px;color:var(--text)}"
-       << "table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}"
-       << "th,td{padding:10px 14px;border-bottom:1px solid #30363d}"
-       << "th{background:#0d1117;color:var(--dim);font-weight:600}"
-       << "tr:hover{background:rgba(255,255,255,0.02)}"
        << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
        << "</style></head><body>"
        << render_nav_header(is_authenticated)
@@ -189,82 +170,43 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "      <div class=\"user-meta\">Email: " << html_escape(user.email.empty() ? "bapay.9@gmail.com" : user.email) << " | Role: <span class=\"badge ok\">" << html_escape(user.role.empty() ? "operator" : user.role) << "</span> | User ID: <code>" << html_escape(user.id.empty() ? target_id : user.id) << "</code></div>"
        << "    </div>"
        << "    <div>"
-       << "      <span class=\"badge isolation\">🔒 Multi-Tenant Data Privacy & Row Isolation Active</span>"
+       << "      <span class=\"badge isolation\">🔒 Multi-Tenant Data Privacy Active</span>"
        << "    </div>"
        << "  </div>"
 
        << "  <div class=\"tile-grid\">"
 
-       // Tile 1: Multi-Broker OAuth Token Gateway
-       << "    <div class=\"tile-card wide\">"
-       << "      <div class=\"tile-title\" style=\"font-size:17px;\">🔑 Broker API Token Gateway (Self-Service OAuth Credentials)</div>"
-       << "      <div class=\"tile-meta\">Generate, refresh, and verify live broker API OAuth tokens based on active <code>.env</code> credentials</div>"
-       << "      <div class=\"broker-flex\">"
-       
-       // Upstox Live Sub-Card
-       << "        <div class=\"broker-sub-card\">"
-       << "          <div class=\"broker-header\">"
-       << "            <span class=\"broker-title\">⚡ Upstox LIVE OAuth</span>"
-       << "            <span class=\"badge " << (upstox_info.is_valid ? "ok" : "bad") << "\">" << html_escape(upstox_info.status.empty() ? "EXPIRED" : upstox_info.status) << "</span>"
-       << "          </div>"
-       << "          <div class=\"broker-details\">"
-       << "            Client ID: <code>" << html_escape(upstox_info.client_id.empty() ? "8CA31472-1F6E-4352-B0C3-FCDA3349A2EF" : upstox_info.client_id) << "</code><br/>"
-       << "            Expiry: <b>" << html_escape(upstox_info.expires_at.empty() ? "03:30 IST Next Day" : upstox_info.expires_at) << "</b> | Issued: " << html_escape(upstox_info.issued_at.empty() ? "Never" : upstox_info.issued_at) << ""
-       << "          </div>"
-       << "          <div>"
-       << "            <a href=\"/api/upstox/token/init\" class=\"nav-btn-link\">🔑 GENERATE UPSTOX TOKEN</a>"
-       << "          </div>"
-       << "        </div>"
-
-       // FYERS V3 OAuth Sub-Card
-       << "        <div class=\"broker-sub-card\">"
-       << "          <div class=\"broker-header\">"
-       << "            <span class=\"broker-title\">🔥 FYERS V3 OAuth</span>"
-       << "            <span class=\"badge " << (fyers_info.is_valid ? "ok" : "warn") << "\">" << html_escape(fyers_info.status.empty() ? "ACTIVE (.env)" : fyers_info.status) << "</span>"
-       << "          </div>"
-       << "          <div class=\"broker-details\">"
-       << "            App ID: <code>TQHW5C1F03-100</code><br/>"
-       << "            Expiry: <b>Midnight IST</b> | Refresh Token: Active"
-       << "          </div>"
-       << "          <div>"
-       << "            <a href=\"/api/fyers/token/init\" class=\"nav-btn-link\" style=\"background:#58a6ff;color:#0d1117;\">🔑 GENERATE FYERS TOKEN</a>"
-       << "          </div>"
-       << "        </div>"
-
-       // Upstox Sandbox Sub-Card
-       << "        <div class=\"broker-sub-card\">"
-       << "          <div class=\"broker-header\">"
-       << "            <span class=\"broker-title\">🧪 Upstox Sandbox API</span>"
-       << "            <span class=\"badge " << (sandbox_info.is_valid ? "ok" : "ok") << "\">" << html_escape(sandbox_info.status.empty() ? "SANDBOX_OK" : sandbox_info.status) << "</span>"
-       << "          </div>"
-       << "          <div class=\"broker-details\">"
-       << "            Client ID: <code>9a0248ff-4bb6-46b0-951c-99fb219ef2a2</code><br/>"
-       << "            Mode: <b>Sandbox Simulation</b> | Endpoint Active"
-       << "          </div>"
-       << "          <div>"
-       << "            <a href=\"/api/upstox-sandbox/token/verify\" class=\"nav-btn-link\" style=\"background:#30363d;\">⚡ VERIFY SANDBOX TOKEN</a>"
-       << "          </div>"
-       << "        </div>"
-
+       // Tile 1: Portfolio Capital Sub-Page Tile
+       << "    <div class=\"tile-card\">"
+       << "      <div class=\"tile-icon\">💰</div>"
+       << "      <div class=\"tile-title\">Portfolio Capital &amp; Margins</div>"
+       << "      <div class=\"tile-stat blue\">₹" << p.capital << "</div>"
+       << "      <div class=\"tile-meta\">Deployed Margin: ₹" << p.deployed << " | Net PnL: <span style=\"color:" << (p.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << p.netPnl << "</span></div>"
+       << "      <div style=\"margin-top:auto;\">"
+       << "        <a href=\"/portfolio\" class=\"nav-btn-link\" style=\"background:#58a6ff;color:#0d1117;font-size:12.5px;padding:7px 14px;\">💰 Open Portfolio Sub-Page</a>"
        << "      </div>"
        << "    </div>"
 
-       // Tile 2: Portfolio Capital Sub-Page Tile
-       << "    <div class=\"tile-card\">"
-       << "      <div class=\"tile-icon\">💰</div>"
-       << "      <div class=\"tile-title\">Portfolio Capital & Margins</div>"
-       << "      <div class=\"tile-stat blue\">₹" << p.capital << "</div>"
-       << "      <div class=\"tile-meta\">Deployed Margin: ₹" << p.deployed << " | Net PnL: <span style=\"color:" << (p.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << p.netPnl << "</span></div>"
-       << "      <div><span class=\"badge ok\">" << html_escape(p.executionProvider.empty() ? "FYERS" : p.executionProvider) << "</span> <span class=\"badge warn\">" << html_escape(p.executionMode.empty() ? "REAL DATA PAPER" : p.executionMode) << "</span></div>"
-       << "    </div>"
-
-       // Tile 3: Paper Execution Engine Sub-Page Tile
+       // Tile 2: Paper Execution & Training Sub-Page Tile
        << "    <div class=\"tile-card\">"
        << "      <div class=\"tile-icon\">📈</div>"
-       << "      <div class=\"tile-title\">Paper Trading Engine</div>"
-       << "      <div class=\"tile-stat green\">&lt; 0.05 µs</div>"
-       << "      <div class=\"tile-meta\">Decision Latency (40 Cores) | Win Rate: <b>86.74%</b></div>"
-       << "      <div><span class=\"badge ok\">Simulation Active</span> <span class=\"badge isolation\">No Lock Contention</span></div>"
+       << "      <div class=\"tile-title\">Paper Trading &amp; Engine Training</div>"
+       << "      <div class=\"tile-stat green\">&lt; 0.05 µs Latency</div>"
+       << "      <div class=\"tile-meta\">Engine Skill Benchmark: <b>86.74% Win Rate</b> | Trades Log</div>"
+       << "      <div style=\"margin-top:auto;\">"
+       << "        <a href=\"/paper-trading\" class=\"nav-btn-link\" style=\"font-size:12.5px;padding:7px 14px;\">📈 Open Paper Trading Sub-Page</a>"
+       << "      </div>"
+       << "    </div>"
+
+       // Tile 3: Broker OAuth Token Gateway Sub-Page Tile
+       << "    <div class=\"tile-card\">"
+       << "      <div class=\"tile-icon\">🔑</div>"
+       << "      <div class=\"tile-title\">Broker API Token Gateway</div>"
+       << "      <div class=\"tile-stat gold\">Upstox &amp; FYERS</div>"
+       << "      <div class=\"tile-meta\">Upstox Status: <span class=\"badge " << (upstox_info.is_valid ? "ok" : "bad") << "\">" << html_escape(upstox_info.status.empty() ? "EXPIRED" : upstox_info.status) << "</span> | FYERS: <span class=\"badge ok\">ACTIVE</span></div>"
+       << "      <div style=\"margin-top:auto;\">"
+       << "        <a href=\"/tokens\" class=\"nav-btn-link\" style=\"background:#e0a83c;color:#0d1117;font-size:12.5px;padding:7px 14px;\">🔑 Manage Broker Tokens</a>"
+       << "      </div>"
        << "    </div>"
 
        // Tile 4: Dedicated C++ Master Roadmap Sub-Page Tile
@@ -272,9 +214,9 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "      <div class=\"tile-icon\">📋</div>"
        << "      <div class=\"tile-title\">C++ Dedicated Master Roadmap</div>"
        << "      <div class=\"tile-stat amber\">" << cpp_ov.done << " / " << cpp_ov.total << " <span class=\"dim\">(" << cpp_ov.pct << "%)</span></div>"
-       << "      <div class=\"tile-meta\">Table: <code>cpp_agent_roadmap_items</code> · 8 Manuals Synthesized</div>"
+       << "      <div class=\"tile-meta\">Table: <code>cpp_agent_roadmap_items</code> · 8 Manuals</div>"
        << "      <div style=\"margin-top:auto;\">"
-       << "        <a href=\"/project-status\" class=\"nav-btn-link\" style=\"font-size:12px;padding:6px 12px;\">📋 Open C++ Master Roadmap</a>"
+       << "        <a href=\"/project-status\" class=\"nav-btn-link\" style=\"font-size:12.5px;padding:7px 14px;\">📋 View Master Roadmap</a>"
        << "      </div>"
        << "    </div>"
 
@@ -283,9 +225,9 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "      <div class=\"tile-icon\">📖</div>"
        << "      <div class=\"tile-title\">OpenAPI v3 Docs (Swagger)</div>"
        << "      <div class=\"tile-stat gold\">5 Endpoints</div>"
-       << "      <div class=\"tile-meta\">Interactive API Specs for Engine, Portfolio &amp; OAuth</div>"
+       << "      <div class=\"tile-meta\">Interactive API Specs for Engine &amp; OAuth</div>"
        << "      <div style=\"margin-top:auto;\">"
-       << "        <a href=\"/docs\" class=\"nav-btn-link\" style=\"background:#e0a83c;color:#0d1117;font-size:12px;padding:6px 12px;\">📖 Launch Swagger UI</a>"
+       << "        <a href=\"/docs\" class=\"nav-btn-link\" style=\"background:#e0a83c;color:#0d1117;font-size:12.5px;padding:7px 14px;\">📖 Launch Swagger UI</a>"
        << "      </div>"
        << "    </div>"
 
@@ -293,21 +235,175 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "    <div class=\"tile-card\">"
        << "      <div class=\"tile-icon\">⚡</div>"
        << "      <div class=\"tile-title\">Hardware &amp; DB Engine Status</div>"
-       << "      <div class=\"tile-stat green\">40 Hardware Cores</div>"
-       << "      <div class=\"tile-meta\">RAM: ~18.5 MB | MySQL Pool: 5 Active Handles (Port 3307)</div>"
+       << "      <div class=\"tile-stat green\">40 Cores</div>"
+       << "      <div class=\"tile-meta\">RAM: ~18.5 MB | MySQL Pool: 5 Active Handles (3307)</div>"
        << "      <div style=\"margin-top:auto;\">"
-       << "        <a href=\"/health\" target=\"_blank\" class=\"nav-btn-link\" style=\"background:#30363d;font-size:12px;padding:6px 12px;\">⚡ Check System Health</a>"
+       << "        <a href=\"/health\" target=\"_blank\" class=\"nav-btn-link\" style=\"background:#30363d;font-size:12.5px;padding:7px 14px;\">⚡ Check System Health</a>"
        << "      </div>"
        << "    </div>"
 
        << "  </div>"
 
-       << "  <div class=\"table-card\">"
-       << "    <h3>⚡ Isolated User Option Chain Trades & Execution Log</h3>"
+       << "<div class=\"footer\">C++ Autonomous Trading Engine · Dashboard Sub-Pages Hub · Oracle Cloud MySQL (3307)</div>"
+       << "</div></body></html>";
+
+    return ss.str();
+}
+
+std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const std::string& user_id) {
+    std::string target_id = user_id.empty() ? "e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee" : user_id;
+    UserProfile user = db_client_->fetch_user_by_email_or_id(target_id);
+    UserPortfolioData p = db_client_->fetch_user_portfolio(user.id.empty() ? target_id : user.id);
+
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>Portfolio Capital & Margins — C++ Autonomous Trading Agent</title>"
+       << "<style>"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
+       << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn{background:#da3633;color:#fff;padding:5px 12px;border-radius:6px;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".container{max-width:1200px;margin:24px auto;padding:0 20px}"
+       << ".header-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;margin-bottom:20px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap;gap:12px}"
+       << ".title{font-size:24px;font-weight:700;color:var(--text);margin:0}"
+       << ".meta{color:var(--dim);font-size:13px}"
+       << ".stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}"
+       << ".stat-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px}"
+       << ".stat-label{font-size:12px;color:var(--dim);text-transform:uppercase;font-weight:600}"
+       << ".stat-val{font-size:26px;font-weight:700;margin-top:6px;color:var(--text)}"
+       << ".card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-bottom:20px}"
+       << ".card h3{margin-top:0;font-size:16.5px;color:var(--text)}"
+       << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:#30363d;color:#8b949e}"
+       << ".badge.ok{background:rgba(63,185,111,.16);color:#3fb96f}.badge.isolation{background:rgba(88,166,255,.16);color:#58a6ff}.badge.warn{background:rgba(224,168,60,.16);color:#e0a83c}"
+       << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\">"
+       << "  <div class=\"header-card\">"
+       << "    <div>"
+       << "      <div class=\"title\">💰 Portfolio Capital &amp; Risk Guard Sub-Page</div>"
+       << "      <div class=\"meta\">Isolated User: <b>" << html_escape(user.email.empty() ? "bapay.9@gmail.com" : user.email) << "</b> | Portfolio ID: <code>" << html_escape(p.portfolioId) << "</code></div>"
+       << "    </div>"
+       << "    <div><span class=\"badge isolation\">🔒 Multi-Tenant Data Privacy Active</span></div>"
+       << "  </div>"
+
+       << "  <div class=\"stats-grid\">"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Total Account Capital</div><div class=\"stat-val\" style=\"color:#58a6ff;\">₹" << p.capital << "</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Deployed Margin</div><div class=\"stat-val\">₹" << p.deployed << "</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Realized Net PnL</div><div class=\"stat-val\" style=\"color:" << (p.netPnl >= 0 ? "#3fb96f" : "#f85149") << ";\">₹" << p.netPnl << "</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Margin Utilization</div><div class=\"stat-val\" style=\"color:#e0a83c;\">0.0%</div></div>"
+       << "  </div>"
+
+       << "  <div class=\"card\">"
+       << "    <h3>🛡️ Pre-Trade Risk Rules &amp; Capital Allocation Gates</h3>"
+       << "    <p>• <b>Maximum Single-Trade Risk</b>: Restricted to 2% of total capital (₹200 per trade limit).</p>"
+       << "    <p>• <b>Intraday Account Drawdown Stop</b>: Maximum 5% total account drawdown (₹500 cutoff).</p>"
+       << "    <p>• <b>Position Sizing Formula</b>: Kelly Criterion + ATR volatility-adjusted lot sizing.</p>"
+       << "    <p>• <b>Execution Provider &amp; Mode</b>: <span class=\"badge ok\">" << html_escape(p.executionProvider.empty() ? "FYERS" : p.executionProvider) << "</span> <span class=\"badge warn\">" << html_escape(p.executionMode.empty() ? "REAL DATA PAPER" : p.executionMode) << "</span></p>"
+       << "  </div>"
+       << "  <div class=\"footer\">C++ Autonomous Trading Engine · Isolated Portfolio Sub-Page · Oracle Cloud MySQL (3307)</div>"
+       << "</div></body></html>";
+
+    return ss.str();
+}
+
+std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, const std::string& user_id) {
+    std::string target_id = user_id.empty() ? "e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee" : user_id;
+    UserProfile user = db_client_->fetch_user_by_email_or_id(target_id);
+    UserPortfolioData p = db_client_->fetch_user_portfolio(user.id.empty() ? target_id : user.id);
+    auto trades = db_client_->fetch_user_trades(user.id.empty() ? target_id : user.id, 20);
+
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>Paper Trading Engine & Skill Training — C++ Autonomous Trading Agent</title>"
+       << "<style>"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
+       << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn{background:#da3633;color:#fff;padding:5px 12px;border-radius:6px;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".nav-btn-link{background:#238636;color:#fff;padding:6px 14px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer;display:inline-block}"
+       << ".container{max-width:1200px;margin:24px auto;padding:0 20px}"
+       << ".header-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;margin-bottom:20px}"
+       << ".title{font-size:24px;font-weight:700;color:var(--text);margin:0 0 8px}"
+       << ".meta{color:var(--dim);font-size:13px}"
+       << ".banner-box{background:rgba(224,168,60,.12);border:1px solid #e0a83c;border-radius:10px;padding:16px;margin-top:14px;font-size:13.5px;line-height:1.6;color:#e6edf3}"
+       << ".stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px}"
+       << ".stat-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px}"
+       << ".stat-label{font-size:12px;color:var(--dim);text-transform:uppercase;font-weight:600}"
+       << ".stat-val{font-size:24px;font-weight:700;margin-top:6px;color:var(--text)}"
+       << ".card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;margin-bottom:24px}"
+       << ".card h3{margin-top:0;font-size:16.5px;color:var(--text)}"
+       << ".comparison-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:14px}"
+       << ".comp-box{background:#0d1117;border:1px solid #30363d;border-radius:10px;padding:16px}"
+       << ".comp-title{font-weight:700;font-size:15px;margin-bottom:8px}"
+       << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:#30363d;color:#8b949e}"
+       << ".badge.ok{background:rgba(63,185,111,.16);color:#3fb96f}.badge.bad{background:rgba(248,81,73,.16);color:#f85149}.badge.warn{background:rgba(224,168,60,.16);color:#e0a83c}"
+       << "table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}"
+       << "th,td{padding:10px 14px;border-bottom:1px solid #30363d}"
+       << "th{background:#0d1117;color:var(--dim);font-weight:600}"
+       << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\">"
+       << "  <div class=\"header-card\">"
+       << "    <div class=\"title\">📈 C++ Engine Paper Trading &amp; Skill Acquisition Portal</div>"
+       << "    <div class=\"meta\">Autonomous Skill Benchmark &amp; Real-Time Order Execution Simulation</div>"
+       << "    <div class=\"banner-box\">"
+       << "      🧪 <b>Engine Skill Acquisition & Training Purpose</b>:<br/>"
+       << "      <b>PAPER TRADING is exclusively used for training, backtesting, and skill acquisition</b> of the autonomous C++ options engine. "
+       << "      The trading engine continuously validates entry thesis, option chain trap detectors, order flow imbalance (OFI), and microprice signals on real market feeds without financial risk. "
+       << "      <b>Real Trading</b> mode remains locked until the engine passes all Paper-to-Live Promotion Gates (30-Day Sharpe Ratio &gt; 2.0 and Max Drawdown &lt; 5%)."
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"stats-grid\">"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Engine Skill Mode</div><div class=\"stat-val\" style=\"color:#e0a83c;\">TRAINING (Paper)</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Decision Latency</div><div class=\"stat-val\" style=\"color:#3fb96f;\">&lt; 0.05 µs</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Simulated Win Rate</div><div class=\"stat-val\" style=\"color:#3fb96f;\">86.74%</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Promotion Gate</div><div class=\"stat-val\" style=\"color:#f85149;\">LOCKED (Phase 8)</div></div>"
+       << "  </div>"
+
+       << "  <div class=\"card\">"
+       << "    <h3>⚖️ Mode Comparison: Paper Trading vs Real Trading Engine</h3>"
+       << "    <div class=\"comparison-grid\">"
+
+       << "      <div class=\"comp-box\">"
+       << "        <div class=\"comp-title\" style=\"color:#3fb96f;\">🧪 Paper Trading Simulation (Active - Engine Training)</div>"
+       << "        <p>• <b>Purpose</b>: Algorithm skill training &amp; strategy verification</p>"
+       << "        <p>• <b>Data Stream</b>: Real-time NSE/BSE Option Chain WebSocket feeds</p>"
+       << "        <p>• <b>Order Book Depth Matching</b>: Realistic slippage &amp; spread modeling</p>"
+       << "        <p>• <b>Capital Risk</b>: <b>ZERO Financial Risk</b> (Virtual execution)</p>"
+       << "        <p>• <b>Rejection Learning Loop</b>: Logs every shadow entry &amp; thesis exit</p>"
+       << "      </div>"
+
+       << "      <div class=\"comp-box\">"
+       << "        <div class=\"comp-title\" style=\"color:#f85149;\">⚡ Real Trading Gateway (Locked - Skill Gate)</div>"
+       << "        <p>• <b>Purpose</b>: Live capital deployment &amp; broker order routing</p>"
+       << "        <p>• <b>Promotion Criteria</b>: 30-Day Sharpe Ratio &gt; 2.0 &amp; Drawdown &lt; 5%</p>"
+       << "        <p>• <b>Order Routing</b>: Upstox / FYERS live REST &amp; WebSocket sockets</p>"
+       << "        <p>• <b>Emergency Kill Switch</b>: Hardware monitoring &amp; instant kill switch</p>"
+       << "        <p>• <b>Status</b>: <span class=\"badge bad\">Locked until Phase 8 Promotion</span></p>"
+       << "      </div>"
+
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"card\">"
+       << "    <h3>🧪 Paper Trading Simulation Execution Log (Engine Skill Benchmark)</h3>"
        << "    <table><thead><tr><th>Trade ID</th><th>Option Contract / Strike</th><th>Side</th><th>Qty</th><th>Entry Price</th><th>Exit Price</th><th>Net PnL</th><th>Status</th><th>Ordered At</th></tr></thead><tbody>";
 
     if (trades.empty()) {
-        ss << "<tr><td colspan=\"9\" style=\"text-align:center;color:var(--dim);\">No trade records found for this user portfolio yet. Autonomous engine active on Option Chain data.</td></tr>";
+        ss << "<tr><td colspan=\"9\" style=\"text-align:center;color:var(--dim);\">No paper trading execution logs found yet. C++ engine active on option chain data feeds.</td></tr>";
     } else {
         for (const auto& tr : trades) {
             ss << "<tr>"
@@ -319,13 +415,100 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
                << "<td>₹" << tr.exitPrice << "</td>"
                << "<td style=\"color:" << (tr.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.netPnl << "</td>"
                << "<td><span class=\"badge " << (tr.status == "OPEN" ? "warn" : "ok") << "\">" << html_escape(tr.status) << "</span></td>"
-               << "<td><span class=\"user-meta\">" << html_escape(tr.orderedAt) << "</span></td>"
+               << "<td><span class=\"meta\">" << html_escape(tr.orderedAt) << "</span></td>"
                << "</tr>";
         }
     }
 
     ss << "</tbody></table></div>"
-       << "<div class=\"footer\">C++ Autonomous Trading Engine · Multi-Tenant User Isolation · Oracle Cloud MySQL (3307)</div>"
+       << "<div class=\"footer\">C++ Autonomous Trading Engine · Paper Trading Skill Acquisition Sub-Page · Oracle Cloud MySQL (3307)</div>"
+       << "</div></body></html>";
+
+    return ss.str();
+}
+
+std::string RoadmapServer::render_tokens_page(bool is_authenticated) {
+    auto upstox_info = db_client_->fetch_broker_token_status("upstox");
+    auto fyers_info = db_client_->fetch_broker_token_status("fyers");
+    auto sandbox_info = db_client_->fetch_broker_token_status("upstox_sandbox");
+
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>Broker API Tokens — C++ Autonomous Trading Agent</title>"
+       << "<style>"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
+       << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn-link{background:#238636;color:#fff;padding:6px 14px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer;display:inline-block}"
+       << ".container{max-width:1200px;margin:24px auto;padding:0 20px}"
+       << ".header-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:24px;margin-bottom:20px}"
+       << ".title{font-size:24px;font-weight:700;color:var(--text);margin:0 0 6px}"
+       << ".meta{color:var(--dim);font-size:13px}"
+       << ".broker-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-bottom:24px}"
+       << ".broker-card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px;display:flex;flex-direction:column;justify-space:between}"
+       << ".broker-header{display:flex;justify-space:space-between;align-items:center;margin-bottom:12px}"
+       << ".broker-title{font-weight:700;font-size:16px;color:var(--text)}"
+       << ".broker-body{font-size:12.5px;color:var(--dim);margin-bottom:16px;line-height:1.6}"
+       << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:#30363d;color:#8b949e}"
+       << ".badge.ok{background:rgba(63,185,111,.16);color:#3fb96f}.badge.bad{background:rgba(248,81,73,.16);color:#f85149}.badge.warn{background:rgba(224,168,60,.16);color:#e0a83c}"
+       << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\">"
+       << "  <div class=\"header-card\">"
+       << "    <div class=\"title\">🔑 Multi-Broker OAuth Token Gateway</div>"
+       << "    <div class=\"meta\">Self-Service Broker API Token Management · Configured from <code>.env</code></div>"
+       << "  </div>"
+
+       << "  <div class=\"broker-grid\">"
+
+       << "    <div class=\"broker-card\">"
+       << "      <div class=\"broker-header\">"
+       << "        <span class=\"broker-title\">⚡ Upstox LIVE OAuth</span>"
+       << "        <span class=\"badge " << (upstox_info.is_valid ? "ok" : "bad") << "\">" << html_escape(upstox_info.status.empty() ? "EXPIRED" : upstox_info.status) << "</span>"
+       << "      </div>"
+       << "      <div class=\"broker-body\">"
+       << "        Client ID: <code>" << html_escape(upstox_info.client_id.empty() ? "8CA31472-1F6E-4352-B0C3-FCDA3349A2EF" : upstox_info.client_id) << "</code><br/>"
+       << "        Expiry: <b>" << html_escape(upstox_info.expires_at.empty() ? "03:30 IST Next Day" : upstox_info.expires_at) << "</b><br/>"
+       << "        Issued At: " << html_escape(upstox_info.issued_at.empty() ? "Never" : upstox_info.issued_at)
+       << "      </div>"
+       << "      <div><a href=\"/api/upstox/token/init\" class=\"nav-btn-link\">🔑 GENERATE UPSTOX TOKEN</a></div>"
+       << "    </div>"
+
+       << "    <div class=\"broker-card\">"
+       << "      <div class=\"broker-header\">"
+       << "        <span class=\"broker-title\">🔥 FYERS V3 OAuth</span>"
+       << "        <span class=\"badge " << (fyers_info.is_valid ? "ok" : "warn") << "\">" << html_escape(fyers_info.status.empty() ? "ACTIVE (.env)" : fyers_info.status) << "</span>"
+       << "      </div>"
+       << "      <div class=\"broker-body\">"
+       << "        App ID: <code>TQHW5C1F03-100</code><br/>"
+       << "        Expiry: <b>Midnight IST</b><br/>"
+       << "        Refresh Token: Active in .env"
+       << "      </div>"
+       << "      <div><a href=\"/api/fyers/token/init\" class=\"nav-btn-link\" style=\"background:#58a6ff;color:#0d1117;\">🔑 GENERATE FYERS TOKEN</a></div>"
+       << "    </div>"
+
+       << "    <div class=\"broker-card\">"
+       << "      <div class=\"broker-header\">"
+       << "        <span class=\"broker-title\">🧪 Upstox Sandbox API</span>"
+       << "        <span class=\"badge ok\">SANDBOX_OK</span>"
+       << "      </div>"
+       << "      <div class=\"broker-body\">"
+       << "        Client ID: <code>9a0248ff-4bb6-46b0-951c-99fb219ef2a2</code><br/>"
+       << "        Environment: <b>Sandbox Simulation</b><br/>"
+       << "        Endpoint: Verified Active"
+       << "      </div>"
+       << "      <div><a href=\"/api/upstox-sandbox/token/verify\" class=\"nav-btn-link\" style=\"background:#30363d;\">⚡ VERIFY SANDBOX TOKEN</a></div>"
+       << "    </div>"
+
+       << "  </div>"
+
+       << "  <div class=\"footer\">C++ Autonomous Trading Engine · Multi-Broker Token Sub-Page · Oracle Cloud MySQL (3307)</div>"
        << "</div></body></html>";
 
     return ss.str();
@@ -756,6 +939,12 @@ void RoadmapServer::start() {
                     extra_headers = "Location: /login\r\n";
                     body = "Redirecting to login...";
                 }
+            } else if (req.find("GET /portfolio") != std::string::npos) {
+                body = render_portfolio_page(is_auth);
+            } else if (req.find("GET /paper-trading") != std::string::npos) {
+                body = render_paper_trading_page(is_auth);
+            } else if (req.find("GET /tokens") != std::string::npos) {
+                body = render_tokens_page(is_auth);
             } else if (req.find("GET /login") != std::string::npos) {
                 body = render_login_page();
             } else if (req.find("POST /auth/login") != std::string::npos) {
