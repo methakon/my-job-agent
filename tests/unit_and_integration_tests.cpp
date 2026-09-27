@@ -18,6 +18,7 @@
 #include "../src/engine/gate12_ml_pipeline.hpp"
 #include "../src/engine/gate13_validation_harness.hpp"
 #include "../src/engine/gate14_risk_reflexion.hpp"
+#include "../src/engine/gate15_experiment_registry.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -906,6 +907,45 @@ void run_solid_and_acid_test_suite() {
         KnowledgeRulePipelineRecord rule_validated = RiskReflexionEngine::evaluate_knowledge_rule_promotion("RULE-002", "Shadow fade on gap > 1.5 ATR", 35, 0.68);
 
         TEST("Gate G14-03 & G14-04: Knowledge pipeline blocks single-trade promotion while approving rules validated on N>=30 trades", !rule_single.is_promoted_to_production && rule_single.status_reason.find("REJECT_INSUFFICIENT_SAMPLE_SIZE_SINGLE_TRADE_PROMOTION_BLOCKED") != std::string::npos && rule_validated.is_promoted_to_production);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 19: GATE 15 EXPERIMENT REGISTRY, CHAMPION/CHALLENGER & ROLLBACK
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 19: Gate 15 Experiment Registry, Champion/Challenger & Rollback ---\n";
+
+    // Item G15-01: Pre-registration of experiments
+    {
+        uint64_t reg_time = 1727443800000ULL;
+        ExperimentRecord exp = ExperimentRegistryEngine::pre_register_experiment("EXP-2026-REG-01", "GapFadeP0Strategy", "Hypothesis: Fade gaps > 1.0 ATR", reg_time);
+
+        TEST("Gate G15-01: Experiment registry pre-registers hypothesis, thresholds & time windows", exp.status == ExperimentStatus::PRE_REGISTERED && exp.min_sharpe_threshold == 1.2 && exp.pnl_improvement_pct_threshold == 0.10);
+    }
+
+    // Item G15-02: Champion vs Challenger promotion protocol
+    {
+        ExperimentRecord challenger_rec;
+        challenger_rec.experiment_id = "CHALLENGER-V2";
+        challenger_rec.champion_id = "CHAMPION-V1";
+
+        // Case A: Challenger underperforms Champion -> PROMOTION BLOCKED
+        ChampionChallengerResult res_fail = ExperimentRegistryEngine::evaluate_champion_challenger(challenger_rec, 1.4, 50000.0, 1.1, 52000.0);
+
+        // Case B: Challenger beats Champion by >10% PnL and Sharpe >= 1.2 -> PROMOTED
+        ChampionChallengerResult res_pass = ExperimentRegistryEngine::evaluate_champion_challenger(challenger_rec, 1.4, 50000.0, 1.6, 62000.0);
+
+        TEST("Gate G15-02: Champion/Challenger protocol blocks underperforming challenger while approving strong candidate", !res_fail.promotion_approved && res_fail.promotion_reason.find("PROMOTION_BLOCKED_CHALLENGER_UNDERPERFORMS_CHAMPION") != std::string::npos && res_pass.promotion_approved);
+    }
+
+    // Item G15-03: Post-deployment Rollback Engine
+    {
+        // Case A: Post-deployment drawdown reaches 18% (>15% limit) -> INSTANT ROLLBACK EXECUTED
+        RollbackResult rb_drawdown = ExperimentRegistryEngine::evaluate_champion_rollback("CHAMPION-V2-FAILED", "CHAMPION-V1-STABLE", 0.18, 1);
+
+        // Case B: Champion healthy (5% drawdown) -> NO ROLLBACK
+        RollbackResult rb_healthy = ExperimentRegistryEngine::evaluate_champion_rollback("CHAMPION-V2-HEALTHY", "CHAMPION-V1-STABLE", 0.05, 0);
+
+        TEST("Gate G15-03: Rollback engine executes instant fallback to previous stable champion on performance decay", rb_drawdown.rollback_executed && rb_drawdown.restored_champion_id == "CHAMPION-V1-STABLE" && !rb_healthy.rollback_executed);
     }
 
     std::cout << "===================================================================\n";
