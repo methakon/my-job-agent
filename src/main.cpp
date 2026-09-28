@@ -4,6 +4,8 @@
 #include "engine/tick_receiver.hpp"
 #include "engine/feature_engine.hpp"
 #include "engine/backtest_engine.hpp"
+#include "engine/gate11_strategy_taxonomy.hpp"
+#include "engine/gate16_risk_limits.hpp"
 #include <iostream>
 #include <memory>
 #include <thread>
@@ -95,8 +97,15 @@ int main(int argc, char* argv[]) {
                     last_active_state = true;
                 }
 
-                // Drain ring buffer ticks, evaluate signals, and execute automated paper trades
+                // Drain ring buffer ticks, evaluate P0 Gap Fade Strategy & Independent Risk Engine, execute paper trades
                 MicrostructureFeatureEngine feature_engine;
+                hermes::GapFadeP0Strategy p0_strategy;
+                hermes::IndependentRiskEngine risk_engine(
+                    EnvLoader::get_double("MAX_PER_TRADE_RISK", 2500.0),
+                    EnvLoader::get_double("MAX_AGGREGATE_CAPITAL", 10000.0),
+                    EnvLoader::get_double("MAX_SESSION_DRAWDOWN", 2500.0)
+                );
+
                 CanonicalOptionTick tick;
                 size_t saved_ticks = 0;
                 while (receiver.get_latest_tick(tick)) {
@@ -104,32 +113,45 @@ int main(int argc, char* argv[]) {
                         saved_ticks++;
 
                         auto feat = feature_engine.process_tick(tick);
-                        if (std::abs(feat.order_flow_imbalance) > 100.0) {
-                            std::string side = (feat.order_flow_imbalance > 0) ? "BUY" : "SELL";
-                            double confidence = 0.85;
-                            std::string symbol = tick.symbol.empty() ? "NIFTY" : tick.symbol;
-                            std::string inst = tick.instrument_key.empty() ? ("NSE:" + symbol) : tick.instrument_key;
+                        
+                        hermes::StrategyInput strat_input;
+                        strat_input.spot_price = tick.ltp > 0 ? tick.ltp : 100.0;
+                        strat_input.open_price = tick.ltp > 0 ? tick.ltp : 100.0;
+                        strat_input.prev_close = (tick.ltp > 0 ? tick.ltp : 100.0) - (feat.order_flow_imbalance * 0.3);
+                        strat_input.relative_volume = std::max(1.0, (double)tick.volume / 1000.0);
+                        strat_input.atr_14 = 50.0;
 
-                            std::string uuid = "dj-" + std::to_string(tick.timestamp_ms);
-                            db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, side + "_CALL", confidence, 0.05, "OFI threshold triggered", "{}");
+                        hermes::StrategyProposal prop = p0_strategy.evaluate(strat_input);
+                        if (prop.action != hermes::StrategyAction::NO_ACTION) {
+                            double proposed_risk = 65.0 * (0.5 * strat_input.atr_14);
+                            auto veto = risk_engine.verify_order_proposal(tick.symbol, proposed_risk, 0.0, 0.0, 0, prop.confidence_score);
 
-                            UserTradeData trade;
-                            trade.id = "cpp-paper-" + std::to_string(tick.timestamp_ms);
-                            trade.instrument = inst;
-                            trade.side = side;
-                            trade.quantity = 65;
-                            trade.entryPrice = tick.ask_price > 0 ? tick.ask_price : (tick.ltp > 0 ? tick.ltp : 100.0);
-                            trade.exitPrice = 0.0;
-                            trade.netPnl = 0.0;
-                            trade.status = "OPEN";
-                            trade.executionProvider = is_upstox_active ? "UPSTOX" : "FYERS";
-                            trade.executionMode = "PAPER";
-                            trade.onRealData = 1;
-                            trade.algoSource = "GapFadeP0Strategy";
+                            if (veto.risk_approved) {
+                                std::string side = (prop.action == hermes::StrategyAction::SELL_CALL_FADE) ? "SELL" : "BUY";
+                                std::string symbol = tick.symbol.empty() ? "NIFTY" : tick.symbol;
+                                std::string inst = tick.instrument_key.empty() ? ("NSE:" + symbol) : tick.instrument_key;
 
-                            if (db_client->create_paper_trade(trade)) {
-                                std::cout << "🚀 [TokenSupervisor] Automated Paper Trade Executed & Persisted to fnf_trades: "
-                                          << trade.id << " (" << trade.instrument << " " << trade.side << " @ ₹" << trade.entryPrice << ")\n";
+                                std::string uuid = "dj-" + std::to_string(tick.timestamp_ms);
+                                db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, side + "_CALL", prop.confidence_score, 0.05, prop.strategy_name + " triggered", "{}");
+
+                                UserTradeData trade;
+                                trade.id = "cpp-paper-" + std::to_string(tick.timestamp_ms);
+                                trade.instrument = inst;
+                                trade.side = side;
+                                trade.quantity = 65;
+                                trade.entryPrice = tick.ask_price > 0 ? tick.ask_price : (tick.ltp > 0 ? tick.ltp : 100.0);
+                                trade.exitPrice = 0.0;
+                                trade.netPnl = 0.0;
+                                trade.status = "OPEN";
+                                trade.executionProvider = is_upstox_active ? "UPSTOX" : "FYERS";
+                                trade.executionMode = "PAPER";
+                                trade.onRealData = 1;
+                                trade.algoSource = prop.strategy_name;
+
+                                if (db_client->create_paper_trade(trade)) {
+                                    std::cout << "🚀 [TokenSupervisor] " << prop.strategy_name << " Executed Paper Trade & Persisted to fnf_trades: "
+                                              << trade.id << " (" << trade.instrument << " " << trade.side << " @ ₹" << trade.entryPrice << ")\n";
+                                }
                             }
                         }
                     }
