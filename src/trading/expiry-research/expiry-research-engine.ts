@@ -378,6 +378,18 @@ export function computeMultiSignalEvidence(params: {
   };
 }
 
+/**
+ * Unvalidated strategy threshold constant — explicitly marked as non-validated.
+ * Must NOT be treated as an operator-approved parameter or statistically proven edge.
+ */
+export const UNVALIDATED_STRATEGY_THRESHOLD = 65;
+
+export enum NoTradeType {
+  NO_TRADE_BY_SAFETY = 'NO_TRADE_BY_SAFETY',
+  NO_TRADE_BY_STRATEGY = 'NO_TRADE_BY_STRATEGY',
+  NO_TRADE_BY_INSUFFICIENT_EVIDENCE = 'NO_TRADE_BY_INSUFFICIENT_EVIDENCE',
+}
+
 // ── 7. Decoupled Entry Engine & Capital Filter Preservation ──────────────────
 
 export interface EntryEngineInput {
@@ -390,11 +402,13 @@ export interface EntryEngineInput {
   capitalFilterLimitInr: number; // Preserved ₹5,000 capital filter
   accountCapitalInr: number;
   lotSize: number;
+  minEvidenceThreshold?: number;
 }
 
 export interface EntryEngineDecision {
   allowEntry: boolean;
   action: 'BUY_CE' | 'BUY_PE' | 'NO_ENTRY';
+  noTradeType?: NoTradeType;
   tradeLots: number;
   tradeUnits: number;
   outlayInr: number;
@@ -404,29 +418,59 @@ export interface EntryEngineDecision {
 }
 
 export function evaluateDecoupledEntryEngine(input: EntryEngineInput): EntryEngineDecision {
-  const { evidence, freshness, safety, entryPrice, capitalFilterLimitInr, lotSize } = input;
+  const { evidence, freshness, safety, entryPrice, capitalFilterLimitInr, lotSize, minEvidenceThreshold = UNVALIDATED_STRATEGY_THRESHOLD } = input;
 
-  // 1. Mandatory Safety Veto Check
+  // 1. Mandatory Safety Veto Check (NO_TRADE_BY_SAFETY)
   if (!safety.passed) {
-    return { allowEntry: false, action: 'NO_ENTRY', tradeLots: 0, tradeUnits: 0, outlayInr: 0, plannedRiskInr: 0, plannedRiskR: 0, rejectionReason: `SAFETY_VETO: ${safety.vetoReason}` };
+    return {
+      allowEntry: false,
+      action: 'NO_ENTRY',
+      noTradeType: NoTradeType.NO_TRADE_BY_SAFETY,
+      tradeLots: 0,
+      tradeUnits: 0,
+      outlayInr: 0,
+      plannedRiskInr: 0,
+      plannedRiskR: 0,
+      rejectionReason: `SAFETY_VETO: ${safety.vetoReason}`,
+    };
   }
 
-  // 2. Freshness Check
+  // 2. Freshness Check (NO_TRADE_BY_SAFETY)
   if (!freshness.systemSafetyPass || !freshness.allowBreakoutEntry) {
-    return { allowEntry: false, action: 'NO_ENTRY', tradeLots: 0, tradeUnits: 0, outlayInr: 0, plannedRiskInr: 0, plannedRiskR: 0, rejectionReason: `FRESHNESS_DEGRADED: ${freshness.bucket}` };
+    return {
+      allowEntry: false,
+      action: 'NO_ENTRY',
+      noTradeType: NoTradeType.NO_TRADE_BY_SAFETY,
+      tradeLots: 0,
+      tradeUnits: 0,
+      outlayInr: 0,
+      plannedRiskInr: 0,
+      plannedRiskR: 0,
+      rejectionReason: `FRESHNESS_DEGRADED: ${freshness.bucket}`,
+    };
   }
 
-  // 3. Directional Evidence Check
+  // 3. Directional Evidence Check (NO_TRADE_BY_INSUFFICIENT_EVIDENCE)
   let action: 'BUY_CE' | 'BUY_PE' | 'NO_ENTRY' = 'NO_ENTRY';
-  if (evidence.bullishEvidenceScore >= 65 && evidence.bearishEvidenceScore < 40) {
+  if (evidence.bullishEvidenceScore >= minEvidenceThreshold && evidence.bearishEvidenceScore < 40) {
     action = 'BUY_CE';
-  } else if (evidence.bearishEvidenceScore >= 65 && evidence.bullishEvidenceScore < 40) {
+  } else if (evidence.bearishEvidenceScore >= minEvidenceThreshold && evidence.bullishEvidenceScore < 40) {
     action = 'BUY_PE';
   } else {
-    return { allowEntry: false, action: 'NO_ENTRY', tradeLots: 0, tradeUnits: 0, outlayInr: 0, plannedRiskInr: 0, plannedRiskR: 0, rejectionReason: 'INSUFFICIENT_STRATEGY_EVIDENCE' };
+    return {
+      allowEntry: false,
+      action: 'NO_ENTRY',
+      noTradeType: NoTradeType.NO_TRADE_BY_INSUFFICIENT_EVIDENCE,
+      tradeLots: 0,
+      tradeUnits: 0,
+      outlayInr: 0,
+      plannedRiskInr: 0,
+      plannedRiskR: 0,
+      rejectionReason: `UNVALIDATED_STRATEGY_THRESHOLD_NOT_MET: score (${Math.max(evidence.bullishEvidenceScore, evidence.bearishEvidenceScore)}) < threshold (${minEvidenceThreshold})`,
+    };
   }
 
-  // 4. Preserved ₹5,000 Capital Filter & Sizing
+  // 4. Preserved ₹5,000 Capital Filter & Sizing (NO_TRADE_BY_SAFETY)
   const costPerLot = entryPrice * lotSize;
   const maxAllowedLots = Math.floor(capitalFilterLimitInr / costPerLot);
 
@@ -434,6 +478,7 @@ export function evaluateDecoupledEntryEngine(input: EntryEngineInput): EntryEngi
     return {
       allowEntry: false,
       action: 'NO_ENTRY',
+      noTradeType: NoTradeType.NO_TRADE_BY_SAFETY,
       tradeLots: 0,
       tradeUnits: 0,
       outlayInr: costPerLot,

@@ -127,6 +127,17 @@ async function runExpiryResearchSuite() {
     assert.ok(res.rejectionReason.includes('BROKER_CONTRACT_MASTER_STALE'));
   });
 
+  test('1.6 Symbol / Expiry Ambiguity (Missing or Unmatched Identifiers) is Rejected', () => {
+    const res = resolveOrderSizingLotSize({
+      symbol: '',
+      underlying: 'NIFTY50-INDEX',
+      expiry: '2026-09-29',
+    });
+    assert.strictEqual(res.valid, false);
+    assert.strictEqual(res.resolvedLotSize, null);
+    assert.strictEqual(res.rejectionReason, 'MISSING_CONTRACT_IDENTIFIERS');
+  });
+
   console.log('\n--- CATEGORY 2: Expiry Nomenclature & Symbol Format Audit ---');
 
   test('2.1 Parse 29SEP Contract Nomenclature', () => {
@@ -176,6 +187,82 @@ async function runExpiryResearchSuite() {
     });
     assert.strictEqual(safety.passed, false);
     assert.strictEqual(safety.vetoReason, SystemSafetyVetoReason.CAPITAL_FILTER_EXCEEDED);
+  });
+
+  test('3.3 Explicit Distinction Between SYSTEM_SAFETY_VETO and UNVALIDATED_STRATEGY_THRESHOLD', () => {
+    const { NoTradeType, evaluateDecoupledEntryEngine, UNVALIDATED_STRATEGY_THRESHOLD } = engine;
+    const safetyPass = evaluateSystemSafetyVeto({
+      quoteAgeMs: 200,
+      systemMaxStaleMs: 15000,
+      bid: 100,
+      ask: 102,
+      spreadPct: 1.5,
+      maxSpreadPct: 2.0,
+      riskApproved: true,
+      isDuplicate: false,
+      killSwitch: false,
+      lotSizeValid: true,
+      outlayInr: 2550,
+      capitalLimitInr: 5000,
+    });
+    const freshnessPass = classifyTickFreshness(200);
+
+    // Scenario A: Insufficient evidence score (50 < 65 UNVALIDATED_STRATEGY_THRESHOLD)
+    const lowEvidence = computeMultiSignalEvidence({
+      spot: 22800,
+      vwap: 22800,
+      orbHigh: 22850,
+      orbLow: 22750,
+      callOiTotal: 1000000,
+      putOiTotal: 1000000,
+      pcr: 1.0,
+      straddlePrice: 150,
+    });
+    const decisionA = evaluateDecoupledEntryEngine({
+      evidence: lowEvidence,
+      freshness: freshnessPass,
+      safety: safetyPass,
+      proposedRiskR: 1.0,
+      structuralStopPrice: 85,
+      entryPrice: 102,
+      capitalFilterLimitInr: 5000,
+      accountCapitalInr: 10000,
+      lotSize: 25,
+      minEvidenceThreshold: UNVALIDATED_STRATEGY_THRESHOLD,
+    });
+    assert.strictEqual(decisionA.allowEntry, false);
+    assert.strictEqual(decisionA.noTradeType, NoTradeType.NO_TRADE_BY_INSUFFICIENT_EVIDENCE);
+    assert.ok(decisionA.rejectionReason.includes('UNVALIDATED_STRATEGY_THRESHOLD_NOT_MET'));
+
+    // Scenario B: Safety Veto failure (Stale quote)
+    const safetyFail = evaluateSystemSafetyVeto({
+      quoteAgeMs: 18000,
+      systemMaxStaleMs: 15000,
+      bid: 100,
+      ask: 102,
+      spreadPct: 1.5,
+      maxSpreadPct: 2.0,
+      riskApproved: true,
+      isDuplicate: false,
+      killSwitch: false,
+      lotSizeValid: true,
+      outlayInr: 2550,
+      capitalLimitInr: 5000,
+    });
+    const decisionB = evaluateDecoupledEntryEngine({
+      evidence: lowEvidence,
+      freshness: freshnessPass,
+      safety: safetyFail,
+      proposedRiskR: 1.0,
+      structuralStopPrice: 85,
+      entryPrice: 102,
+      capitalFilterLimitInr: 5000,
+      accountCapitalInr: 10000,
+      lotSize: 25,
+    });
+    assert.strictEqual(decisionB.allowEntry, false);
+    assert.strictEqual(decisionB.noTradeType, NoTradeType.NO_TRADE_BY_SAFETY);
+    assert.ok(decisionB.rejectionReason.includes('SAFETY_VETO'));
   });
 
   console.log('\n--- CATEGORY 4: Strike Window Width Empirical Evaluation (N=2..6) ---');
