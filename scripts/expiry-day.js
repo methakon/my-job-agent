@@ -70,7 +70,7 @@ function summarise(cycle) {
   L.push(`  neutral: ${d.neutralEvidence.join(', ') || '—'}`);
   L.push(`  abstained: ${d.unusableBuckets.join(', ') || '—'}`);
   if (d.whyNoTrade.length) L.push(`  why NO TRADE: ${d.whyNoTrade.join(' | ')}`);
-  L.push(`TRADEABLE ${cycle.tradeable.verdict}  blocking: ${cycle.tradeable.blocking.join(', ') || '—'}`);
+  L.push(`TRADEABLE ${cycle.tradeable.verdict}  noTradeType=${cycle.noTrade?.type ?? '—'}  blocking: ${cycle.tradeable.blocking.join(', ') || '—'}`);
   L.push(`SETUPS  ${cycle.setups.candidates.map((c) => c.setup).join(', ') || '—'}`);
   L.push(`AUTHORITY canPlaceOrder=${cycle.authority.canPlaceOrder} · strategy armed=NO (operator approval pending)`);
   return L.join('\n');

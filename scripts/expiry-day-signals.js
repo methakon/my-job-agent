@@ -36,6 +36,63 @@ const VIEW = {
   REVERSAL: 'REVERSAL', NO_TRADE: 'NO_TRADE',
 };
 
+/**
+ * Why we are not trading. This REFINES the NO_TRADE label; it never changes
+ * behaviour and never replaces the existing whyNoTrade[] / blocking[] detail,
+ * which remain the auditable record of exactly which check failed.
+ */
+const NO_TRADE_TYPE = {
+  SAFETY: 'SAFETY',
+  INSUFFICIENT_DATA: 'INSUFFICIENT_DATA',
+  CONFLICTING_EVIDENCE: 'CONFLICTING_EVIDENCE',
+  NO_VALIDATED_EDGE: 'NO_VALIDATED_EDGE',
+  RISK: 'RISK',
+  LIQUIDITY: 'LIQUIDITY',
+};
+
+/**
+ * Classify a NO_TRADE outcome into exactly one primary reason.
+ *
+ * Ordering principle: name the thing that must change FIRST.
+ *   1. SAFETY — the strategy is not armed, so no other reason is even reachable.
+ *   2. LIQUIDITY / RISK — a concrete cost or entry-quality gate failed. These are
+ *      specific and actionable, so they outrank the generic "no direction".
+ *   3. INSUFFICIENT_DATA — the data itself is missing/stale/absent.
+ *   4. CONFLICTING_EVIDENCE — the data was fine, the signals disagreed.
+ *   5. NO_VALIDATED_EDGE — nothing failed except that no edge is proven yet.
+ *
+ * `DIRECTION_CONFIRMED` is deliberately NOT an INSUFFICIENT_DATA trigger: it is
+ * the generic "no side was produced" gate and would otherwise mask the specific
+ * liquidity/risk reason that actually blocked the trade.
+ */
+function classifyNoTrade({ view, whyNoTrade = [], blocking = [], signalConflict = false, regime, validated }) {
+  const has = (id) => blocking.includes(id);
+  if (has('POLICY_PERMITS')) {
+    return { type: NO_TRADE_TYPE.SAFETY, because: 'POLICY_PERMITS: the expiry strategy is not armed by the operator', blocking };
+  }
+  if (has('SPREAD_OK') || has('LIQUID') || has('MOVE_VS_COST')) {
+    return { type: NO_TRADE_TYPE.LIQUIDITY, because: 'cost/liquidity gate failed: the expected move does not clear spread + slippage + fees', blocking };
+  }
+  if (has('TIME_OK') || has('NOT_EXTENDED') || has('RISK_REWARD_OK') || has('LOCATION_OK') || has('IV_OK')) {
+    return { type: NO_TRADE_TYPE.RISK, because: 'risk/entry-quality gate failed', blocking };
+  }
+  if (has('DATA_FRESH') || whyNoTrade.some((r) => /STALE|UNKNOWN/.test(r))
+      || whyNoTrade.some((r) => /usable evidence bucket/.test(r))) {
+    return { type: NO_TRADE_TYPE.INSUFFICIENT_DATA, because: whyNoTrade.join(' | ') || 'no confirmed direction from the data on hand', blocking };
+  }
+  if (signalConflict || has('NO_SIGNAL_CONFLICT')) {
+    return { type: NO_TRADE_TYPE.CONFLICTING_EVIDENCE, because: 'important signals disagree; waiting for confirmation rather than forcing a side', blocking };
+  }
+  if (view === VIEW.NO_TRADE && (validated === false || regime === undefined || regime === null)) {
+    return { type: NO_TRADE_TYPE.NO_VALIDATED_EDGE, because: 'no validated edge on Indian expiry data yet (zero historical expiry sessions captured)', blocking };
+  }
+  return {
+    type: view === VIEW.NO_TRADE ? NO_TRADE_TYPE.INSUFFICIENT_DATA : NO_TRADE_TYPE.NO_VALIDATED_EDGE,
+    because: whyNoTrade.join(' | ') || 'no tradeable conclusion',
+    blocking,
+  };
+}
+
 /** One evidence record. `score` in [-1, 1]; `weight` scales it. */
 function bucket(name, { score, confidence, dataAgeMs, bucket: fresh, reason, usable = true, at = null }) {
   const w = usable ? C.freshnessWeight(fresh) : 0;
@@ -367,4 +424,4 @@ function evaluateTradeable(direction, entry, policy = {}) {
   };
 }
 
-module.exports = { BUCKETS, VIEW, bucket, builders, classifyDirection, evaluateTradeable };
+module.exports = { BUCKETS, VIEW, NO_TRADE_TYPE, bucket, builders, classifyDirection, evaluateTradeable, classifyNoTrade };

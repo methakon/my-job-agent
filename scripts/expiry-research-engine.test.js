@@ -51,39 +51,96 @@ async function runExpiryResearchSuite() {
 
   console.log('\n--- CATEGORY 1: Contract Master & ORDER_SIZING_LOT_SIZE Invariant ---');
 
-  test('1.1 Official Exchange Lot Sizes Match Specification', () => {
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY'], 25);
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY50-INDEX'], 25);
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['BANKNIFTY'], 15);
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTYBANK-INDEX'], 15);
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['SENSEX'], 10);
+  test('1.1 Exchange-reference lot sizes (VALIDATION LAYER ONLY — not the sizing source)', () => {
+    // These are reference values for cross-checking. The authoritative lot size
+    // for sizing is the exact contract's record in the contract master (see
+    // resolveOrderSizingLotSize precedence), never this table.
+    // Provenance: FYERS contract master CSV (field[3], INFERRED — the file has no
+    // header row), cross-checked against the DB registry and, for SENSEX, against
+    // the Upstox desk's independently recorded lotSize. Official NSE/BSE circular
+    // verification was UNAVAILABLE at the time of writing (exchange blocks
+    // automated access) — do not describe these as "per circular" without a source.
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY'], 65);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY50-INDEX'], 65);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['BANKNIFTY'], 30);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTYBANK-INDEX'], 30);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['SENSEX'], 20);
   });
 
-  test('1.2 Stale DB Lot Size 65 for NIFTY is Hard-Rejected', () => {
+  test('1.2 Exact Contract resolves lot size directly from Authoritative Broker Master', () => {
     const res = resolveOrderSizingLotSize({
-      symbol: 'NSE:NIFTY29SEP22850CE',
+      symbol: 'BSE:SENSEX01OCT72000CE',
+      underlying: 'SENSEX',
+      expiry: '2026-10-01',
+      brokerMasterRecord: {
+        symbol: 'BSE:SENSEX01OCT72000CE',
+        underlying: 'SENSEX',
+        expiry: '2026-10-01',
+        strike: 72000,
+        optionType: 'CE',
+        lotSize: 20, // SENSEX lot size per the contract master (weekly + monthly alike)
+        tickSize: 0.05,
+        source: 'BROKER_MASTER',
+        lastUpdatedMs: Date.now(),
+      },
+    });
+    assert.strictEqual(res.valid, true);
+    assert.strictEqual(res.resolvedLotSize, 20);
+    assert.strictEqual(res.lotSizeSource, 'BROKER_CONTRACT_MASTER');
+  });
+
+  test('1.2b Lot size comes from the contract master, never from an underlying-level constant', () => {
+    // A broker master that DISAGREES with the exchange-reference table must
+    // still win: the exact contract record is the authority. The old defect
+    // rejected the broker value instead (BROKER_EXCHANGE_DISAGREEMENT).
+    const brokerSays = 99;
+    const res = resolveOrderSizingLotSize({
+      symbol: 'NSE:NIFTY26SEP22800CE',
       underlying: 'NIFTY50-INDEX',
       expiry: '2026-09-29',
-      dbLotSize: 65, // Stale DB value
+      brokerMasterRecord: {
+        symbol: 'NSE:NIFTY26SEP22800CE',
+        underlying: 'NIFTY50-INDEX',
+        expiry: '2026-09-29',
+        strike: 22800,
+        optionType: 'CE',
+        lotSize: brokerSays,
+        tickSize: 0.05,
+        source: 'BROKER_MASTER',
+        lastUpdatedMs: Date.now(),
+      },
+    });
+    assert.strictEqual(res.valid, true, 'a contract-master value must not be rejected');
+    assert.strictEqual(res.resolvedLotSize, brokerSays);
+    assert.strictEqual(res.lotSizeSource, 'BROKER_CONTRACT_MASTER');
+  });
+
+  test('1.2c The reference table alone never resolves a lot size', () => {
+    // No contract-master record, no DB value → unresolved. An underlying with a
+    // reference entry must NOT be enough to size an order.
+    const res = resolveOrderSizingLotSize({
+      symbol: 'NSE:NIFTY26SEP22800CE',
+      underlying: 'NIFTY50-INDEX',
+      expiry: '2026-09-29',
     });
     assert.strictEqual(res.valid, false);
     assert.strictEqual(res.resolvedLotSize, null);
-    assert.ok(res.rejectionReason.includes('STALE_DB_LOT_SIZE_REJECTED'));
+    assert.strictEqual(res.lotSizeSource, 'UNRESOLVED');
   });
 
-  test('1.3 Stale DB Lot Size 30 for BANKNIFTY is Hard-Rejected', () => {
+  test('1.3 Database Contract Master resolves lot size for exact contract when present', () => {
     const res = resolveOrderSizingLotSize({
       symbol: 'NSE:BANKNIFTY29SEP56500PE',
       underlying: 'NIFTYBANK-INDEX',
       expiry: '2026-09-29',
-      dbLotSize: 30, // Stale DB value
+      dbLotSize: 30,
     });
-    assert.strictEqual(res.valid, false);
-    assert.strictEqual(res.resolvedLotSize, null);
-    assert.ok(res.rejectionReason.includes('STALE_DB_LOT_SIZE_REJECTED'));
+    assert.strictEqual(res.valid, true);
+    assert.strictEqual(res.resolvedLotSize, 30);
+    assert.strictEqual(res.lotSizeSource, 'DB_CONTRACT_MASTER');
   });
 
-  test('1.4 Disagreement Between Broker Master and Exchange Spec is Rejected', () => {
+  test('1.4 Expiry Mismatch between Broker Master and Input is Rejected', () => {
     const res = resolveOrderSizingLotSize({
       symbol: 'NSE:NIFTY29SEP22850CE',
       underlying: 'NIFTY50-INDEX',
@@ -91,10 +148,10 @@ async function runExpiryResearchSuite() {
       brokerMasterRecord: {
         symbol: 'NSE:NIFTY29SEP22850CE',
         underlying: 'NIFTY50-INDEX',
-        expiry: '2026-09-29',
+        expiry: '2026-10-29', // Mismatched expiry
         strike: 22850,
         optionType: 'CE',
-        lotSize: 50, // Mismatched broker record
+        lotSize: 65,
         tickSize: 0.05,
         source: 'BROKER_MASTER',
         lastUpdatedMs: Date.now(),
@@ -102,7 +159,7 @@ async function runExpiryResearchSuite() {
     });
     assert.strictEqual(res.valid, false);
     assert.strictEqual(res.resolvedLotSize, null);
-    assert.ok(res.rejectionReason.includes('BROKER_EXCHANGE_DISAGREEMENT'));
+    assert.ok(res.rejectionReason.includes('CONTRACT_EXPIRY_MISMATCH'));
   });
 
   test('1.5 Stale Broker Master (>24h) is Rejected', () => {
@@ -116,7 +173,7 @@ async function runExpiryResearchSuite() {
         expiry: '2026-09-29',
         strike: 22850,
         optionType: 'CE',
-        lotSize: 25,
+        lotSize: 65,
         tickSize: 0.05,
         source: 'BROKER_MASTER',
         lastUpdatedMs: Date.now() - (25 * 3600 * 1000), // 25 hours old

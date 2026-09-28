@@ -15,9 +15,9 @@ export function sessionStorePoolOptions(): Record<string, unknown> {
 		user: process.env.MYSQL_USER || 'root',
 		password: process.env.MYSQL_PASSWORD || '',
 		database: process.env.MYSQL_DATABASE || 'myjob_agent',
-		connectionLimit: 4,
 		namedPlaceholders: true,
 		...mysqlPoolTuning(),
+		connectionLimit: 4,
 	};
 }
 

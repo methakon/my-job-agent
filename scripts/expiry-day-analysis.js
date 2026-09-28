@@ -303,6 +303,16 @@ async function runCycle(conn, { indexKey, dateIso, nowMs = Date.now(), config = 
     permitsExpiryStrategy: false,          // NOT approved by the operator
     ...config.policy,
   });
+  // Refine the NO_TRADE label WITHOUT changing behaviour or dropping detail:
+  // whyNoTrade[] and blocking[] remain the auditable record.
+  const noTrade = S.classifyNoTrade({
+    view: direction.view,
+    whyNoTrade: direction.whyNoTrade,
+    blocking: tradeable.blocking,
+    signalConflict: direction.signalConflict,
+    regime: regime?.regime,
+    validated: regime?.validated,
+  });
   const setups = tagSetups({ direction, tradeable, regime, or, vwapState: vwap, walls: micro?.walls, spot, impliedMovePts: impliedMove?.impliedMovePts });
 
   return {
@@ -326,6 +336,14 @@ async function runCycle(conn, { indexKey, dateIso, nowMs = Date.now(), config = 
     regime,
     direction,
     tradeable,
+    noTrade: {
+      ...noTrade,
+      // Behaviour is unchanged by this field: it is a label over the existing
+      // verdict, and the full reason chain is preserved alongside it.
+      verdict: tradeable.verdict,
+      whyNoTrade: direction.whyNoTrade,
+      blocking: tradeable.blocking,
+    },
     setups,
     // Explicit, machine-readable statement: this engine never authorises a trade.
     authority: {

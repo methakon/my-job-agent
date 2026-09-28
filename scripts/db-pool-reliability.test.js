@@ -123,10 +123,11 @@ async function main() {
   // ── 1. Production config carries the driver-supported tuning ──────────────
   {
     const tuning = mysqlPoolTuning();
+    const { enableKeepAlive, keepAliveInitialDelay, maxIdle, idleTimeout } = tuning;
     assert.deepEqual(
-      tuning,
+      { enableKeepAlive, keepAliveInitialDelay, maxIdle, idleTimeout },
       { enableKeepAlive: true, keepAliveInitialDelay: 10_000, maxIdle: 2, idleTimeout: 30_000 },
-      'the tuning is exactly the four mysql2-supported options',
+      'the tuning carries the four mysql2-supported options',
     );
     const opts = mysqlConfig('myjob_agent');
     assert.deepEqual(opts.extra, tuning, 'the runtime TypeORM config passes the tuning through `extra`');
@@ -153,7 +154,7 @@ async function main() {
     assert.equal(connOpts.keepAliveInitialDelay, 10_000);
     assert.equal(connOpts.maxIdle, 2);
     assert.equal(connOpts.idleTimeout, 30_000);
-    assert.equal(connOpts.connectionLimit, undefined, 'TypeORM passes no pool-size override');
+    assert.equal(connOpts.connectionLimit, Math.max(1, Number(process.env.MYSQL_POOL_SIZE || 25)), 'TypeORM passes configured pool-size limit');
 
     const core = mysql2.createPool({ ...connOpts, host: '127.0.0.1', port: 1, user: 'u', database: 'd' });
     // mysql2 keeps connection-level options under `config.connectionConfig`.
@@ -161,7 +162,7 @@ async function main() {
     assert.equal(core.config.connectionConfig.keepAliveInitialDelay, 10_000);
     assert.equal(core.config.maxIdle, 2);
     assert.equal(core.config.idleTimeout, 30_000);
-    assert.equal(core.config.connectionLimit, 10, 'mysql2 default pool size, untouched by the tuning');
+    assert.equal(core.config.connectionLimit, Math.max(1, Number(process.env.MYSQL_POOL_SIZE || 25)), 'mysql2 pool size configured for transport headroom');
     assert.ok(core._removeIdleTimeoutConnectionsTimer, 'mysql2 armed its idle-connection reaper');
     disarmReaper(core);
     await new Promise((resolve) => core.end(resolve));

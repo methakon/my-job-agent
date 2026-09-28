@@ -68,6 +68,10 @@ function buildRecord({ cycle, nowMs = Date.now() }) {
 
     whyNotTrade: d.whyNoTrade ?? [],
     blockingGates: t.blocking ?? [],
+    // Refined primary reason. Purely additive: the full audit trail above is
+    // preserved, and this does not alter any signal behaviour.
+    noTradeType: cycle.noTrade?.type ?? null,
+    noTradeBecause: cycle.noTrade?.because ?? null,
 
     // Paper-only hypotheticals. Null unless a candidate contract was evaluated.
     hypothetical: {

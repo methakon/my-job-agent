@@ -281,6 +281,56 @@ test('the capital filter is never reinterpreted here', () => {
   assert.match(t.capitalFilterNote, /not reinterpreted/);
 });
 
+// ────────────────────────── no-trade classification ─────────────────────
+group('signals: NO_TRADE gets a precise, auditable reason');
+const NT = S.NO_TRADE_TYPE;
+
+test('every NO_TRADE type is one of the six defined values', () => {
+  assert.deepEqual(Object.values(NT).sort(), ['CONFLICTING_EVIDENCE', 'INSUFFICIENT_DATA', 'LIQUIDITY', 'NO_VALIDATED_EDGE', 'RISK', 'SAFETY']);
+});
+test('policy/arming block ⇒ SAFETY (checked first: nothing else is reachable yet)', () => {
+  const r = S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['POLICY_PERMITS', 'SPREAD_OK', 'DATA_FRESH'], whyNoTrade: ['data STALE'] });
+  assert.equal(r.type, NT.SAFETY);
+  assert.match(r.because, /not armed/);
+});
+test('missing or stale data ⇒ INSUFFICIENT_DATA', () => {
+  assert.equal(S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['DATA_FRESH'], whyNoTrade: ['data STALE (age=900000ms)'] }).type, NT.INSUFFICIENT_DATA);
+  assert.equal(S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['DIRECTION_CONFIRMED'], whyNoTrade: ['only 3 usable evidence bucket(s), need 4'] }).type, NT.INSUFFICIENT_DATA);
+});
+test('disagreeing signals ⇒ CONFLICTING_EVIDENCE', () => {
+  const r = S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['NO_SIGNAL_CONFLICT'], signalConflict: true, whyNoTrade: [] });
+  assert.equal(r.type, NT.CONFLICTING_EVIDENCE);
+  assert.match(r.because, /forcing a side/);
+});
+test('nothing resolvable and nothing validated ⇒ NO_VALIDATED_EDGE', () => {
+  const r = S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['DIRECTION_CONFIRMED'], whyNoTrade: [], validated: false });
+  assert.equal(r.type, NT.NO_VALIDATED_EDGE);
+  assert.match(r.because, /zero historical expiry sessions/);
+});
+test('spread / liquidity / move-vs-cost ⇒ LIQUIDITY', () => {
+  assert.equal(S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['SPREAD_OK'], whyNoTrade: [] }).type, NT.LIQUIDITY);
+  assert.equal(S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['MOVE_VS_COST'], whyNoTrade: [] }).type, NT.LIQUIDITY);
+});
+test('time / R:R / location / IV ⇒ RISK', () => {
+  assert.equal(S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['RISK_REWARD_OK'], whyNoTrade: [] }).type, NT.RISK);
+  assert.equal(S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking: ['TIME_OK'], whyNoTrade: [] }).type, NT.RISK);
+});
+test('classification preserves the full reason chain', () => {
+  const blocking = ['POLICY_PERMITS', 'SPREAD_OK'];
+  const why = ['signal conflict', 'only 2 usable buckets'];
+  const r = S.classifyNoTrade({ view: S.VIEW.NO_TRADE, blocking, whyNoTrade: why });
+  assert.deepEqual(r.blocking, blocking, 'every blocking gate is retained');
+  assert.match(r.because, /not armed/);
+});
+test('classification does not change the tradeability verdict', () => {
+  const dir = { view: S.VIEW.NO_TRADE, whyNoTrade: ['x'], signalConflict: false };
+  const t = S.evaluateTradeable(dir, {}, { permitsExpiryStrategy: false });
+  const n = S.classifyNoTrade({ view: dir.view, whyNoTrade: dir.whyNoTrade, blocking: t.blocking, signalConflict: false });
+  assert.equal(t.verdict, 'NO_TRADE');
+  assert.equal(n.type, NT.SAFETY);
+  assert.equal(t.tradeable, false, 'behaviour unchanged by the label');
+});
+
 // ─────────────────────────────── setups ──────────────────────────────────
 group('setups: definitions and tagging');
 test('every setup A–H is defined with the required fields', () => {

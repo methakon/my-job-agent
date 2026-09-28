@@ -31,17 +31,42 @@ export interface LotSizeResolution {
   rejectionReason?: string;
 }
 
+/**
+ * EXCHANGE-REFERENCE lot sizes — VALIDATION LAYER ONLY.
+ *
+ * This table MUST NOT be used as the source for order sizing. The authoritative
+ * precedence for sizing is:
+ *
+ *   EXACT CONTRACT → CURRENT AUTHORITATIVE CONTRACT MASTER → LOT SIZE → RISK
+ *
+ * `resolveOrderSizingLotSize` implements exactly that: a contract-master record
+ * for the exact contract wins, the DB contract row is the fallback, and if
+ * neither resolves the answer is `null` and the caller must skip the order.
+ *
+ * These values exist so a contract-master record can be CROSS-CHECKED (and a
+ * wildly inconsistent one flagged) without ever silently replacing it.
+ *
+ * Provenance (2026-09-29): FYERS contract-master CSV field[3] — INFERRED, the
+ * file carries no header row and no parser or schema doc exists in-repo;
+ * cross-checked against `fnf_option_contracts` and, for SENSEX, against the
+ * Upstox desk's independently recorded lotSize. OFFICIAL EXCHANGE VERIFICATION
+ * = UNAVAILABLE (NSE/BSE block automated access). Do not restate these as
+ * "per circular" without a fetched source.
+ */
 export const OFFICIAL_EXCHANGE_LOT_SIZES: Record<string, number> = {
-  'NIFTY': 25,
-  'NIFTY50-INDEX': 25,
-  'BANKNIFTY': 15,
-  'NIFTYBANK-INDEX': 15,
-  'FINNIFTY': 25,
-  'SENSEX': 10,
+  'NIFTY': 65,
+  'NIFTY50-INDEX': 65,
+  'BANKNIFTY': 30,
+  'NIFTYBANK-INDEX': 30,
+  'FINNIFTY': 65,
+  'SENSEX': 20,
 };
 
 /**
  * ORDER_SIZING_LOT_SIZE Invariant Resolver
+ *
+ * Precedence:
+ * EXACT CONTRACT → AUTHORITATIVE CONTRACT MASTER → LOT SIZE
  */
 export function resolveOrderSizingLotSize(params: {
   symbol: string;
@@ -57,10 +82,7 @@ export function resolveOrderSizingLotSize(params: {
     return { valid: false, resolvedLotSize: null, lotSizeSource: 'NONE', rejectionReason: 'MISSING_CONTRACT_IDENTIFIERS' };
   }
 
-  const normUnderlying = underlying.toUpperCase().trim();
-  const officialSpec = OFFICIAL_EXCHANGE_LOT_SIZES[normUnderlying];
-
-  // Check broker master record if present
+  // 1. Primary Precedence: Authoritative Broker Contract Master for exact contract
   if (brokerMasterRecord) {
     const isStale = (nowMs - brokerMasterRecord.lastUpdatedMs) > (24 * 3600 * 1000);
     if (isStale) {
@@ -69,28 +91,15 @@ export function resolveOrderSizingLotSize(params: {
     if (brokerMasterRecord.expiry !== expiry) {
       return { valid: false, resolvedLotSize: null, lotSizeSource: 'EXPIRY_MISMATCH', rejectionReason: `CONTRACT_EXPIRY_MISMATCH: record ${brokerMasterRecord.expiry} vs input ${expiry}` };
     }
-    if (officialSpec && brokerMasterRecord.lotSize !== officialSpec) {
-      return {
-        valid: false,
-        resolvedLotSize: null,
-        lotSizeSource: 'DISAGREEMENT',
-        rejectionReason: `BROKER_EXCHANGE_DISAGREEMENT: broker has ${brokerMasterRecord.lotSize}, exchange spec has ${officialSpec}`,
-      };
+    if (!brokerMasterRecord.lotSize || brokerMasterRecord.lotSize < 1) {
+      return { valid: false, resolvedLotSize: null, lotSizeSource: 'INVALID_LOT_SIZE', rejectionReason: 'INVALID_CONTRACT_MASTER_LOT_SIZE' };
     }
     return { valid: true, resolvedLotSize: brokerMasterRecord.lotSize, lotSizeSource: 'BROKER_CONTRACT_MASTER' };
   }
 
-  // Fallback to official exchange specification if DB matches
-  if (officialSpec) {
-    if (dbLotSize && dbLotSize !== officialSpec) {
-      return {
-        valid: false,
-        resolvedLotSize: null,
-        lotSizeSource: 'DB_STALE_REJECTED',
-        rejectionReason: `STALE_DB_LOT_SIZE_REJECTED: DB has ${dbLotSize}, official exchange spec requires ${officialSpec}`,
-      };
-    }
-    return { valid: true, resolvedLotSize: officialSpec, lotSizeSource: 'OFFICIAL_EXCHANGE_SPEC' };
+  // 2. Secondary Precedence: Database Contract Master for exact contract
+  if (dbLotSize && dbLotSize >= 1) {
+    return { valid: true, resolvedLotSize: dbLotSize, lotSizeSource: 'DB_CONTRACT_MASTER' };
   }
 
   return { valid: false, resolvedLotSize: null, lotSizeSource: 'UNRESOLVED', rejectionReason: 'AMBIGUOUS_LOT_SIZE_SPECIFICATION' };

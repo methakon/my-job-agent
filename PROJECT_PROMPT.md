@@ -1368,3 +1368,58 @@ Awaiting user continuation signal. Trading session over — this closeout is the
 - TypeORM `create()` with `nullable` columns: pass `undefined` not `null` (TS strict: `DeepPartial` doesn't accept `null`); `const out = []` infers `never[]` — type the array literal
 - Prod runs `synchronize=false` (NODE_ENV=production) — new entity tables must be created via SQL in MySQL before boot
 - Visa guide page renders the raw markdown file live — edits to `VISA_SPONSORED_JOBS_GUIDE.md` show up on refresh; no rebuild needed
+
+## Session Log (2026-09-27) — Tantric AI Agent Foundation
+
+### What was done
+
+1. **PyTorch CPU-only installed** in `.venv-ai/` virtual environment:
+   - PyTorch 2.14.0+cpu, torchvision 0.29.0+cpu, torchaudio 2.11.0+cpu
+   - OpenCV 5.0.0 (headless), dlib 20.0.1, librosa 1.0.0, scikit-learn 1.9.1
+   - All packages verified working together
+   - CUDA not available (GT 730 compute capability 2.1 — hardware blocked)
+
+2. **Tantric AI Agent Roadmap created** at `docs/TANTRIC_AI_AGENT_ROADMAP.md`:
+   - Step 1: Foundation (DONE) — PyTorch installed
+   - Step 2: CPU preprocessing pipeline (NEXT) — can start now
+   - Step 3: GPU hardware upgrade (BLOCKED) — RTX 3060 12GB + 32GB RAM
+   - Steps 4-9: Vision, audio, fusion, LLM, continual learning, validation
+   - Source: psychat.pdf clinical psychology AI training curriculum
+
+3. **Context from psychat.pdf:**
+   - Micro-expression recognition (FACS/Action Units)
+   - Clinical assessment and diagnosis (DSM-5)
+   - Psychopathology interpretation
+   - Empathic communication and de-escalation
+   - Continual learning framework
+   - This is integral to the tantric AI agent project
+
+### Current blockers
+
+- **GPU hardware:** GT 730 (2GB DDR3, compute capability 2.1) cannot run any modern AI models
+- **RAM:** 7.6GB insufficient for multi-model inference (need 32GB minimum)
+- **CUDA:** Blocked by GPU hardware — requires compute capability 3.0+
+
+### Minimum hardware upgrade path
+
+| Component | Minimum | Recommended | Cost (India) |
+|-----------|---------|-------------|--------------|
+| GPU | RTX 3060 12GB | RTX 4060 Ti 16GB | ₹25K-45K |
+| RAM | 32 GB DDR4 | 64 GB DDR4 | ₹8K-16K |
+| PSU | 550W 80+ Bronze | 650W 80+ Gold | ₹4K-6K |
+
+**Total:** ₹37K-58K
+
+### What this enables
+
+- Steps 4-9 of the roadmap (vision, audio, fusion, LLM, continual learning)
+- Real-time micro-expression recognition
+- Multi-modal clinical assessment
+- Empathic dialogue generation
+- Foundation for tantric AI consciousness research
+
+### Next actions
+
+1. Start Step 2: CPU preprocessing pipeline (face detection, frame extraction, audio features)
+2. When budget allows: Purchase RTX 3060 12GB + 32GB RAM
+3. After hardware: Reinstall PyTorch with CUDA, begin vision model training
