@@ -21,6 +21,17 @@ Status: paper-only; no live orders. FYERS market-data feed is LIVE via the share
 - Only when the remaining balance is truly exhausted (≤ ₹0) does the desk hold new opens and log **"paper account depleted … holding new opens until user redeposits"** — encoded in the session driver (2026-09-03) as the `effectiveBalance = capital + netPnl ≤ 0` guard.
 - Implementation note: `capital` stays fixed at the deposit amount; realized P&L and service charges accumulate in `netPnl`/`totalCost` across sessions; the driver's depletion guard and the dashboard's Capital + Net P&L together express "remaining money".
 
+## Risk policy — sizing & budget (operator directive 2026-09-28, "Path A")
+
+The desk's risk budget is computed from **equity = capital + net P&L (+ unrealised)** in `fnfRiskSnapshot()` — profits compound into the budget automatically; the `capital` field is only the deposit base. Live example 2026-09-28: capital ₹10,000 + netPnl ₹1,659.58 → equity/ceiling ₹11,659.58.
+
+- `FNF_RISK_PCT_PER_TRADE=20` → risk budget **₹2,331.92** at the current equity. Max premium per lot (risk/lot = premium × 0.2875 × lotSize): NIFTY (65) ≈ ₹124 · BANKNIFTY (30) ≈ ₹270 · SENSEX (20) ≈ ₹405.
+- `FNF_MAX_PORTFOLIO_RISK_PCT=40` · `FNF_MAX_OPEN_POSITIONS=2` · `FNF_MAX_EXPOSURE_PCT=100` · `FNF_MAX_DAILY_LOSS_PCT=20` · `FNF_MAX_DRAWDOWN_PCT=40`.
+- Kept unchanged: `FNF_DEFAULT_STOP_PCT=0.25` (matches the realised −25%…−31% premium exits), `FNF_SLIPPAGE_BUFFER_PCT=0.15`, `FNF_MAX_SPREAD_PCT=3`.
+- Rationale: the previous 1% default (budget ₹116.60) vetoed every winner — 24-Sep alone logged **505 consecutive `RISK GATE FAILED` cycles** at risk/lot ₹1,408–1,425 (≈12× the budget); the desk's own 4–11 Sep trades ran premiums ₹50.80–120 → risk/lot ₹949–2,243 (≈10–19% of equity at the time), and **1 lot is the market's minimum granularity**, so the percentage must be read off that, not the reverse.
+- Enforcement: env on both hosts (local `my-job-agent/.env` + VM `/home/ubuntu/trading-agent/.env`), read per sizing call by `fnfRiskPolicyFromEnv()` (`src/trading/fnf-risk.ts`). Rollback: remove the `FNF_*` lines + restart both trading-agent processes.
+- Paper-only. Execution locks (`REAL_ORDER_ALLOWED` family, `UPSTOX_SANDBOX_ENABLED`) are untouched.
+
 ## Non-negotiable entry gate
 
 A trade is rejected unless all of these are available and fresh:
