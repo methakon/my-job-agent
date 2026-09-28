@@ -828,3 +828,42 @@ std::vector<SandboxLogData> RoadmapDbClient::fetch_sandbox_logs(int limit) {
     pool_->release(conn);
     return list;
 }
+
+bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_id = escape_string(conn, trade.id);
+    std::string safe_inst = escape_string(conn, trade.instrument);
+    std::string safe_side = escape_string(conn, trade.side);
+    std::string safe_status = escape_string(conn, trade.status.empty() ? "OPEN" : trade.status);
+    std::string safe_prov = escape_string(conn, trade.executionProvider.empty() ? "UPSTOX_PAPER" : trade.executionProvider);
+    std::string safe_mode = escape_string(conn, trade.executionMode.empty() ? "PAPER" : trade.executionMode);
+    std::string safe_algo = escape_string(conn, trade.algoSource.empty() ? "GapFadeP0Strategy" : trade.algoSource);
+    std::string safe_ordered = escape_string(conn, trade.orderedAt);
+
+    std::string query = "INSERT INTO fnf_trades (id, instrument, side, quantity, entryPrice, exitPrice, grossPnl, cost, netPnl, status, orderedAt, onRealData, executionProvider, executionMode, algoSource) VALUES ('"
+        + safe_id + "', '"
+        + safe_inst + "', '"
+        + safe_side + "', "
+        + std::to_string(trade.quantity) + ", "
+        + std::to_string(trade.entryPrice) + ", "
+        + std::to_string(trade.exitPrice) + ", 0.0, 0.0, "
+        + std::to_string(trade.netPnl) + ", '"
+        + safe_status + "', "
+        + (safe_ordered.empty() ? "NOW()" : ("'" + safe_ordered + "'")) + ", "
+        + std::to_string(trade.onRealData) + ", '"
+        + safe_prov + "', '"
+        + safe_mode + "', '"
+        + safe_algo + "') ON DUPLICATE KEY UPDATE entryPrice = VALUES(entryPrice), status = VALUES(status);";
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] create_paper_trade error: " << mysql_error(conn) << "\n";
+        return false;
+    }
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}

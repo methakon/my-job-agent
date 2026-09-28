@@ -95,12 +95,43 @@ int main(int argc, char* argv[]) {
                     last_active_state = true;
                 }
 
-                // Drain ring buffer ticks and persist to fnf_market_snapshots
+                // Drain ring buffer ticks, evaluate signals, and execute automated paper trades
+                MicrostructureFeatureEngine feature_engine;
                 CanonicalOptionTick tick;
                 size_t saved_ticks = 0;
                 while (receiver.get_latest_tick(tick)) {
                     if (db_client->save_canonical_market_snapshot(tick)) {
                         saved_ticks++;
+
+                        auto feat = feature_engine.process_tick(tick);
+                        if (std::abs(feat.order_flow_imbalance) > 100.0) {
+                            std::string side = (feat.order_flow_imbalance > 0) ? "BUY" : "SELL";
+                            double confidence = 0.85;
+                            std::string symbol = tick.symbol.empty() ? "NIFTY" : tick.symbol;
+                            std::string inst = tick.instrument_key.empty() ? ("NSE:" + symbol) : tick.instrument_key;
+
+                            std::string uuid = "dj-" + std::to_string(tick.timestamp_ms);
+                            db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, side + "_CALL", confidence, 0.05, "OFI threshold triggered", "{}");
+
+                            UserTradeData trade;
+                            trade.id = "cpp-paper-" + std::to_string(tick.timestamp_ms);
+                            trade.instrument = inst;
+                            trade.side = side;
+                            trade.quantity = 65;
+                            trade.entryPrice = tick.ask_price > 0 ? tick.ask_price : (tick.ltp > 0 ? tick.ltp : 100.0);
+                            trade.exitPrice = 0.0;
+                            trade.netPnl = 0.0;
+                            trade.status = "OPEN";
+                            trade.executionProvider = is_upstox_active ? "UPSTOX" : "FYERS";
+                            trade.executionMode = "PAPER";
+                            trade.onRealData = 1;
+                            trade.algoSource = "GapFadeP0Strategy";
+
+                            if (db_client->create_paper_trade(trade)) {
+                                std::cout << "🚀 [TokenSupervisor] Automated Paper Trade Executed & Persisted to fnf_trades: "
+                                          << trade.id << " (" << trade.instrument << " " << trade.side << " @ ₹" << trade.entryPrice << ")\n";
+                            }
+                        }
                     }
                 }
                 if (saved_ticks > 0) {

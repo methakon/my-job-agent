@@ -109,6 +109,10 @@ struct UserTradeData {
     std::string status;
     std::string orderedAt;
     std::string closedAt;
+    std::string executionProvider = "UPSTOX_PAPER";
+    std::string executionMode = "PAPER";
+    int onRealData = 1;
+    std::string algoSource = "GapFadeP0Strategy";
 };
 
 struct MarketSnapshotData {
@@ -213,6 +217,7 @@ public:
     UserProfile fetch_user_by_email_or_id(const std::string& identifier);
     UserPortfolioData fetch_user_portfolio(const std::string& user_id);
     std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 10);
+    bool create_paper_trade(const UserTradeData& trade);
 
     UpstoxTokenInfo fetch_upstox_token_status();
     bool save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at);
