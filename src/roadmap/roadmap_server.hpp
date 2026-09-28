@@ -7,9 +7,10 @@
 
 class RoadmapServer {
 public:
-    RoadmapServer(int port, std::shared_ptr<RoadmapDbClient> db_client);
+    RoadmapServer(int port, std::shared_ptr<RoadmapDbClient> db_client = nullptr);
     ~RoadmapServer();
 
+    void set_db_client(std::shared_ptr<RoadmapDbClient> db_client) { db_client_ = db_client; }
     void start();
     void stop();
 

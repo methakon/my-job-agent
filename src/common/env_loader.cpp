@@ -64,3 +64,14 @@ int EnvLoader::get_int(const std::string& key, int fallback) {
         return fallback;
     }
 }
+
+double EnvLoader::get_double(const std::string& key, double fallback) {
+    std::string val = get(key, "");
+    if (val.empty()) return fallback;
+    try {
+        return std::stod(val);
+    } catch (...) {
+        return fallback;
+    }
+}
+

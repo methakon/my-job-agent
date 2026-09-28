@@ -1,5 +1,6 @@
 #include "gate16_risk_limits.hpp"
 #include "gate0_bootstrap.hpp"
+#include "../common/env_loader.hpp"
 #include <sstream>
 #include <iomanip>
 #include <iostream>
@@ -10,9 +11,10 @@ IndependentRiskEngine::IndependentRiskEngine(
     double max_per_trade_risk,
     double max_aggregate_capital,
     double max_session_drawdown
-) : max_per_trade_risk_(max_per_trade_risk),
-    max_aggregate_capital_(max_aggregate_capital),
-    max_session_drawdown_(max_session_drawdown) {}
+) : max_per_trade_risk_(max_per_trade_risk > 0 ? max_per_trade_risk : EnvLoader::get_double("MAX_PER_TRADE_RISK", 2000.0)),
+    max_aggregate_capital_(max_aggregate_capital > 0 ? max_aggregate_capital : EnvLoader::get_double("MAX_AGGREGATE_CAPITAL", 10000.0)),
+    max_session_drawdown_(max_session_drawdown > 0 ? max_session_drawdown : EnvLoader::get_double("MAX_SESSION_DRAWDOWN", 1500.0)) {}
+
 
 ExecutionModeState IndependentRiskEngine::get_execution_mode_state() {
 #ifdef HERMES_COMPILE_TIME_PAPER_ONLY

@@ -1,4 +1,5 @@
 #include "gate8_stat_arb.hpp"
+#include "../common/env_loader.hpp"
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -103,17 +104,24 @@ StatArbResult StatArbEngine::evaluate_position(
     // Assuming lot size = 65 for NIFTY
     double pnl_inr = pnl_points * 65.0;
 
-    // Hard Risk Cap check (-₹2,000 ceiling per lot or hit stop loss)
-    if (pnl_inr <= -pos.max_risk_amount || (is_short_fade && current_price >= pos.stop_loss_price) || (!is_short_fade && current_price <= pos.stop_loss_price)) {
+    // Hard Risk Cap check (per lot or hit stop loss)
+    double effective_max_risk = pos.max_risk_amount > 0 ? pos.max_risk_amount : EnvLoader::get_double("MAX_PER_TRADE_RISK", 2000.0);
+    uint32_t effective_max_holding = pos.max_holding_minutes > 0 ? pos.max_holding_minutes : static_cast<uint32_t>(EnvLoader::get_int("MAX_POSITION_HOLDING_MINUTES", 60));
+
+    if (pnl_inr <= -effective_max_risk || (is_short_fade && current_price >= pos.stop_loss_price) || (!is_short_fade && current_price <= pos.stop_loss_price)) {
         res.signal = StatArbSignal::FORCE_EXIT_RISK_CAP_EXCEEDED;
-        res.signal_reason = "FORCE_EXIT_RISK_CAP_EXCEEDED: Loss reached ₹2,000 risk cap or stop loss level";
+        std::ostringstream ss;
+        ss << "FORCE_EXIT_RISK_CAP_EXCEEDED: Loss reached ₹" << effective_max_risk << " risk cap or stop loss level";
+        res.signal_reason = ss.str();
         return res;
     }
 
-    // Max Holding Period check (45 minutes)
-    if (elapsed_min >= pos.max_holding_minutes) {
+    // Max Holding Period check (0 = disabled / dynamic structure exit)
+    if (effective_max_holding > 0 && elapsed_min >= effective_max_holding) {
         res.signal = StatArbSignal::FORCE_EXIT_TIME_EXPIRED;
-        res.signal_reason = "FORCE_EXIT_TIME_EXPIRED: Max holding duration (45 mins) reached";
+        std::ostringstream ss;
+        ss << "FORCE_EXIT_TIME_EXPIRED: Max holding duration (" << effective_max_holding << " mins) reached";
+        res.signal_reason = ss.str();
         return res;
     }
 

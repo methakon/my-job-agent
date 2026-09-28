@@ -20,6 +20,12 @@
 #include "../src/engine/gate14_risk_reflexion.hpp"
 #include "../src/engine/gate15_experiment_registry.hpp"
 #include "../src/engine/gate16_risk_limits.hpp"
+#include "../src/engine/gate17_cross_market.hpp"
+#include "../src/engine/gate18_advanced_research.hpp"
+#include "../src/engine/gate19_observability.hpp"
+#include "../src/engine/gate20_shadow_scaffolding.hpp"
+#include "../src/engine/gate21_final_acceptance.hpp"
+#include "../src/engine/gate_const_invariants.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -833,10 +839,10 @@ void run_solid_and_acid_test_suite() {
     // Item G12-03 & G12-04: Baseline vs Tree Model Comparison & Approval Gate
     {
         // Case A: Leakage test passed & Tree Model achieves +8.7% lift over simple baseline
-        BaselineComparisonRecord rec_pass = MLFeaturePipelineEngine::evaluate_baseline_vs_tree_model(true, 0.525, 0.612);
+        hermes::BaselineComparisonRecord rec_pass = MLFeaturePipelineEngine::evaluate_baseline_vs_tree_model(true, 0.525, 0.612);
 
         // Case B: Leakage test failed -> Tree model MUST be rejected
-        BaselineComparisonRecord rec_fail = MLFeaturePipelineEngine::evaluate_baseline_vs_tree_model(false, 0.525, 0.612);
+        hermes::BaselineComparisonRecord rec_fail = MLFeaturePipelineEngine::evaluate_baseline_vs_tree_model(false, 0.525, 0.612);
 
         TEST("Gate G12-03 & G12-04: Tree model approved only after passing leakage test and proving >5% accuracy lift", rec_pass.tree_model_approved && !rec_fail.tree_model_approved && rec_pass.accuracy_lift >= 0.05);
     }
@@ -993,6 +999,172 @@ void run_solid_and_acid_test_suite() {
 
         TEST("Gate G16-04: Emergency kill switch cancels pending orders and flattens paper positions cleanly", kill_res.kill_switch_triggered && kill_res.cancelled_orders_count == 2 && kill_res.flattened_positions_count == 1);
         TEST("Gate G16-05: Execution mode guard confirms PAPER mode active and LIVE mode strictly unreachable", mode == ExecutionModeState::PAPER);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 21: GATE 17 CROSS-MARKET, EVENT PIPELINE & LOOK-AHEAD GUARD
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 21: Gate 17 Cross-Market, Event Pipeline & Look-Ahead Guard ---\n";
+
+    {
+        CrossMarketEventEngine cross_engine;
+        ScheduledEvent rbi_event;
+        rbi_event.event_id = "EV-RBI-2026";
+        rbi_event.name = "RBI Monetary Policy";
+        rbi_event.scheduled_timestamp_ms = 1727443800000ULL + 3600000ULL; // 1 hour ahead
+        rbi_event.impact_weight = 0.9;
+        cross_engine.add_scheduled_event(rbi_event);
+
+        EventDistanceResult dist = cross_engine.compute_event_distance(1727443800000ULL);
+
+        std::string rej_reason;
+        bool no_lookahead_ok = cross_engine.validate_no_lookahead(1727443800000ULL, 1727443800000ULL, rej_reason);
+        bool lookahead_blocked = !cross_engine.validate_no_lookahead(1727443800000ULL, 1727443800000ULL + 5000ULL, rej_reason);
+
+        TEST("Gate G17-01 & G17-02: Cross-market features & scheduled event distance calculated correctly", dist.has_upcoming_event && std::abs(dist.distance_minutes - 60.0) < 1.0 && dist.impact_weight == 0.9);
+        TEST("Gate G17-03: Look-ahead guard blocks future event/feature timestamp", no_lookahead_ok && lookahead_blocked && rej_reason.find("REJECT_LOOKAHEAD_FUTURE_EVENT_DATA") != std::string::npos);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 22: GATE 18 ADVANCED RESEARCH FRAMEWORK & BASELINE GATING
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 22: Gate 18 Advanced Research Framework & Baseline Gating ---\n";
+
+    {
+        AdvancedResearchFramework research;
+        AdvancedBaselineComparisonRecord record;
+        record.model_id = "HMM-REGIME-V1";
+        record.type = AdvancedModelType::HMM_REGIME;
+        record.simpler_baseline_name = "RuleBasedStateEngine";
+        record.baseline_sharpe = 1.4;
+        record.advanced_model_sharpe = 1.8;
+        record.perf_lift_pct = 28.5;
+        record.baseline_plateau_proven = true;
+        record.off_box_trained = true;
+        record.is_enabled_for_production = false; // Shadow mode
+
+        research.register_baseline_comparison(record);
+
+        std::string reason;
+        bool approved = research.is_model_approved_for_production("HMM-REGIME-V1", reason);
+
+        TEST("Gate G18-01: Advanced models require baseline plateau, off-box training, and stay shadow-only", !approved && reason.find("REJECT_SHADOW_ONLY_MODE") != std::string::npos);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 23: GATE 19 SYSTEM OBSERVABILITY & LIVE TELEMETRY
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 23: Gate 19 System Observability & Live Telemetry ---\n";
+
+    {
+        SystemObservabilityEngine obs(db_client);
+        SystemObservabilityState state;
+        state.data_freshness_sec = 0.05;
+        state.active_broker_feed = "UPSTOX";
+        state.feed_quality_score = 99.8;
+        state.total_capital = 10000.0;
+        state.max_capital_ceiling = 10000.0;
+        state.deployed_capital = 2500.0;
+        state.available_margin = 7500.0;
+        state.session_net_pnl = 450.0;
+        state.total_candidates_evaluated = 142;
+        state.total_trade_proposals = 3;
+        state.total_risk_vetoes = 1;
+        state.current_regime = "TRENDING_BULL";
+        state.execution_mode = "PAPER_TRADING_ENGINE";
+        state.live_orders_blocked = true;
+
+        obs.update_state(state);
+        std::string json_str = obs.export_telemetry_json();
+
+        TEST("Gate G19-01: Observability telemetry exports live data health, capital tiles, regime and risk veto counts", json_str.find("PAPER_TRADING_ENGINE") != std::string::npos && json_str.find("portfolio_capital_and_margins") != std::string::npos && json_str.find("TRENDING_BULL") != std::string::npos);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 24: GATE 20 SHADOW EXECUTION ENGINE SCAFFOLDING
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 24: Gate 20 Shadow Execution Engine Scaffolding ---\n";
+
+    {
+        ShadowExecutionEngine shadow_engine;
+        ShadowOrderProposal prop;
+        prop.order_id = "SHADOW-ORD-101";
+        prop.symbol = "NIFTY26SEP24300CE";
+        prop.side = "BUY";
+        prop.quantity = 75;
+        prop.limit_price = 145.0;
+        prop.timestamp_ms = 1727443800000ULL;
+        prop.strategy_id = "GapFadeP0Strategy";
+
+        std::string status;
+        bool ok = shadow_engine.submit_order(prop, status);
+        auto logs = shadow_engine.get_shadow_execution_logs();
+
+        TEST("Gate G20-01: Shadow execution engine logs paper proposals while blocking live order path", ok && !shadow_engine.is_live_execution_allowed() && logs.size() == 1 && logs[0].is_paper_execution);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 25: GATE 21 FINAL ACCEPTANCE & SYSTEM RELEASE
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 25: Gate 21 Final Acceptance & System Release ---\n";
+
+    {
+        FinalAcceptanceValidator validator(db_client);
+        Phase1ReleaseReport report = validator.evaluate_phase1_acceptance();
+
+        TEST("Gate G21-01, G21-02 & G21-03: Final acceptance validator verifies all Gates 0-19 GREEN, OOS rule promotion, and stable paper run", report.phase1_final_acceptance_unlocked && report.gates_0_to_19_verified_green && report.oos_tested_rule_promoted && report.minimum_stable_paper_period_passed && report.gate_verifications.size() >= 20);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 26: CONST INVARIANTS (ENTRY GATES E1-E10 & RULES R-001..R-015)
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 26: CONST Invariants (Entry Gates E1-E10 & Rules R-001..R-015) ---\n";
+
+    {
+        ConstInvariantsEngine const_engine;
+
+        // Test A: Normal valid context -> PASS
+        EntryGateEvaluationContext valid_ctx;
+        EntryGateResult valid_res = const_engine.evaluate_entry_gates(valid_ctx);
+
+        // Test B (E1/R-007): Stale tick feed (age = 3.5s) -> REJECT
+        EntryGateEvaluationContext stale_ctx = valid_ctx;
+        stale_ctx.tick_age_sec = 3.5;
+        EntryGateResult stale_res = const_engine.evaluate_entry_gates(stale_ctx);
+
+        // Test C (E7): High trap score (65 > 50) -> REJECT
+        EntryGateEvaluationContext trap_ctx = valid_ctx;
+        trap_ctx.trap_score = 65.0;
+        EntryGateResult trap_res = const_engine.evaluate_entry_gates(trap_ctx);
+
+        // Test D (R-004): Averaging down attempt -> REJECT
+        EntryGateEvaluationContext avg_ctx = valid_ctx;
+        avg_ctx.is_averaging_down = true;
+        EntryGateResult avg_res = const_engine.evaluate_entry_gates(avg_ctx);
+
+        // Test E (R-005): Auto-reversal attempt -> REJECT
+        EntryGateEvaluationContext rev_ctx = valid_ctx;
+        rev_ctx.is_auto_reversal = true;
+        EntryGateResult rev_res = const_engine.evaluate_entry_gates(rev_ctx);
+
+        // Test F (R-014): System HALT active -> REJECT
+        EntryGateEvaluationContext halt_ctx = valid_ctx;
+        halt_ctx.system_halted = true;
+        EntryGateResult halt_res = const_engine.evaluate_entry_gates(halt_ctx);
+
+        // Test G (R-009): Position health state machine transition to RED on 35% drawdown
+        PositionHealthState h_red = const_engine.transition_health_state(PositionHealthState::GREEN, 35.0, 15.0);
+
+        // Test H (R-010): Negative recovery EV rejected
+        std::string rec_reason;
+        bool rec_ok = const_engine.is_recovery_allowed(-5.0, 1500.0, rec_reason);
+
+        TEST("CONST Entry Gates E1-E10 & Rules R-001..R-015: Valid trade proposal approved cleanly", valid_res.passed_all && valid_res.failed_gate_id == "NONE");
+        TEST("CONST Gate E1 & Rule R-007: Stale tick feed triggers immediate NO_TRADE", !stale_res.passed_all && stale_res.failed_gate_id == "E1/R-007");
+        TEST("CONST Gate E7: High option chain trap score triggers immediate veto", !trap_res.passed_all && trap_res.failed_gate_id == "E7");
+        TEST("CONST Rule R-004 & R-005: Automated averaging down and post-loss auto-reversal rejected", !avg_res.passed_all && avg_res.failed_gate_id == "R-004" && !rev_res.passed_all && rev_res.failed_gate_id == "R-005");
+        TEST("CONST Rule R-014: System HALT mode blocks new entries", !halt_res.passed_all && halt_res.failed_gate_id == "R-014");
+        TEST("CONST Rule R-009 & R-010: Position health transitions and negative recovery EV rejection verified", h_red == PositionHealthState::RED && !rec_ok && rec_reason.find("REJECT_NEGATIVE_RECOVERY_EV") != std::string::npos);
     }
 
     std::cout << "===================================================================\n";

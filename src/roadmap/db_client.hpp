@@ -7,7 +7,11 @@
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <map>
+#include <tuple>
 #include <mysql/mysql.h>
+
+struct CanonicalOptionTick;
 
 struct ChecklistItem {
     int id;
@@ -104,6 +108,46 @@ struct UserTradeData {
     double netPnl = 0.0;
     std::string status;
     std::string orderedAt;
+    std::string closedAt;
+};
+
+struct MarketSnapshotData {
+    std::string instrument;
+    double price{0.0};
+    double changePct{0.0};
+    double volume{0.0};
+    std::string ts;
+};
+
+struct DecayCalibrationData {
+    int weekday{0};
+    double decayRate{0.04};
+    double windowStartHour{9.5};
+    double windowEndHour{15.25};
+    int samples{0};
+    std::string lastRectifiedAt;
+};
+
+struct LearningSummaryData {
+    int totalClosed{0};
+    int winners{0};
+    double winRate{0.0};
+    double netPnl{0.0};
+    std::map<std::string, std::tuple<int, double, double>> byAlgo; // algo -> <count, winRate, netPnl>
+};
+
+struct SandboxLogData {
+    std::string id;
+    std::string instrument;
+    std::string side;
+    int quantity{0};
+    double entryPrice{0.0};
+    double exitPrice{0.0};
+    double netPnl{0.0};
+    std::string status;
+    std::string orderedAt;
+    std::string closedAt;
+    std::string executionProvider;
 };
 
 class MySQLConnectionPool {
@@ -174,7 +218,15 @@ public:
     bool save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at);
 
     BrokerTokenInfo fetch_broker_token_status(const std::string& provider);
+    std::string fetch_active_broker_token_raw(const std::string& provider);
     bool save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at);
+    bool save_canonical_market_snapshot(const CanonicalOptionTick& tick);
+
+    // FNF Market Data, Decay, Learning, and Internal Sandbox Methods
+    std::vector<MarketSnapshotData> fetch_market_snapshots();
+    std::vector<DecayCalibrationData> fetch_decay_calibrations();
+    LearningSummaryData fetch_learning_summary();
+    std::vector<SandboxLogData> fetch_sandbox_logs(int limit = 10);
 
     // Hermes-CPP Zero-Progress Roadmap & Clarifications Methods
     std::vector<HermesCppStage> fetch_hermes_cpp_stages();
