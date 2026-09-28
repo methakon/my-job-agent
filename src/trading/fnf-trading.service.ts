@@ -1859,8 +1859,14 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 		// the archive with a wrong instant (the rest of the row's machine-written
 		// columns — createdAt — are the client's UTC).
 		const archivedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+		// INSERT IGNORE: deterministic PKs mean a row can already be in history
+		// (e.g. a run interrupted between INSERT and DELETE). A plain INSERT made
+		// one such duplicate abort the entire move — stalling the archive (and,
+		// via the shared try in the driver, the unified archive as well) while
+		// the live tables kept a week of ticks. IGNORE skips the history copy,
+		// the DELETE below then still clears the live row.
 		const snapshots = await this.snapshots.manager.query(
-			`INSERT INTO fnf_market_snapshots_history
+			`INSERT IGNORE INTO fnf_market_snapshots_history
 				(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt)
 				SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, ?
 				FROM fnf_market_snapshots WHERE ts < ?`,
@@ -1871,7 +1877,7 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 			[boundaryIst],
 		);
 		const quotes = await this.quoteHistory.manager.query(
-			`INSERT INTO fnf_option_quotes_history
+			`INSERT IGNORE INTO fnf_option_quotes_history
 				(id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
 				  openInterest, impliedVolatility, delta, gamma, theta, vega, provider, ts, createdAt, archivedAt)
 				SELECT id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
