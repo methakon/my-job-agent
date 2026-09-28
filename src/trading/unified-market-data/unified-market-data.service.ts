@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, MoreThanOrEqual, Repository } from 'typeorm';
+import { Like, MoreThanOrEqual, QueryDeepPartialEntity, Repository } from 'typeorm';
 import { UnifiedOptionQuote } from './unified-option-quote.entity';
 import { UnifiedMarketSnapshot } from './unified-market-snapshot.entity';
 import { canonicalInstrumentKey } from './canonical/canonical-tick';
@@ -427,8 +427,18 @@ export class UnifiedMarketDataService {
     try {
       // The `depth` column is typed `unknown`, which TypeORM's insert typings reject;
       // the row shape itself is exactly what the entity was created with.
+      // INSERT IGNORE (.orIgnore): two writers race the same deterministic row ids
+      // (local agent + VM worker), so a colliding row must be SKIPPED silently —
+      // a plain INSERT aborts the whole 500-row batch on the first duplicate, and
+      // every aborted batch costs a full statement retry (the write-behind wedge).
       await withTimeout(
-        this.quotes.insert(rows as unknown as Parameters<Repository<UnifiedOptionQuote>['insert']>[0]),
+        this.quotes
+          .createQueryBuilder()
+          .insert()
+          .into(UnifiedOptionQuote)
+          .values(rows as unknown as QueryDeepPartialEntity<UnifiedOptionQuote>[])
+          .orIgnore()
+          .execute(),
         this.flushTimeoutMs,
         () => this.noteFlushTimeout('quote'),
       );
@@ -476,8 +486,16 @@ export class UnifiedMarketDataService {
     const rows = [...this.pendingSnapshotRows.values()].slice(0, this.maxRowsPerFlush);
     for (const row of rows) this.pendingSnapshotRows.delete(String(row.id));
     try {
+      // INSERT IGNORE — same reasoning as flushQuoteRows: colliding ids are skipped
+      // in-batch instead of aborting the statement (dual-writer idempotency).
       await withTimeout(
-        this.snapshots.insert(rows as unknown as Parameters<Repository<UnifiedMarketSnapshot>['insert']>[0]),
+        this.snapshots
+          .createQueryBuilder()
+          .insert()
+          .into(UnifiedMarketSnapshot)
+          .values(rows as unknown as QueryDeepPartialEntity<UnifiedMarketSnapshot>[])
+          .orIgnore()
+          .execute(),
         this.flushTimeoutMs,
         () => this.noteFlushTimeout('snapshot'),
       );

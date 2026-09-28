@@ -319,22 +319,39 @@ export class FnfTradingService {
 			lotSize,
 			units,
 		};
-		const trade = await this.trades.save(this.trades.create({
-			portfolio,
-			instrument: dto.instrument,
-			side: dto.side,
-			quantity: units, // stored in units (lots × lot size)
-			entryPrice: premium, // premium per unit
-			algoSource: dto.algoSource ?? undefined,
-			decisionParams: dto.decisionParams
-				? JSON.stringify({ ...JSON.parse(dto.decisionParams), contract: contractMeta })
-				: JSON.stringify({ contract: contractMeta }),
-			decisionId: dto.decisionId ?? null,
-			status: 'OPEN',
-		}));
-
-		await this.portfolios.update(portfolio.id, {
-			deployed: Number(portfolio.deployed) + outlay,
+		// ── Cross-process entry guard (dual-driver safety) ───────────────────
+		// The local and the VM desk both run the session driver (10s tick), and
+		// the driver's in-cycle `alreadyOpen` check races across processes: one
+		// process can fetch its open list before the other inserts. Serialize
+		// check+insert on the portfolio row so exactly one process can open a
+		// given instrument; the loser is cleanly rejected (400).
+		const trade = await this.trades.manager.transaction(async (em) => {
+			await em.query('SELECT id FROM fnf_portfolios WHERE id = ? FOR UPDATE', [portfolio.id]);
+			const clash = await em.getRepository(FnfTrade).findOne({
+				where: { portfolio: { id: portfolio.id }, instrument: dto.instrument, status: 'OPEN' },
+			});
+			if (clash) {
+				throw new BadRequestException(
+					`position already open for ${dto.instrument} (trade ${clash.id}) — duplicate entry blocked`,
+				);
+			}
+			const created = await em.getRepository(FnfTrade).save(
+				em.getRepository(FnfTrade).create({
+					portfolio,
+					instrument: dto.instrument,
+					side: dto.side,
+					quantity: units, // stored in units (lots × lot size)
+					entryPrice: premium, // premium per unit
+					algoSource: dto.algoSource ?? undefined,
+					decisionParams: dto.decisionParams
+						? JSON.stringify({ ...JSON.parse(dto.decisionParams), contract: contractMeta })
+						: JSON.stringify({ contract: contractMeta }),
+					decisionId: dto.decisionId ?? null,
+					status: 'OPEN',
+				}),
+			);
+			await em.update(FnfPortfolio, { id: portfolio.id }, { deployed: Number(portfolio.deployed) + outlay });
+			return created;
 		});
 		this.logger.log(`[FYERS][REAL] option ${dto.side} ${dto.quantity} lot(s) ${dto.instrument} @ ₹${premium.toFixed(2)}/unit (${units} units, outlay ${outlay.toFixed(2)})`);
 		void this.queueTradeReport({
@@ -1842,8 +1859,14 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 		// the archive with a wrong instant (the rest of the row's machine-written
 		// columns — createdAt — are the client's UTC).
 		const archivedAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+		// INSERT IGNORE: deterministic PKs mean a row can already be in history
+		// (e.g. a run interrupted between INSERT and DELETE). A plain INSERT made
+		// one such duplicate abort the entire move — stalling the archive (and,
+		// via the shared try in the driver, the unified archive as well) while
+		// the live tables kept a week of ticks. IGNORE skips the history copy,
+		// the DELETE below then still clears the live row.
 		const snapshots = await this.snapshots.manager.query(
-			`INSERT INTO fnf_market_snapshots_history
+			`INSERT IGNORE INTO fnf_market_snapshots_history
 				(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt)
 				SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, ?
 				FROM fnf_market_snapshots WHERE ts < ?`,
@@ -1854,7 +1877,7 @@ private sanitizeSnapshot(snap: DecisionSnapshot): Record<string, unknown> {
 			[boundaryIst],
 		);
 		const quotes = await this.quoteHistory.manager.query(
-			`INSERT INTO fnf_option_quotes_history
+			`INSERT IGNORE INTO fnf_option_quotes_history
 				(id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,
 				  openInterest, impliedVolatility, delta, gamma, theta, vega, provider, ts, createdAt, archivedAt)
 				SELECT id, contractSymbol, underlying, expiry, strike, optionType, ltp, bid, ask, volume,

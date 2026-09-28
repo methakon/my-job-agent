@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { BypassAuth } from '../auth/bypass-auth.decorator';
 import { ProjectChecklistItem } from './project-checklist-item.entity';
 import { ProjectStatusService } from './project-status.service';
 import { ProjectClarification } from './project-clarification.entity';
@@ -100,7 +101,14 @@ export class ProjectStatusPageController {
 		private readonly clar: ProjectClarificationService,
 	) {}
 
+	/**
+	 * Public read-only view (operator directive 2026-09-27): the checklist page is
+	 * viewable without a login so anyone can check project status. @BypassAuth is
+	 * deliberately METHOD-level — the POST endpoints in this controller (status,
+	 * note, clarifications) and GET clarifications.json stay behind the auth wall.
+	 */
 	@Get()
+	@BypassAuth()
 	async page(@Res() res: Response) {
 		const [groups, overall, clarOv] = await Promise.all([
 			this.status.grouped(),
