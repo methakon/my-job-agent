@@ -24,9 +24,9 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
  *    stale one. The reaper is armed only when `maxIdle < connectionLimit`,
  *    which is why maxIdle is 2 against mysql2's default limit of 10.
  *
- * This changes only how sockets are recycled. The pool SIZE (connectionLimit)
- * is untouched, no query semantics change, and no trading, risk, sizing,
- * arbitration or ownership behaviour is affected.
+ * This changes how sockets are recycled plus the pool size itself (see the
+ * measured `connectionLimit` note below). No query semantics change, and no
+ * trading, risk, sizing, arbitration or ownership behaviour is affected.
  */
 
 /**
@@ -47,6 +47,17 @@ export function mysqlPoolTuning(): Record<string, number | boolean> {
 		...mysqlKeepAliveOptions(),
 		maxIdle: 2,
 		idleTimeout: 30_000,
+		// Pool SIZE — mysql2's default is 10 slots and that ceiling is too low
+		// for this deployment's transport. Measured 2026-09-28: every statement
+		// through the SSH tunnel costs ~186 ms, so 10 slots cap a process at
+		// ~54 statements/s while market-hours persistence demand (per-row
+		// canonical writes + journal + batched flushes) sits at/above that edge;
+		// acquires pile up unserved (observed: 4,235 queued on the trading
+		// process) and each write-behind flush burns its full 20 s ceiling.
+		// 25 slots x ~5.4 stmt/s ~= 135 stmt/s keeps real headroom: a 25-way
+		// parallel connect+query through the SAME tunnel completed in 656 ms.
+		// Override with MYSQL_POOL_SIZE if a host needs otherwise.
+		connectionLimit: Math.max(1, Number(process.env.MYSQL_POOL_SIZE || 25)),
 		// queueLimit bounds how many INSERTs can pile up when every pool slot is
 		// occupied by a half-dead connection.  0 = unlimited — withTimeout (120 s)
 		// already bounds query lifetime; releasePoolConnections (RingQueue fix)
