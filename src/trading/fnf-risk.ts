@@ -135,7 +135,8 @@ export function fnfRiskSnapshot(
 ): FnfRiskSnapshot {
   const equity = portfolio.capital + portfolio.netPnl + portfolio.unrealisedPnl;
   const riskBudget = equity * (policy.riskPctPerTrade / 100);
-  const headroom = portfolio.capital - portfolio.deployed;
+  // Headroom includes realized P&L (matches the candidate capital filter; operator directive 2026-09-28).
+  const headroom = portfolio.capital + portfolio.netPnl - portfolio.deployed;
   const sessionLoss = portfolio.sessionStartEquity - equity;
   const sessionLossBudget = portfolio.sessionStartEquity * (policy.maxDailyLossPct / 100);
   const drawdown = portfolio.peakEquity - equity;
@@ -207,7 +208,7 @@ export function fnfSizeFromRisk(req: SizeRequest): SizeResult {
 
   if (riskPerLot > snapshot.riskBudget) {
     refusals.push(
-      `risk_per_lot ${riskPerLot.toFixed(2)} exceeds risk_budget ${snapshot.riskBudget.toFixed(2)} (1% of ₹${snapshot.equity.toFixed(0)})`,
+      `risk_per_lot ${riskPerLot.toFixed(2)} exceeds risk_budget ${snapshot.riskBudget.toFixed(2)} (${policy.riskPctPerTrade}% of ₹${snapshot.equity.toFixed(0)})`,
     );
   }
 
