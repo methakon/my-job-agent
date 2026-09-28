@@ -319,22 +319,39 @@ export class FnfTradingService {
 			lotSize,
 			units,
 		};
-		const trade = await this.trades.save(this.trades.create({
-			portfolio,
-			instrument: dto.instrument,
-			side: dto.side,
-			quantity: units, // stored in units (lots × lot size)
-			entryPrice: premium, // premium per unit
-			algoSource: dto.algoSource ?? undefined,
-			decisionParams: dto.decisionParams
-				? JSON.stringify({ ...JSON.parse(dto.decisionParams), contract: contractMeta })
-				: JSON.stringify({ contract: contractMeta }),
-			decisionId: dto.decisionId ?? null,
-			status: 'OPEN',
-		}));
-
-		await this.portfolios.update(portfolio.id, {
-			deployed: Number(portfolio.deployed) + outlay,
+		// ── Cross-process entry guard (dual-driver safety) ───────────────────
+		// The local and the VM desk both run the session driver (10s tick), and
+		// the driver's in-cycle `alreadyOpen` check races across processes: one
+		// process can fetch its open list before the other inserts. Serialize
+		// check+insert on the portfolio row so exactly one process can open a
+		// given instrument; the loser is cleanly rejected (400).
+		const trade = await this.trades.manager.transaction(async (em) => {
+			await em.query('SELECT id FROM fnf_portfolios WHERE id = ? FOR UPDATE', [portfolio.id]);
+			const clash = await em.getRepository(FnfTrade).findOne({
+				where: { portfolio: { id: portfolio.id }, instrument: dto.instrument, status: 'OPEN' },
+			});
+			if (clash) {
+				throw new BadRequestException(
+					`position already open for ${dto.instrument} (trade ${clash.id}) — duplicate entry blocked`,
+				);
+			}
+			const created = await em.getRepository(FnfTrade).save(
+				em.getRepository(FnfTrade).create({
+					portfolio,
+					instrument: dto.instrument,
+					side: dto.side,
+					quantity: units, // stored in units (lots × lot size)
+					entryPrice: premium, // premium per unit
+					algoSource: dto.algoSource ?? undefined,
+					decisionParams: dto.decisionParams
+						? JSON.stringify({ ...JSON.parse(dto.decisionParams), contract: contractMeta })
+						: JSON.stringify({ contract: contractMeta }),
+					decisionId: dto.decisionId ?? null,
+					status: 'OPEN',
+				}),
+			);
+			await em.update(FnfPortfolio, { id: portfolio.id }, { deployed: Number(portfolio.deployed) + outlay });
+			return created;
 		});
 		this.logger.log(`[FYERS][REAL] option ${dto.side} ${dto.quantity} lot(s) ${dto.instrument} @ ₹${premium.toFixed(2)}/unit (${units} units, outlay ${outlay.toFixed(2)})`);
 		void this.queueTradeReport({
