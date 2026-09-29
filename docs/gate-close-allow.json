@@ -950,6 +950,12 @@
       "reason": "Fix the two blockers that prevented any paper trade from opening: resolve contract expiry from the registry (not the session date) and never string-slice a mysql2 DATE column. DTE now correct and remains a feature. Paper-only, live execution disabled.",
       "workstream": "trading-expiry-learning",
       "authority": "operator-directive 2026-09-29 (first complete real-tick paper learning cycle)"
+    },
+    "448d6512cc2657b44788587c04ff210eaee90b9f": {
+      "short": "448d651",
+      "reason": "FYERS expiry-code fix: accept both DDMMM and DDO0MM symbol forms and take the expiry date from authoritative contract metadata instead of the symbol. Unblocks the option feed so paper learning can observe real quotes. Paper-only; live execution disabled.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (first complete real-tick paper learning cycle)"
     }
   }
 }
