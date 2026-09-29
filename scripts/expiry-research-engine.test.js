@@ -8,7 +8,7 @@ const path = require('path');
 // Compile check & requirement tests
 async function runExpiryResearchSuite() {
   console.log('===================================================================');
-  console.log('⚡ [HERMES EXPIRY-DAY RESEARCH SUITE] RUNNING AUDIT & INVARIANT TESTS');
+  console.log('⚡ [DHARTRADES EXPIRY-DAY RESEARCH SUITE] RUNNING AUDIT & INVARIANT TESTS');
   console.log('===================================================================');
 
   // Load ts-node or compiled dist module

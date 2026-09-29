@@ -7,7 +7,7 @@ const path = require('path');
 
 async function runDynamicRiskEngineTests() {
   console.log('===================================================================');
-  console.log('⚡ [HERMES DYNAMIC RISK ENGINE] RUNNING UNIT & INTEGRATION TESTS');
+  console.log('⚡ [DHARTRADES DYNAMIC RISK ENGINE] RUNNING UNIT & INTEGRATION TESTS');
   console.log('===================================================================');
 
   let engineModule;

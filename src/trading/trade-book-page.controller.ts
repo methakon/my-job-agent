@@ -19,7 +19,7 @@ export class TradeBookPageController {
 
 	@Get()
 	async page(@Res() res: Response) {
-		// Fetch all trade book imports (research data - NOT Hermes execution)
+		// Fetch all trade book imports (research data - NOT Dhartrades execution)
 		const { getRepository } = await import('typeorm');
 		const tradeBookRepo = getRepository(TradeBookImport);
 		const imports = await tradeBookRepo.find({
@@ -81,13 +81,13 @@ th{background:var(--card);color:var(--dim);font-weight:600;text-transform:upperc
 tr.today td{background:rgba(91,140,255,.08)}
 .empty{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--dim)}
 .hint{color:var(--dim);font-size:12px;margin-top:8px}
-code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,60,.1);padding:1px 4px;border-radius:4px}
+.code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,60,.1);padding:1px 4px;border-radius:4px}
 .footer{margin-top:24px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
 </style></head><body>
 <div class="masthead">
   <div>
     <h1>📋 Historical TradeBook</h1>
-    <div class="meta">Broker tradebook records imported for research/learning — NOT Hermes execution</div>
+    <div class="meta">Broker tradebook records imported for research/learning — NOT Dhartrades execution</div>
   </div>
   <div class="meta">API: <code>POST /trading/trade-book/import</code> · <a href="/docs">Swagger</a></div>
 </div>
@@ -97,13 +97,13 @@ code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,
   <div class="kv">
     <div><span>Data origin</span><b class="dim">Broker-imported (Zerodha/other)</b></div>
     <div><span>For</span><b class="dim">Research, learning, pattern analysis</b></div>
-    <div><span>NOT</span><b class="bad">Hermes execution / paper trading</b></div>
+    <div><span>NOT</span><b class="bad">Dhartrades execution / paper trading</b></div>
     <div><span>Status</span><b class="warn">Historical only</b></div>
   </div>
   <div class="hint">
-    These records represent actual broker tradebooks. They may be linked to Hermes
+    These records represent actual broker tradebooks. They may be linked to Dhartrades
     DecisionSnapshots where exact matches exist, but many will remain unmatched.
-    Do NOT treat these as Hermes trades.
+    Do NOT treat these as Dhartrades trades.
   </div>
 </div>
 
@@ -138,7 +138,7 @@ code{font:12px/1.5 ui-monospace,monospace;color:#e0a83c;background:rgba(224,168,
 
 <div class="footer">
   <a href="/">← dashboard</a> · <a href="/fnf-trading">FNF trading</a> · <a href="/option-trading">Option trading</a> · <a href="/docs">Swagger</a><br>
-  Historical TradeBook panel — research data only. Hermes execution → FNF trading.
+  Historical TradeBook panel — research data only. Dhartrades execution → FNF trading.
 </div>
 </body></html>`);
 	}

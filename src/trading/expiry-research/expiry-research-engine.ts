@@ -1,5 +1,5 @@
 /**
- * HERMES Expiry-Day Quantitative & Microstructure Research Engine
+ * Dhartrades Expiry-Day Quantitative & Microstructure Research Engine
  *
  * Implements:
  * 1. ORDER_SIZING_LOT_SIZE invariant & broker/exchange contract master resolution

@@ -1,5 +1,5 @@
 /**
- * Dynamic Bayesian Fractional-Kelly Position Sizing & Risk Engine
+ * Dhartrades Dynamic Bayesian Fractional-Kelly Position Sizing & Risk Engine
  *
  * Implements:
  * 1. CAPITAL_IN_HAND continuous calculation (initial capital + net realized P&L - charges).
