@@ -29,9 +29,42 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
-const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent-job';
-require(path.join(ROOT, 'node_modules/dotenv')).config({ path: path.join(ROOT, '.env') });
-const mysql = require(path.join(ROOT, 'node_modules/mysql2/promise'));
+// ROOT must be the worktree actually being operated on.
+//
+// It used to be a hard-coded absolute path to the JOB worktree, so a push from
+// ANY other worktree (e.g. my-job-agent-trading) made this guard:
+//   - run `git log` in the wrong worktree (it inspected job-agent-dev),
+//   - read that worktree's docs/gate-close-allow.json and legacy baseline,
+//   - and therefore block a legitimate push that had nothing to do with the job
+//     roadmap. That forced an operator-visible GATE_CLOSE_SKIP=1 bypass.
+//
+// Resolution order (safety intent preserved — the gate still fails closed when
+// it genuinely cannot verify):
+//   1. GATE_CLOSE_ROOT            — explicit operator override
+//   2. the enclosing git worktree (git rev-parse --show-toplevel), which is the
+//      directory the hook cds into before invoking us
+//   3. the directory containing this script
+//   4. the last-resort default below, so behaviour never silently disappears
+//
+// A worktree still needs node_modules and .env; we resolve those from the
+// worktree when present and otherwise fall back to the main checkout, so a
+// worktree without its own install can still run the guard.
+function resolveRoot() {
+	if (process.env.GATE_CLOSE_ROOT) return process.env.GATE_CLOSE_ROOT;
+	const opts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+	try {
+		const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { ...opts, cwd: __dirname }).trim();
+		if (top && fs.existsSync(top)) return top;
+	} catch { /* not a git checkout — fall through */ }
+	const selfRoot = path.resolve(__dirname, '..');
+	if (fs.existsSync(selfRoot)) return selfRoot;
+	return '/home/swarna-sekhar-dhar/projects/my-job-agent-job';
+}
+const ROOT = resolveRoot();
+// Dependencies/.env may live in the main checkout even when ROOT is a worktree.
+const DEPS_ROOT = fs.existsSync(path.join(ROOT, 'node_modules')) ? ROOT : '/home/swarna-sekhar-dhar/projects/my-job-agent';
+require(path.join(DEPS_ROOT, 'node_modules/dotenv')).config({ path: path.join(DEPS_ROOT, '.env') });
+const mysql = require(path.join(DEPS_ROOT, 'node_modules/mysql2/promise'));
 
 const BASE = process.env.PROJECT_STATUS_BASE || process.env.DESK_API_BASE || 'http://127.0.0.1:3010';
 const argv = process.argv.slice(2);

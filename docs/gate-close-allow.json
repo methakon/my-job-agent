@@ -842,6 +842,84 @@
       "reason": "Expiry-day paper learning ledger: dynamic sizing, net-of-charges economics, cold-start exploration; STT corrected to Finance Act 2026 rates. PAPER ONLY - live execution disabled, no order path. Roadmap coverage for this workstream is not yet represented on /project-status; flagged to operator.",
       "workstream": "trading-expiry-learning",
       "authority": "operator-directive 2026-09-29 (learning-first paper model, observation-gated)"
+    },
+    "b7602d06f09d522f0442dfbb75e2a2b8cbbb998c": {
+      "short": "b7602d0",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "21980ccf280429ccc5aeba0e52a061486d437924": {
+      "short": "21980cc",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "a183ff1e540530b832edb6eb813b48f8c7074770": {
+      "short": "a183ff1",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "2825f0a417931184d91291adf36dae9a00cc3b66": {
+      "short": "2825f0a",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "b580e275744477292abac42704a9ff4cb14f2a47": {
+      "short": "b580e27",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "cc05dc2b045cbd26c16450387015dfef706e5b39": {
+      "short": "cc05dc2",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "a47485c4f99139fa22083a94cd02b842fd8ae9fa": {
+      "short": "a47485c",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "a36111d4cf984505f749a99b8826554708ca42ae": {
+      "short": "a36111d",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "ae94ad76afa4e76e3ef95a356ba60fea52032147": {
+      "short": "ae94ad7",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "c4e1972d3eb79838bf904636f7cea728e2c30fe1": {
+      "short": "c4e1972",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "da7ca1e596d577c7ee02a5791fc3833511fa9839": {
+      "short": "da7ca1e",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "f5ff92b1413fdde21ff46a393a8789bd6918fb86": {
+      "short": "f5ff92b",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "6557f344202d93c41def51af28099b39111b9097": {
+      "short": "6557f34",
+      "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
     }
   }
 }
