@@ -33,6 +33,23 @@ require('dotenv').config();
 
 // ────────────────────────────── pure helpers ───────────────────────────────
 
+/**
+ * Normalise a DATE column to 'YYYY-MM-DD'.
+ *
+ * mysql2 returns DATE columns as JS Date objects. Calling .slice(0, 10) on one
+ * yields "Tue Sep 29" — which silently matched no contract and, through the
+ * ON DUPLICATE KEY UPDATE below, re-wrote correct rows with a corrupt expiry.
+ * Read the local calendar fields; do not round-trip through toISOString().
+ */
+function isoDay(v) {
+  if (v === null || v === undefined) return null;
+  if (v instanceof Date) {
+    return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+  }
+  const m = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
 /** Nearest expiry (YYYY-MM-DD, inclusive of today) from a list of dates. */
 function pickNearestExpiry(dates, todayIso) {
   const uniq = [...new Set(dates.map((d) => String(d).slice(0, 10)))].sort();
@@ -126,9 +143,9 @@ function atmStraddle(chain, spot) {
 function buildUniverseForUnderlying(rows, underlyingName, spot, width, todayIso) {
   const mine = rows.filter((r) => r.underlyingName === underlyingName && Number(r.strike) > 0);
   if (!mine.length) return null;
-  const expiry = pickNearestExpiry(mine.map((r) => r.expiry), todayIso);
+  const expiry = pickNearestExpiry(mine.map((r) => isoDay(r.expiry)), todayIso);
   if (!expiry) return null;
-  const onExp = mine.filter((r) => String(r.expiry).slice(0, 10) === expiry);
+  const onExp = mine.filter((r) => isoDay(r.expiry) === expiry);
   const byStrike = new Map();
   for (const r of onExp) {
     const k = Number(r.strike);
@@ -145,7 +162,7 @@ function buildUniverseForUnderlying(rows, underlyingName, spot, width, todayIso)
       contracts.push({
         symbol: r.symbol,
         underlying: r.underlying,
-        expiry: String(r.expiry).slice(0, 10),
+        expiry: isoDay(r.expiry),
         strike: k,
         optionType: t,
         lotSize: Number(r.lotSize),
@@ -298,7 +315,7 @@ async function generateUniverse({ masterDir, width, outDir, todayIso, spotOverri
   fs.writeFileSync(path.join(outDir, 'universe.env'), envLines.join('\n') + '\n');
   const sql = contracts
     .map((c) => `INSERT INTO fnf_option_contracts (id, symbol, underlying, expiry, strike, optionType, lotSize, tickSize)` +
-      ` VALUES (UUID(), '${c.symbol}', '${c.underlying}', '${String(c.expiry).slice(0, 10)}', ${c.strike}, '${c.optionType}', ${c.lotSize}, ${c.tickSize})` +
+      ` VALUES (UUID(), '${c.symbol}', '${c.underlying}', '${isoDay(c.expiry)}', ${c.strike}, '${c.optionType}', ${c.lotSize}, ${c.tickSize})` +
       ` ON DUPLICATE KEY UPDATE underlying=VALUES(underlying), expiry=VALUES(expiry), strike=VALUES(strike),` +
       ` optionType=VALUES(optionType), lotSize=VALUES(lotSize), tickSize=VALUES(tickSize);`)
     .join('\n');
@@ -402,6 +419,7 @@ async function main() {
 }
 
 module.exports = {
+  isoDay,
   pickNearestExpiry, selectStrikes, pcr, maxPain, oiWalls, atmStraddle,
   buildUniverseForUnderlying, parseMasterRows, chainByStrike, todayIstIso, IST_OFFSET_MS,
 };

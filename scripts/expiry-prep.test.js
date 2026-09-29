@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const {
   pickNearestExpiry, selectStrikes, pcr, maxPain, oiWalls, atmStraddle,
   buildUniverseForUnderlying, parseMasterRows,
+  isoDay,
 } = require('./expiry-prep');
 
 let passed = 0; let failed = 0;
@@ -130,5 +131,25 @@ test('parseMasterRows: extracts option rows from the broker master format', () =
   assert.equal(rows[0].lotSize, 65);
 });
 
+// ── Regression: DATE columns must never be string-sliced ──────────────
+console.log('\nDATE column normalisation');
+test('isoDay formats a JS Date from mysql2 as YYYY-MM-DD, not "Tue Sep 29"', () => {
+  // mysql2 returns DATE columns as Date objects in local time.
+  assert.equal(isoDay(new Date(2026, 8, 29)), '2026-09-29');
+});
+test('isoDay passes through an ISO string unchanged', () => {
+  assert.equal(isoDay('2026-09-29'), '2026-09-29');
+  assert.equal(isoDay('2026-09-29 00:00:00'), '2026-09-29');
+});
+test('isoDay returns null for junk rather than a corrupt date', () => {
+  assert.equal(isoDay(null), null);
+  assert.equal(isoDay(undefined), null);
+  assert.equal(isoDay('not-a-date'), null);
+});
+test('a Date expiry never produces a two-token "Tue Sep 29" registry value', () => {
+  const bad = isoDay(new Date(2026, 8, 29));
+  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(bad), `registry expiry must be ISO, got "${bad}"`);
+  assert.equal(bad.split(' ').length, 1);
+});
 console.log(`\nexpiry-prep: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

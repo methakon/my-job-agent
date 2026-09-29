@@ -30,6 +30,11 @@ const A = require('./expiry-day-analysis');
 const L = require('./expiry-paper-ledger');
 const { monitor } = require('./expiry-exit-monitor');
 
+/** Loop key -> registry underlying key. */
+const UNDERLYING_KEY = {
+  NIFTY: 'NIFTY50-INDEX', BANKNIFTY: 'NIFTYBANK-INDEX', SENSEX: 'SENSEX',
+};
+
 const OUT_DIR = process.env.EXPIRY_LOOP_DIR
   || '/home/swarna-sekhar-dhar/.hermes/cache/scratch/expiry-session-2026-09-29';
 const DECISIONS = path.join(OUT_DIR, 'loop-decisions.jsonl');
@@ -66,7 +71,11 @@ function deriveStop({ premium, atr, spreadPts, optionType, dte, regime }) {
 }
 
 /** Turn a live cycle into an actionable, sized paper decision. */
-function decideAndSize({ cycle, contractMasterRow }) {
+function decideAndSize({ cycle, contractMasterRow, dateIso, dte }) {
+  // DTE is always derived from the contract's own expiry. If the caller did not
+  // pass one, compute it — a hardcoded 0 would have been a lie on any session
+  // that is not itself an expiry day.
+  const effectiveDte = dte ?? dteOf(contractMasterRow?.expiry, dateIso ?? C.istDateIso());
   const reasons = [];
   const nowMs = Date.now();
 
@@ -96,7 +105,7 @@ function decideAndSize({ cycle, contractMasterRow }) {
   // ── 4. Loss boundary BEFORE entry
   const stop = deriveStop({
     premium: entryAsk, atr: cycle.optionMetrics?.atm?.underlyingAtr ?? null,
-    spreadPts: sp?.spread ?? null, optionType, dte: 0, regime: cycle.regime?.regime,
+    spreadPts: sp?.spread ?? null, optionType, dte: effectiveDte, regime: cycle.regime?.regime,
   });
 
   // ── 5. Dynamic size via the ledger (mode ladder, capital invariant)
@@ -114,7 +123,7 @@ function decideAndSize({ cycle, contractMasterRow }) {
     action: 'PAPER_BUY',
     view, setup, key, optionType, contract: contractMasterRow,
     entryAsk, premium: entryAsk, stop, sizing,
-    dte: 0,                                   // feature, not veto
+    dte: effectiveDte,                        // feature, not veto
     reasons,
     expectedMove: cycle.impliedMove ?? null,
     spread: sp ?? null,
@@ -137,7 +146,9 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
 
   let cycle;
   try {
-    cycle = await A.withDb((conn) => A.runCycle(conn, { indexKey, dateIso, nowMs, config: { daysToExpiry: 0 } }));
+    // daysToExpiry is resolved from the registry nearest expiry, not pinned to 0.
+    // Pinning it to 0 made every non-expiry session look like expiry day.
+    cycle = await A.withDb((conn) => A.runCycle(conn, { indexKey, dateIso, nowMs, config: {} }));
   } catch (e) {
     out.result = { action: 'SKIP', reasons: [`DATA_READ_FAILED: ${e.message.slice(0, 60)}`] };
     appendDecision(out);
@@ -158,30 +169,57 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
     maxPain: cycle.microstructure?.maxPain?.strike ?? null,
   };
 
-  // Contract identity comes from the registry (the authoritative master), not
-  // from symbol parsing.
-  let contract = null;
-  try {
-    contract = await A.withDb(async (conn) => {
-      const strike = cycle.optionMetrics?.atm?.strike;
-      const [rows] = await conn.query(
-        `SELECT symbol, underlying, expiry, strike, optionType, lotSize
-           FROM fnf_option_contracts
-          WHERE underlying = ? AND strike = ? AND expiry = ?
-          ORDER BY optionType LIMIT 2`,
-        [indexKey === 'NIFTY' ? 'NIFTY50-INDEX' : indexKey === 'BANKNIFTY' ? 'NIFTYBANK-INDEX' : 'SENSEX', strike ?? 0, dateIso],
-      );
-      return rows[0] ?? null;
-    });
-  } catch { /* recorded as unavailable below */ }
+      // Contract identity comes from the registry (the authoritative master), not
+      // from symbol parsing.
+      //
+      // The expiry is resolved from the REGISTRY, never from `dateIso`. Looking
+      // for contracts expiring on the session date silently returns nothing on
+      // any day that is not itself an expiry day, which is why a non-expiry
+      // session could never open a position.
+      let contract = null;
+      let resolvedExpiry = null;
+      try {
+        contract = await A.withDb(async (conn) => {
+          const [expRows] = await conn.query(
+            `SELECT expiry, COUNT(*) n
+               FROM fnf_option_contracts
+              WHERE underlying = ? AND expiry >= ?
+              GROUP BY expiry ORDER BY expiry ASC LIMIT 1`,
+            [UNDERLYING_KEY[indexKey] ?? indexKey, dateIso],
+          );
+          if (!expRows.length) return null;
+          // mysql2 returns DATE columns as JS Date objects in local time. Using
+          // toString().slice() produced "Tue Sep 29" and matched no contract.
+          resolvedExpiry = isoDate(expRows[0].expiry);
+          const [rows] = await conn.query(
+            `SELECT symbol, underlying, expiry, strike, optionType, lotSize
+               FROM fnf_option_contracts
+              WHERE underlying = ? AND strike = ? AND expiry = ?
+              ORDER BY optionType LIMIT 2`,
+            [UNDERLYING_KEY[indexKey] ?? indexKey, cycle.optionMetrics?.atm?.strike ?? 0, resolvedExpiry],
+          );
+          return rows[0] ?? null;
+        });
+      } catch { /* recorded as unavailable below */ }
 
-  if (!contract) {
-    out.result = { action: 'SKIP', reasons: ['NO_REGISTERED_CONTRACT_FOR_ATM'] };
-    appendDecision(out);
-    return out;
-  }
+      if (!contract) {
+        out.result = {
+          action: 'SKIP',
+          reasons: [resolvedExpiry
+            ? `NO_REGISTERED_CONTRACT_FOR_ATM (expiry ${resolvedExpiry})`
+            : 'NO_REGISTERED_CONTRACT_FOR_THIS_SESSION (no expiry in the registry on/after the session date)'],
+          resolvedExpiry,
+        };
+        out.account = L.account(L.loadState());
+        appendDecision(out);
+        return out;
+      }
 
-  const decision = decideAndSize({ cycle, contractMasterRow: contract });
+      // Real days-to-expiry, computed from the resolved contract. DTE remains a
+      // FEATURE: 0 is a valid, learnable state, never a veto.
+      const dte = dteOf(resolvedExpiry, dateIso);
+
+  const decision = decideAndSize({ cycle, contractMasterRow: contract, dateIso, dte });
   out.result = {
     action: decision.action,
     reasons: decision.reasons,
@@ -200,7 +238,7 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
     const rec = L.openPaperPosition({
       key: decision.key, symbol: contract.symbol, underlying: contract.underlying,
       expiry: contract.expiry, regime: cycle.regime?.regime, setup: (decision.setup ?? [])[0] ?? 'NONE',
-      dte: 0, view: cycle.direction?.view ?? null,
+      dte, view: cycle.direction?.view ?? null,
       agreementShare: cycle.direction?.agreementShare ?? null,
       spreadAtEntry: decision.spread?.spread ?? null,
       underlyingAtEntry: cycle.spot ?? null,
@@ -262,6 +300,31 @@ async function monitorPositions({ indexKey, dateIso, nowMs, cycle }) {
 function appendDecision(rec) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.appendFileSync(DECISIONS, `${JSON.stringify(rec)}\n`);
+}
+
+/**
+ * Real days-to-expiry for the cycle, or null when it cannot be determined.
+ * DTE is a FEATURE of the market state, not a gate: 0 is learnable, and a null
+ * is recorded as unknown rather than guessed.
+ */
+/** Normalise a DATE column (JS Date | string) to 'YYYY-MM-DD'. */
+function isoDate(v) {
+  if (!v) return null;
+  if (v instanceof Date) {
+    // Read the local calendar fields: the driver already applied the shift, and
+    // re-reading via toISOString() would shift the day again.
+    const y = v.getFullYear(); const m = String(v.getMonth() + 1).padStart(2, '0'); const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(v);
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[0] : null;
+}
+
+function dteOf(expiry, dateIso) {
+  if (!expiry) return null;
+  const d = Math.round((Date.parse(`${String(expiry).slice(0, 10)}T00:00:00Z`) - Date.parse(`${dateIso}T00:00:00Z`)) / 86_400_000);
+  return Number.isFinite(d) ? Math.max(0, d) : null;
 }
 
 module.exports = { tick, decideAndSize, deriveStop, CHARGES, OUT_DIR, DECISIONS };
