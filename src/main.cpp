@@ -101,9 +101,9 @@ int main(int argc, char* argv[]) {
                 MicrostructureFeatureEngine feature_engine;
                 hermes::GapFadeP0Strategy p0_strategy;
                 hermes::IndependentRiskEngine risk_engine(
-                    EnvLoader::get_double("MAX_PER_TRADE_RISK", 2500.0),
-                    EnvLoader::get_double("MAX_AGGREGATE_CAPITAL", 10000.0),
-                    EnvLoader::get_double("MAX_SESSION_DRAWDOWN", 2500.0)
+                    EnvLoader::get_double("MAX_PER_TRADE_RISK", 25000.0),
+                    EnvLoader::get_double("MAX_AGGREGATE_CAPITAL", 100000.0),
+                    EnvLoader::get_double("MAX_SESSION_DRAWDOWN", 25000.0)
                 );
 
                 CanonicalOptionTick tick;
@@ -123,7 +123,14 @@ int main(int argc, char* argv[]) {
 
                         hermes::StrategyProposal prop = p0_strategy.evaluate(strat_input);
                         if (prop.action != hermes::StrategyAction::NO_ACTION) {
-                            double proposed_risk = 65.0 * (0.5 * strat_input.atr_14);
+                            int lot_size = 25;
+                            if (tick.symbol.find("BANKNIFTY") != std::string::npos || tick.instrument_key.find("BANKNIFTY") != std::string::npos) {
+                                lot_size = 15;
+                            } else if (tick.symbol.find("SENSEX") != std::string::npos || tick.instrument_key.find("SENSEX") != std::string::npos) {
+                                lot_size = 20;
+                            }
+
+                            double proposed_risk = lot_size * (0.5 * strat_input.atr_14);
                             auto veto = risk_engine.verify_order_proposal(tick.symbol, proposed_risk, 0.0, 0.0, 0, prop.confidence_score);
 
                             if (veto.risk_approved) {
@@ -138,7 +145,7 @@ int main(int argc, char* argv[]) {
                                 trade.id = "cpp-paper-" + std::to_string(tick.timestamp_ms);
                                 trade.instrument = inst;
                                 trade.side = side;
-                                trade.quantity = 65;
+                                trade.quantity = lot_size;
                                 trade.entryPrice = tick.ask_price > 0 ? tick.ask_price : (tick.ltp > 0 ? tick.ltp : 100.0);
                                 trade.exitPrice = 0.0;
                                 trade.netPnl = 0.0;
