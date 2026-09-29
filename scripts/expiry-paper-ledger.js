@@ -226,6 +226,27 @@ function openPaperPosition(args) {
       committedCapital: sizing.committedCapital,
       entryPremium: args.premium, entryAsk: args.entryAsk, lotSize: args.lotSize, lots: sizing.lots,
       stopPremium: args.stopPremium, openedAtIst: record.openedAtIst,
+      // Entry provenance the exit monitor and the outcome record need. Without
+      // these a closed trade cannot be compared against the state that produced
+      // it, so it is not usable training data.
+      entry: {
+        regime: args.regime ?? null,
+        setup: args.setup ?? null,
+        dte: args.dte ?? null,
+        view: args.view ?? null,
+        agreementShare: args.agreementShare ?? null,
+        pHat: sizing?.pHat ?? null,
+        mode: sizing?.mode ?? null,
+        uncertainty: sizing?.uncertainty ?? null,
+        spreadAtEntry: args.spreadAtEntry ?? null,
+        underlyingAtEntry: args.underlyingAtEntry ?? null,
+        entryIstMs: Date.now(),
+      },
+      // Excursions are tracked monotonically from the FIRST mark after entry
+      // and never recomputed, so the outcome records the real path taken.
+      mfePremium: args.premium,
+      maePremium: args.premium,
+      marks: 0,
     });
     saveState(state);
   }
@@ -234,8 +255,67 @@ function openPaperPosition(args) {
   return record;
 }
 
+/**
+ * Mark an open position to a live premium. Updates MFE/MAE monotonically and
+ * unrealized P&L. This is NOT an outcome: nothing is learned here, because a
+ * trade that has not closed has no realised result. Unrealized value is
+ * reported but deliberately excluded from the posterior.
+ */
+function markPosition({ id, premium, underlyingPrice = null, nowMs = Date.now() }) {
+  const state = loadState();
+  const p = state.openPositions.find((x) => x.id === id);
+  if (!p) return { marked: false, reason: 'POSITION_NOT_FOUND' };
+  if (!(premium > 0)) return { marked: false, reason: 'INVALID_PREMIUM' };
+  p.marks += 1;
+  p.lastMarkPremium = premium;
+  p.lastMarkIstMs = nowMs;
+  if (underlyingPrice !== null && Number.isFinite(underlyingPrice)) p.lastUnderlying = underlyingPrice;
+  // Monotonic excursions: an unrealized high is never forgotten, which is what
+  // makes MAE/MFE usable training features.
+  if (premium > (p.mfePremium ?? p.entryPremium)) p.mfePremium = premium;
+  if (premium < (p.maePremium ?? p.entryPremium)) p.maePremium = premium;
+  const qty = p.lotSize * p.lots;
+  const charges = exitSideCharges({ entryPremium: p.entryAsk, exitPremium: premium, lotSize: p.lotSize, lots: p.lots });
+  const gross = (premium - p.entryAsk) * qty;
+  // Unrealized across ALL open positions, each at its latest mark. This is
+  // reported but NEVER folded into the posterior — only closePaperPosition
+  // updates the model, because an open trade has no realised outcome yet.
+  state.unrealizedNet = Number(state.openPositions.reduce((a, o) => {
+    const mark = o.id === id ? premium : (o.lastMarkPremium ?? o.entryAsk);
+    const c = exitSideCharges({ entryPremium: o.entryAsk, exitPremium: mark, lotSize: o.lotSize, lots: o.lots });
+    return a + c.grossPnl - c.totalCharges;
+  }, 0).toFixed(2));
+  saveState(state);
+  return {
+    marked: true, id, premium,
+    mfePremium: p.mfePremium, maePremium: p.maePremium, marks: p.marks,
+    unrealizedGross: Number(gross.toFixed(2)),
+    unrealizedNet: Number((gross - charges.totalCharges).toFixed(2)),
+    unrealizedIsRealized: false,
+    heldMinutes: Number(((nowMs - (p.entry?.entryIstMs ?? nowMs)) / 60000).toFixed(1)),
+  };
+}
+
+/** Round-trip charges and gross P&L for a mark or an exit. */
+function exitSideCharges({ entryPremium, exitPremium, lotSize, lots, charges }) {
+  const c = charges ?? DEFAULT_EXIT_CHARGES;
+  const qty = lotSize * lots;
+  const notionalIn = entryPremium * qty;
+  const notionalOut = exitPremium * qty;
+  const brokerage = c.brokeragePerLot * lots * 2;   // in and out
+  const exchange = ((notionalIn + notionalOut) / 2) * (c.exchangeFeePct / 100);
+  const gst = brokerage * (c.gstRatePct / 100);
+  const stamp = notionalIn * (c.stampDutyRatePct / 100);
+  const stt = notionalOut * (c.sttRatePct / 100);
+  return { grossPnl: (exitPremium - entryPremium) * qty, totalCharges: brokerage + exchange + gst + stamp + stt };
+}
+
+const DEFAULT_EXIT_CHARGES = {
+  brokeragePerLot: 20, sttRatePct: 0.15, exchangeFeePct: 0.05, gstRatePct: 18, stampDutyRatePct: 0.003,
+};
+
 /** Close a paper position and fold the NET outcome into the posterior. */
-function closePaperPosition({ id, exitBid, intrinsicExit = 0, exitReason, charges }) {
+function closePaperPosition({ id, exitBid, intrinsicExit = 0, exitReason, charges, exitContext = null }) {
   const state = loadState();
   const idx = state.openPositions.findIndex((p) => p.id === id);
   if (idx < 0) return { closed: false, reason: 'POSITION_NOT_FOUND' };
@@ -258,9 +338,42 @@ function closePaperPosition({ id, exitBid, intrinsicExit = 0, exitReason, charge
   state.outcomes.push({ id, key, netPnl: econ.netPnl, rMultiple, exitReason, at: new Date().toISOString() });
   saveState(state);
   const outcome = {
-    schema: 'expiry-paper-outcome/v1', id, key, exitReason, economics: econ, rMultiple,
+    schema: 'expiry-paper-outcome/v1', id, key, exitReason,
+    // ── Full training record: the state that produced the trade, and the state
+    // it was exited into. Without both halves this is not learnable.
+    entryState: {
+      regime: p.entry?.regime ?? null,
+      setup: p.entry?.setup ?? null,
+      dte: p.entry?.dte ?? null,
+      view: p.entry?.view ?? null,
+      agreementShare: p.entry?.agreementShare ?? null,
+      confidenceP: p.entry?.pHat ?? null,
+      mode: p.entry?.mode ?? null,
+      underlying: p.entry?.underlyingAtEntry ?? null,
+      spread: p.entry?.spreadAtEntry ?? null,
+      entryAsk: p.entryAsk,
+      lots: p.lots,
+      committedCapital: p.committedCapital,
+    },
+    exitState: {
+      regime: exitContext?.regime ?? null,
+      agreementShare: exitContext?.agreementShare ?? null,
+      timeToCloseMin: exitContext?.timeToCloseMin ?? null,
+      liquidity: exitContext?.liquidity ?? null,
+      mark: exitBid,
+    },
+    economics: econ,                 // gross, itemised charges, net
+    rMultiple,
+    maePremium: p.maePremium ?? p.entryAsk,
+    mfePremium: p.mfePremium ?? p.entryAsk,
+    maePts: Number(((p.maePremium ?? p.entryAsk) - p.entryAsk).toFixed(2)),
+    mfePts: Number(((p.mfePremium ?? p.entryAsk) - p.entryAsk).toFixed(2)),
+    holdDurationMin: Number(((Date.now() - (p.entry?.entryIstMs ?? Date.now())) / 60000).toFixed(1)),
+    marks: p.marks ?? 0,
     modeAfter: learningModeFor(post),
     account: account(state),
+    capitalReleased: p.committedCapital,
+    liveOrderCount: 0,
   };
   fs.appendFileSync(LEDGER, `${JSON.stringify(outcome)}\n`);
   return { closed: true, ...outcome };
@@ -303,9 +416,9 @@ function learningReport() {
 }
 
 module.exports = {
-  MODE, OUT_DIR, LEDGER, STATE, INITIAL_PAPER_CAPITAL,
-  learningModeFor, netPnl, loadState, saveState, account,
-  sizePaperPosition, openPaperPosition, closePaperPosition, learningReport,
+  MODE, OUT_DIR, LEDGER, STATE, INITIAL_PAPER_CAPITAL, DEFAULT_EXIT_CHARGES,
+  learningModeFor, netPnl, loadState, saveState, account, exitSideCharges,
+  sizePaperPosition, openPaperPosition, markPosition, closePaperPosition, learningReport,
 };
 
 if (require.main === module) {

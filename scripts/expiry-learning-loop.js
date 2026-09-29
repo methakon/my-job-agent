@@ -28,6 +28,7 @@ const C = require('./expiry-day-core');
 const S = require('./expiry-day-signals');
 const A = require('./expiry-day-analysis');
 const L = require('./expiry-paper-ledger');
+const { monitor } = require('./expiry-exit-monitor');
 
 const OUT_DIR = process.env.EXPIRY_LOOP_DIR
   || '/home/swarna-sekhar-dhar/.hermes/cache/scratch/expiry-session-2026-09-29';
@@ -199,7 +200,11 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
     const rec = L.openPaperPosition({
       key: decision.key, symbol: contract.symbol, underlying: contract.underlying,
       expiry: contract.expiry, regime: cycle.regime?.regime, setup: (decision.setup ?? [])[0] ?? 'NONE',
-      dte: 0, premium: decision.entryAsk, lotSize: contract.lotSize,
+      dte: 0, view: cycle.direction?.view ?? null,
+      agreementShare: cycle.direction?.agreementShare ?? null,
+      spreadAtEntry: decision.spread?.spread ?? null,
+      underlyingAtEntry: cycle.spot ?? null,
+      premium: decision.entryAsk, lotSize: contract.lotSize,
       entryAsk: decision.entryAsk, stopPremium: decision.stop.stopPremium,
       uncertainty: 1 - (cycle.direction?.agreementShare ?? 0),
       liveDataAvailable: true,
@@ -207,9 +212,50 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
     out.paperEntry = { id: rec.id, lots: rec.lots, committedCapital: rec.sizing?.committedCapital, liveOrderCount: 0 };
   }
 
+  // Exit pass: every open position (including one just opened) is marked and
+  // re-decided on the SAME fresh snapshot, so a position that is already
+  // invalid at entry is not left unattended until the next cron tick.
+  out.exit = await monitorPositions({ indexKey, dateIso, nowMs, cycle });
+
   out.account = L.account(L.loadState());
   appendDecision(out);
   return out;
+}
+
+/**
+ * Run the exit monitor for this index using the live cycle we just computed.
+ * A position whose contract has no live quote gets a HOLD (never a fill).
+ */
+async function monitorPositions({ indexKey, dateIso, nowMs, cycle }) {
+  const open = L.loadState().openPositions ?? [];
+  if (!open.length) return { openAtStart: 0, processed: 0, note: 'no open paper positions' };
+  const atm = cycle.optionMetrics?.atm;
+  const minutesToClose = (() => {
+    const mins = C.istMinutesOfDay(C.istNowDate(nowMs));
+    const close = 15 * 60 + 30;
+    return dateIso === C.istDateIso(nowMs) ? close - mins : null;
+  })();
+  // Only the ATM contract is quoted in this cycle's chain, so a position in a
+  // different strike is reported as unquotable rather than marked at a
+  // fabricated price.
+  const quoteFor = async (position) => {
+    if (!atm || !atm.strike) return null;
+    const leg = position.entry?.optionType === 'PE' ? null : atm;
+    if (!leg) return null;
+    if (position.lotSize && leg.strike && position.stopPremium === undefined) return null;
+    return {
+      ltp: leg.ceLtp, bid: leg.bid, ask: leg.ask,
+      spreadPctOfMid: leg.spread?.spreadPctOfMid ?? null,
+      volume: leg.ceVol ?? null, openInterest: leg.ceOi ?? null,
+      spot: cycle.spot ?? null,
+      regime: cycle.regime?.regime ?? null,
+      agreementShare: cycle.direction?.agreementShare ?? null,
+      freshnessBucket: cycle.freshness?.overallBucket ?? 'UNKNOWN',
+      dataAgeMs: cycle.freshness?.dataAgeMs ?? null,
+      minutesToClose,
+    };
+  };
+  return monitor({ quoteFor, nowMs });
 }
 
 function appendDecision(rec) {
