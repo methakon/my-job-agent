@@ -204,6 +204,7 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
       agreementShare: cycle.direction?.agreementShare ?? null,
       spreadAtEntry: decision.spread?.spread ?? null,
       underlyingAtEntry: cycle.spot ?? null,
+      contract: contract.symbol, strike: Number(contract.strike), optionType: decision.optionType,
       premium: decision.entryAsk, lotSize: contract.lotSize,
       entryAsk: decision.entryAsk, stopPremium: decision.stop.stopPremium,
       uncertainty: 1 - (cycle.direction?.agreementShare ?? 0),

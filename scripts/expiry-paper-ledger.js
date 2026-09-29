@@ -242,6 +242,12 @@ function openPaperPosition(args) {
         underlyingAtEntry: args.underlyingAtEntry ?? null,
         entryIstMs: Date.now(),
       },
+      // Contract identity must be stored explicitly: the monitor has to re-find
+      // THIS contract's live quote, and parsing it back out of the symbol would
+      // reintroduce the naming-convention bug (FYERS 26SEP vs Upstox 29SEP).
+      contract: args.contract ?? null,
+      strike: args.strike ?? null,
+      optionType: args.optionType ?? null,
       // Excursions are tracked monotonically from the FIRST mark after entry
       // and never recomputed, so the outcome records the real path taken.
       mfePremium: args.premium,
