@@ -220,6 +220,18 @@ function openingRangeState(bars, { orMinutes = 15, breakBufferPct = 0.10 } = {})
   const orBars = bars.slice(0, need);
   const orHigh = Math.max(...orBars.map((b) => b.high));
   const orLow = Math.min(...orBars.map((b) => b.low));
+  // Defensive: the index tape can be EMPTY (e.g. a feed outage, or before the
+  // open). Math.max(...[]) is -Infinity and Math.min(...[]) is +Infinity, so
+  // every downstream number silently became garbage. Report "no bars" instead.
+  if (!bars.length) {
+    return {
+      ready: false, reason: 'NO_BARS', barsSeen: 0, barsNeeded: need,
+      orHigh: null, orLow: null, orHeight: null, breakBuffer: null,
+      close: null, vwap: null, closePos: 'UNKNOWN', beyondBuffer: false,
+      pokedUp: false, pokedDown: false, hadBreak: false, breakFailed: false,
+      held: null, barsOutside: 0, vwapRelation: 'UNKNOWN', distanceFromVwap: null, vwapDistancePct: null,
+    };
+  }
   const last = bars[bars.length - 1];
   const height = orHigh - orLow;
   const buffer = height * breakBufferPct;

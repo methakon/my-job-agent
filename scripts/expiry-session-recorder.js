@@ -185,7 +185,10 @@ async function tick({ nowMs = Date.now(), indexes = ['NIFTY', 'BANKNIFTY', 'SENS
   record.dbError = contractMasterError;
   record.contractMaster = {
     totalContracts: contracts.length,
-    byUnderlying: contracts.reduce((acc, c) => { acc[c.underlying] = (acc[c.underlying] ?? 0) + 1; return acc; }),
+    // Initial value is REQUIRED: with a flaky tunnel a read can legitimately
+    // return zero contracts, and a bare reduce() throws 'Reduce of empty array',
+    // losing the entire observation. An empty count is a fact, not a crash.
+    byUnderlying: contracts.reduce((acc, c) => { acc[c.underlying] = (acc[c.underlying] ?? 0) + 1; return acc; }, {}),
     expiryMetadataError: 'CLEARED — 40 NIFTY/BANKNIFTY rows corrected to 2026-09-29; 0 remaining confirmed 2026-09-26 errors on NSE',
     sensexUnresolved: '62 BSE:SENSEX26SEP* rows remain EXPIRY_RECONCILIATION_UNRESOLVED and are NOT guessed',
     readError: contractMasterError,
@@ -200,6 +203,13 @@ async function tick({ nowMs = Date.now(), indexes = ['NIFTY', 'BANKNIFTY', 'SENS
     blockedSymbolsTotal: dte.blockedByGate.length,
   };
   record.availability = availabilityByIndex;
+  // Defensive: with a flaky tunnel a read can return zero rows, which must be
+  // reported as unavailable rather than crashing the tick (an empty array here
+  // previously threw 'Reduce of empty array' and lost the whole observation).
+  if (!record.contractMaster.byUnderlying || Object.keys(record.contractMaster.byUnderlying).length === 0) {
+    record.contractMaster.byUnderlying = {};
+    record.contractMaster.readStatus = contractMasterError ? 'UNAVAILABLE_DB_ERROR' : 'UNAVAILABLE_NO_ROWS';
+  }
 
   for (const idx of indexes) {
     try {

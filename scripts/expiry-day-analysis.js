@@ -218,7 +218,10 @@ function dealerGammaProxy(chain, spot, expiryIso, { daysToExpiry = 0 } = {}) {
   // customers are net short calls / long puts, making dealers long gamma. This
   // is an ASSUMPTION, so the output is a context line with zero directional vote.
   const rows = chain.filter((r) => Number.isFinite(Number(r.ce?.gamma)));
-  if (!rows.length || !Number.isFinite(spot) || rows.length < 5) return null;
+  if (!rows.length) return null;                       // no gamma quoted: abstain
+  if (!Number.isFinite(spot) || spot <= 0) return null; // no spot: cannot pick ATM
+  let closest = rows[0];
+  for (const r of rows) if (Math.abs(r.strike - spot) < Math.abs(closest.strike - spot)) closest = r;
   let netGamma = 0;
   let totalOi = 0;
   for (const r of rows) {
@@ -227,7 +230,6 @@ function dealerGammaProxy(chain, spot, expiryIso, { daysToExpiry = 0 } = {}) {
     netGamma += g - p;          // customers long puts ⇒ dealers short put gamma
     totalOi += Number(r.ce.oi || 0) + Number(r.pe.oi || 0);
   }
-  const closest = rows.reduce((best, r) => (Math.abs(r.strike - spot) < Math.abs(best.strike - spot) ? r : best), rows[0]);
   return {
     assumption: 'customers net long puts / short calls ⇒ dealers long gamma (UNVERIFIABLE from public data)',
     netGamma: C.r2(netGamma, 2),

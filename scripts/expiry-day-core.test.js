@@ -162,6 +162,21 @@ test('openingRangeState is not ready before the OR window completes', () => {
   assert.equal(st.ready, false);
   assert.equal(st.reason, 'INSUFFICIENT_BARS');
 });
+test('openingRangeState never leaks ±Infinity from an empty tape (regression)', () => {
+  // The empty case is caught by the INSUFFICIENT_BARS guard, so no Infinity is
+  // produced. orMinutes:0 reaches the bar maths with an empty set and must also
+  // degrade cleanly. This locks BOTH paths so a future refactor cannot expose
+  // Math.max(...[]) on an empty array.
+  const empty = C.openingRangeState([], { orMinutes: 15 });
+  assert.equal(empty.ready, false);
+  assert.equal(empty.reason, 'INSUFFICIENT_BARS');
+  assert.equal(empty.orHigh, undefined);
+  const zeroWindow = C.openingRangeState([], { orMinutes: 0 });
+  assert.equal(zeroWindow.ready, false);
+  assert.equal(zeroWindow.orHigh, null);
+  assert.notEqual(zeroWindow.orHigh, -Infinity);
+  assert.notEqual(zeroWindow.orLow, Infinity);
+});
 test('openingRangeState: inside the range ⇒ no break', () => {
   const bars = mkBars([
     bar(555, 100, 110, 98, 105), bar(560, 105, 112, 100, 104), bar(565, 104, 108, 99, 103),
