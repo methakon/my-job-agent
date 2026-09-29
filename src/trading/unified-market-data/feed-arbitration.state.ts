@@ -96,12 +96,17 @@ export const shortUniverse = (value: string): string =>
  * Underlying of an OPTION contract symbol: NIFTY26SEP23900CE -> NIFTY,
  * BANKNIFTY26SEP57400CE -> BANKNIFTY. Index symbols (…-INDEX) return null —
  * an index snapshot is not option coverage.
+ *
+ * The expiry code has two FYERS forms: DDMMM (26SEP) and DDO0MM (26O06, used
+ * when the week and month repeat). Matching only [A-Z]{3} made every 26O06
+ * symbol return null, so the feed claimed no option universe at all and the
+ * arbiter skipped registration.
  */
 export const underlyingOfOptionSymbol = (symbol: string): string | null => {
   const raw = String(symbol ?? '').trim();
   if (!raw) return null;
   const tail = raw.split(':').pop() ?? raw;
-  const m = tail.toUpperCase().match(/^([A-Z]+?)\d{2}[A-Z]{3}\d+(CE|PE)$/);
+  const m = tail.toUpperCase().match(/^([A-Z]+?)\d{2}(?:[A-Z]{3}|O\d{2})\d+(CE|PE)$/);
   return m ? m[1] : null;
 };
 

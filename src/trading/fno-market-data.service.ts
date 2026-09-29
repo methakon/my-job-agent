@@ -351,43 +351,44 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     // Auto-register option symbols listed in FNO_MARKET_DATA_SYMBOLS so their
     // ticks route to the option-quote store (never to index snapshots). Pattern:
     // NSE:NIFTY<DDMMM><STRIKE><CE|PE> or BSE:SENSEX<DDMMM><STRIKE><CE|PE>.
-    const optionSymbolPattern = /^(NSE|BSE):([A-Z0-9]+)(\d{2}[A-Z]{3})(\d+)(CE|PE)$/;
-    const MONTHS: Record<string, string> = { JAN: '01', FEB: '02', MAR: '03', APR: '04', MAY: '05', JUN: '06', JUL: '07', AUG: '08', SEP: '09', OCT: '10', NOV: '11', DEC: '12' };
-    const expiryOf = (ddmmy: string, optionType: string): string | null => {
-      // FYERS expiry code DDMMM (e.g. 26SEP). Year inferred: if the date has already
-      // passed this year, assume next year.
-      const day = Number(ddmmy.slice(0, 2));
-      const mon = MONTHS[ddmmy.slice(2, 5)];
-      if (!mon) return null;
-      const now = new Date();
-      let year = now.getUTCFullYear();
-      if (now.getUTCMonth() + 1 > Number(mon) || (now.getUTCMonth() + 1 === Number(mon) && now.getUTCDate() > day)) year += 1;
-      const iso = `${year}-${mon}-${String(day).padStart(2, '0')}`;
-      const d = new Date(iso + 'T00:00:00.000Z');
-      return Number.isNaN(d.getTime()) ? null : iso;
-    };
+    // FYERS expiry symbols come in two forms: DDMMM (26SEP) and DDO0MM
+    // (26O06 = 6 Oct). The old [A-Z]{3}-only pattern dropped every 26O06 symbol.
+    const optionSymbolPattern = /^(NSE|BSE):([A-Z0-9]+)(\d{2}(?:[A-Z]{3}|O\d{2}))(\d+)(CE|PE)$/;
+    // The code does NOT encode the expiry DAY. FYERS' own master proves it:
+    // 26SEP is 29 Sep, 26OCT is 27 Oct, 26DEC is 29 Dec. Deriving a date from
+    // the code produced the wrong expiry every single time (it read 26 as the
+    // day). Contract metadata from FNO_OPTION_CONTRACTS is authoritative;
+    // a symbol with no metadata is skipped rather than dated by guesswork.
+    const metaBySymbol = new Map<string, { expiry: string; lotSize: number; tickSize: number; underlying: string }>();
+    for (const c of this.optionChain.configuredContracts()) {
+      metaBySymbol.set(c.symbol, {
+        expiry: String(c.expiry).slice(0, 10),
+        lotSize: Number(c.lotSize) || 0,
+        tickSize: Number(c.tickSize) || 0.05,
+        underlying: String(c.underlying ?? ''),
+      });
+    }
     for (const sym of symbols) {
       const m = optionSymbolPattern.exec(sym);
       if (!m || this.optionContracts.has(sym)) continue;
-      const underlying = m[1] === 'BSE' && m[2].includes('SENSEX') ? 'SENSEX' : m[2];
-      const expiry = expiryOf(m[3], m[5]);
-      if (!expiry) continue;
-      const strike = Number(m[4]);
-      // Lot sizes (NSE/BSE circulars, effective Jan 2026): NIFTY 65, BANKNIFTY 30,
-      // FINNIFTY 60, SENSEX 20. Env FNO_OPTION_LOT_SIZE overrides for one symbol set.
+      const meta = metaBySymbol.get(sym);
+      if (!meta) {
+        // No authoritative expiry for this symbol. Registering it with a guessed
+        // date would poison DTE, expiry-day detection and contract selection.
+        this.logger?.warn?.(`[FnoMarketData] no contract metadata for ${sym}; not registering`);
+        continue;
+      }
       const token = m[2].toUpperCase();
       const DEFAULT_LOT: Record<string, number> = { NIFTY: 65, NIFTYBANK: 30, NIFTYFIN: 60, SENSEX: 20 };
-      const lotSize = Number(process.env.FNO_OPTION_LOT_SIZE ?? 0)
-        || DEFAULT_LOT[token]
-        || (m[1] === 'BSE' ? 20 : 65);
+      const lotSize = Number(process.env.FNO_OPTION_LOT_SIZE ?? 0) || meta.lotSize || DEFAULT_LOT[token] || (m[1] === 'BSE' ? 20 : 65);
       const contract = {
         symbol: sym,
-        underlying,
-        expiry,
-        strike,
+        underlying: meta.underlying || (m[1] === 'BSE' && m[2].includes('SENSEX') ? 'SENSEX' : m[2]),
+        expiry: meta.expiry,
+        strike: Number(m[4]),
         optionType: m[5] as 'CE' | 'PE',
         lotSize,
-        tickSize: 0.05,
+        tickSize: meta.tickSize || 0.05,
       };
       this.optionContracts.set(sym, contract);
       void this.optionChain.upsertContract(contract).catch((e: unknown) => {
