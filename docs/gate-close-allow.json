@@ -920,6 +920,12 @@
       "reason": "Trading/expiry workstream: expiry-day decision engine, paper learning ledger, contract-master reconciliation, and earlier FNF trading fixes. No /project-status roadmap row exists for this workstream; creating one is an operator decision (rows are never invented by an agent). Scope: trading only, unrelated to the job roadmap.",
       "workstream": "trading-expiry-learning",
       "authority": "operator-directive 2026-09-29 (learning-first paper model) + pre-existing trading history"
+    },
+    "6e37b8b0910d2ffb02f1d524c509d80173a72433": {
+      "short": "6e37b8b",
+      "reason": "VM resilience diagnostics (scripts/vm-resilience.js): read-only OOM/tunnel/pm2 probe that identified the pm2 node worker being OOM-killed on the 952MB/no-swap VM as the cause of the recurring ~90-minute wedge. Infrastructure workstream; no /project-status roadmap row exists (rows are created by operator decision only).",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (make infrastructure resilient)"
     }
   }
 }
