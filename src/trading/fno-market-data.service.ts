@@ -134,11 +134,16 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
     // message; see canonical/tick-interpreter.service.ts).
     private readonly interpreter: TickInterpreterService,
   ) {
+    // Operator order (2026-09-28, §3.3): the subscription list is generated
+    // (recentred strikes per expiry per index) and can exceed the legacy
+    // 50-symbol cap. The cap stays configurable — FNO_FEED_MAX_SYMBOLS,
+    // default 200 — so a constrained box can trim it without a code change.
+    const maxSymbols = Math.max(1, Number(process.env.FNO_FEED_MAX_SYMBOLS ?? 200));
     const symbols = (process.env.FNO_MARKET_DATA_SYMBOLS ?? 'NSE:NIFTY50-INDEX,NSE:NIFTYBANK-INDEX,NSE:SENSEX-INDEX')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean)
-      .slice(0, 50);
+      .slice(0, maxSymbols);
     const provider = (process.env.FNO_MARKET_DATA_PROVIDER ?? 'fyers').toLowerCase();
     const yahooEnabled = /^(1|true|yes)$/i.test(process.env.YAHOO_FEED_ENABLED ?? 'false');
     const enabled = /^(1|true|yes)$/i.test(process.env.FNO_MARKET_DATA_ENABLED ?? 'false');

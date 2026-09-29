@@ -83,7 +83,11 @@
     return wrap;
   }
 
+  var loginWired = false;
   function wireLogin() {
+    // Idempotent: several paths (render, /auth/me failure, timeout fallback) may call this.
+    if (loginWired) { return; }
+    loginWired = true;
     $('loginForm').addEventListener('submit', function (e) {
       e.preventDefault();
       clearFlash($('loginMsg'));
@@ -139,8 +143,23 @@
     }
   }
 
-  api('/auth/me').then(function (d) { render(d.user || null); }).catch(function () {
+  /* If /auth/me is slow or hung (server restart / DB slow path), surface the
+     sign-in form anyway: the button must never be dead while the page waits. */
+  var loginFallbackTimer = setTimeout(function () {
+    if (views.login.classList.contains('hidden') && views.dashboard.classList.contains('hidden')) {
+      pill.textContent = 'Sign-in';
+      wireLogin();
+      showView('login');
+    }
+  }, 12000);
+
+  api('/auth/me').then(function (d) {
+    clearTimeout(loginFallbackTimer);
+    render(d.user || null);
+  }).catch(function () {
+    clearTimeout(loginFallbackTimer);
     pill.textContent = 'Server unreachable';
+    wireLogin();
     showView('login');
   });
 })();
