@@ -12,15 +12,25 @@
 
 export interface ChargesConfig {
   brokeragePerLot: number;   // e.g. ₹20 per lot
-  sttRatePct: number;        // e.g. 0.0625% on sell premium
+  sttRatePct: number;        // % of premium on SELL (0.15 w.e.f. 2026-04-01)
+  sttExerciseRatePct?: number; // % of INTRINSIC value when exercised (0.15)
   exchangeFeePct: number;    // e.g. 0.05%
   gstRatePct: number;        // 18% on (brokerage + exchange fee)
   stampDutyRatePct: number;  // 0.003% on buy premium
 }
 
+/**
+ * STT for options was revised by the Finance Act 2026 with effect from
+ * 2026-04-01 (NSE: https://www.nseindia.com/static/products-services/equity-derivatives-securities-transaction-tax):
+ *   - sale of an option in securities            : 0.15% of premium (seller)
+ *   - sale of an option where the option is exercised: 0.15% of INTRINSIC value
+ * The previous 0.10% / 0.125% rates are stale. Net P&L is the learning
+ * objective, so a stale tax rate silently biases every observed edge upward.
+ */
 export const DEFAULT_CHARGES: ChargesConfig = {
   brokeragePerLot: 20.0,
-  sttRatePct: 0.0625,
+  sttRatePct: 0.15,        // Finance Act 2026, effective 2026-04-01
+  sttExerciseRatePct: 0.15, // on intrinsic value when an option is exercised
   exchangeFeePct: 0.05,
   gstRatePct: 18.0,
   stampDutyRatePct: 0.003,
