@@ -944,6 +944,12 @@
       "reason": "Exit-monitor CLI plus stored contract identity so a paper position re-resolves its own live quote by exact key (FYERS 26SEP / Upstox 29SEP namespaces describe the same contract). Paper-only, live execution disabled. Trading workstream; no /project-status roadmap row.",
       "workstream": "trading-expiry-learning",
       "authority": "operator-directive 2026-09-29 (complete the NIFTY paper lifecycle)"
+    },
+    "e7bf4e04bbd255ceefd6a08b908277c8e1f9d87e": {
+      "short": "e7bf4e0",
+      "reason": "Fix the two blockers that prevented any paper trade from opening: resolve contract expiry from the registry (not the session date) and never string-slice a mysql2 DATE column. DTE now correct and remains a feature. Paper-only, live execution disabled.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (first complete real-tick paper learning cycle)"
     }
   }
 }
