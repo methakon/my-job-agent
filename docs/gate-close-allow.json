@@ -926,6 +926,12 @@
       "reason": "VM resilience diagnostics (scripts/vm-resilience.js): read-only OOM/tunnel/pm2 probe that identified the pm2 node worker being OOM-killed on the 952MB/no-swap VM as the cause of the recurring ~90-minute wedge. Infrastructure workstream; no /project-status roadmap row exists (rows are created by operator decision only).",
       "workstream": "trading-expiry-learning",
       "authority": "operator-directive 2026-09-29 (make infrastructure resilient)"
+    },
+    "1e8c128bc8161c48d22c45bdb1ca96ce343c1d81": {
+      "short": "1e8c128",
+      "reason": "Expiry learning loop: wires real ticks -> signal -> dynamic size -> paper execution -> net outcome -> posterior update. Paper-only, no broker SDK in the path, live execution disabled. Trading workstream; no /project-status roadmap row exists (operator decision to create one).",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (learning-first paper model)"
     }
   }
 }
