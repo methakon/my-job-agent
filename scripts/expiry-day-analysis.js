@@ -29,11 +29,28 @@ const INDEXES = {
   SENSEX: { symbol: 'BSE:SENSEX-INDEX', aliases: ['BSE:SENSEX-INDEX', 'BSE:SENSEX', 'SENSEX'], label: 'SENSEX' },
 };
 
-const IST_OPTION_PREFIX = {
-  // Upstox-style keys stored by the shared market-data writer.
-  NIFTY: ['NSE:NIFTY29SEP%', 'NSE_INDEX:NIFTY29SEP%'],
-  BANKNIFTY: ['NSE:BANKNIFTY29SEP%', 'NSE_INDEX:BANKNIFTY29SEP%'],
-  SENSEX: ['BSE:SENSEX01OCT%', 'BSE_INDEX:SENSEX01OCT%'],
+// Symbol prefixes per index for the EXPIRING series, WITHOUT trailing
+// wildcards (the wildcard is applied per-pattern at query time). The namespace
+// differs by BROKER and both are live simultaneously:
+//   FYERS  → month+year      e.g. NSE:NIFTY26SEP22800CE   (2026-09-29 expiry)
+//   Upstox → day+month+year  e.g. NSE:NIFTY29SEP22800CE   (SAME contract)
+// Matching only one namespace silently returns an EMPTY chain and reads as
+// "no option data" when the other broker is streaming it.
+// `anchor` additionally enforces the index boundary: LIKE has no word
+// boundary, so 'NSE:NIFTY29SEP%' would also match 'NSE:BANKNIFTY29SEP…'.
+const OPTION_SERIES = {
+  NIFTY: {
+    prefixes: ['NSE:NIFTY26SEP', 'NSE:NIFTY29SEP', 'NSE_INDEX:NIFTY26SEP', 'NSE_INDEX:NIFTY29SEP'],
+    anchor: 'NSE:NIFTY',          // never matches NSE:BANKNIFTY
+  },
+  BANKNIFTY: {
+    prefixes: ['NSE:BANKNIFTY26SEP', 'NSE:BANKNIFTY29SEP', 'NSE_INDEX:BANKNIFTY26SEP', 'NSE_INDEX:BANKNIFTY29SEP'],
+    anchor: 'NSE:BANKNIFTY',
+  },
+  SENSEX: {
+    prefixes: ['BSE:SENSEX26O01', 'BSE:SENSEX01OCT', 'BSE_INDEX:SENSEX26O01', 'BSE_INDEX:SENSEX01OCT', 'BSE:SENSEX26SEP'],
+    anchor: 'BSE:SENSEX',
+  },
 };
 
 function dbConfig() {
@@ -87,8 +104,16 @@ async function fetchPreviousSession(conn, idx, dateIso) {
 }
 
 /** Latest option-chain snapshot for the expiring series, grouped by strike. */
-async function fetchOptionChain(conn, prefixes, dateIso) {
+async function fetchOptionChain(conn, prefixes, dateIso, underlyingPrefix) {
+  // Each prefix is an EXACT string prefix (no trailing '%'). The wildcard is
+  // applied per pattern, and an additional `underlyingPrefix` anchor enforces
+  // the index boundary: LIKE has no word boundary, so 'NSE:NIFTY29SEP%' also
+  // matches 'NSE:BANKNIFTY29SEP…'. That silently merged the BANKNIFTY ladder
+  // into the NIFTY chain and made the ATM straddle unresolvable.
   const like = prefixes.map(() => 'instrumentKey LIKE ?').join(' OR ');
+  const args = [...prefixes.map((p) => `${p}%`)];
+  const anchor = underlyingPrefix ? 'AND u.instrumentKey LIKE ?' : '';
+  if (underlyingPrefix) args.push(`${underlyingPrefix}%`);
   const [rows] = await conn.query(
     `SELECT u.instrumentKey, u.strike, u.optionType, u.ltp, u.bid, u.ask, u.bidQty, u.askQty,
             u.volume, u.oi, u.previousOi, u.changeOi, u.iv, u.delta, u.gamma, u.theta, u.vega,
@@ -96,8 +121,9 @@ async function fetchOptionChain(conn, prefixes, dateIso) {
        FROM unified_option_quotes u
        JOIN (SELECT instrumentKey, MAX(ts) mx FROM unified_option_quotes
               WHERE ts >= ? AND (${like}) GROUP BY instrumentKey) t
-         ON t.instrumentKey = u.instrumentKey AND t.mx = u.ts`,
-    [`${dateIso} 00:00:00`, ...prefixes],
+         ON t.instrumentKey = u.instrumentKey AND t.mx = u.ts
+      ${anchor}`,
+    [`${dateIso} 00:00:00`, ...args],
   );
   const byStrike = new Map();
   let source = null; let lastTs = null; let lastSourceTs = null;
@@ -226,7 +252,7 @@ async function runCycle(conn, { indexKey, dateIso, nowMs = Date.now(), config = 
   const [ticks, prev, chainRes] = await Promise.all([
     fetchIndexTicks(conn, tapeSymbols(idx), dateIso),
     fetchPreviousSession(conn, tapeSymbols(idx), dateIso),
-    fetchOptionChain(conn, IST_OPTION_PREFIX[indexKey] ?? [], dateIso),
+    fetchOptionChain(conn, OPTION_SERIES[indexKey]?.prefixes ?? [], dateIso, OPTION_SERIES[indexKey]?.anchor),
   ]);
   const chain = chainRes.chain;
   const last = ticks[ticks.length - 1] ?? null;
@@ -358,6 +384,6 @@ async function runCycle(conn, { indexKey, dateIso, nowMs = Date.now(), config = 
 }
 
 module.exports = {
-  INDEXES, IST_OPTION_PREFIX, dbConfig, withDb, fetchIndexTicks, fetchPreviousSession,
+  INDEXES, OPTION_SERIES, dbConfig, withDb, fetchIndexTicks, fetchPreviousSession,
   fetchOptionChain, microstructure, optionMetrics, dealerGammaProxy, runCycle,
 };
