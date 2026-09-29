@@ -68,18 +68,30 @@ async function runDynamicRiskEngineTests() {
 
   console.log('\n--- CATEGORY 2: Kelly Shrinkage Curve Monotonicity ---');
 
-  test('2.1 Shrinkage curve moves monotonically with sample size at 3+ checkpoints', () => {
+  test('2.1 Shrinkage curve moves monotonically with sample size at 6 checkpoints', () => {
     const engine = new DynamicRiskEngine(5000);
 
-    const s0 = engine.computeKellyShrinkage(0);   // Checkpoint 1: n = 0
-    const s10 = engine.computeKellyShrinkage(10); // Checkpoint 2: n = 10
-    const s25 = engine.computeKellyShrinkage(25); // Checkpoint 3: n = 25
-    const s50 = engine.computeKellyShrinkage(50); // Checkpoint 4: n = 50
+    const checkPoints = [0, 5, 10, 25, 50, 100];
+    const shrinkages = checkPoints.map(n => ({ n, val: engine.computeKellyShrinkage(n) }));
+
+    console.log('     Shrinkage curve checkpoints:');
+    shrinkages.forEach(cp => {
+      console.log(`       n = ${String(cp.n).padStart(3, ' ')} trades -> shrinkage S(n) = ${cp.val.toFixed(4)}`);
+    });
+
+    const s0 = shrinkages[0].val;
+    const s5 = shrinkages[1].val;
+    const s10 = shrinkages[2].val;
+    const s25 = shrinkages[3].val;
+    const s50 = shrinkages[4].val;
+    const s100 = shrinkages[5].val;
 
     assert.ok(s0 >= 0.15 && s0 <= 0.25, `Expected s0 ~ 0.15-0.25, got ${s0}`);
-    assert.ok(s10 > s0, `Expected s10 (${s10}) > s0 (${s0})`);
+    assert.ok(s5 > s0, `Expected s5 (${s5}) > s0 (${s0})`);
+    assert.ok(s10 > s5, `Expected s10 (${s10}) > s5 (${s5})`);
     assert.ok(s25 > s10, `Expected s25 (${s25}) > s10 (${s10})`);
     assert.ok(s50 > s25, `Expected s50 (${s50}) > s25 (${s25})`);
+    assert.ok(s100 >= s50, `Expected s100 (${s100}) >= s50 (${s50})`);
   });
 
   console.log('\n--- CATEGORY 3: CAPITAL_IN_HAND Hard Ceiling & Portfolio Exposure ---');
@@ -154,34 +166,61 @@ async function runDynamicRiskEngineTests() {
     assert.ok(pRange < 0.25, `Expected pRange < 0.25, got ${pRange}`);
   });
 
-  console.log('\n--- CATEGORY 5: Hard Invariants Verification ---');
+  console.log('\n--- CATEGORY 5: Split Hard Safety Invariants (1 Test Per Invariant) ---');
 
-  test('5.1 Hard Invariants block correctly when deliberately violated', () => {
+  test('5.1 Paper-Only Invariant: attemptedRealOrder=true blocks with REAL_ORDER_ROUTING_PROHIBITED', () => {
     const engine = new DynamicRiskEngine(5000);
-
-    // 1. Attempted Real Order
-    const rReal = engine.calculatePositionSize({
+    const res = engine.calculatePositionSize({
       symbol: 'NSE:NIFTY29SEP22850CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29',
       premium: 50, lotSize: 65, side: 'BUY', structuralStopPrice: 40, attemptedRealOrder: true
     });
-    assert.strictEqual(rReal.allowed, false);
-    assert.ok(rReal.refusals.some(r => r.includes('REAL_ORDER_ROUTING_PROHIBITED')));
+    assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.rejectionCategory, 'HARD_SAFETY_VETO');
+    assert.ok(res.refusals.some(r => r.includes('REAL_ORDER_ROUTING_PROHIBITED')), 'Must include REAL_ORDER_ROUTING_PROHIBITED');
+  });
 
-    // 2. Duplicate Order
-    const rDup = engine.calculatePositionSize({
+  test('5.2 Idempotency Invariant: isDuplicateOrder=true blocks with DUPLICATE_ORDER_IDEMPOTENCY_BREACH', () => {
+    const engine = new DynamicRiskEngine(5000);
+    const res = engine.calculatePositionSize({
       symbol: 'NSE:NIFTY29SEP22850CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29',
       premium: 50, lotSize: 65, side: 'BUY', structuralStopPrice: 40, isDuplicateOrder: true
     });
-    assert.strictEqual(rDup.allowed, false);
-    assert.ok(rDup.refusals.some(r => r.includes('DUPLICATE_ORDER_IDEMPOTENCY_BREACH')));
+    assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.rejectionCategory, 'HARD_SAFETY_VETO');
+    assert.ok(res.refusals.some(r => r.includes('DUPLICATE_ORDER_IDEMPOTENCY_BREACH')), 'Must include DUPLICATE_ORDER_IDEMPOTENCY_BREACH');
+  });
 
-    // 3. Stale Quote Data (>15s)
-    const rStale = engine.calculatePositionSize({
+  test('5.3 Quote Freshness Invariant: quoteAgeSec > maxStaleSec blocks with STALE_QUOTE_DATA', () => {
+    const engine = new DynamicRiskEngine(5000);
+    const res = engine.calculatePositionSize({
       symbol: 'NSE:NIFTY29SEP22850CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29',
       premium: 50, lotSize: 65, side: 'BUY', structuralStopPrice: 40, quoteAgeSec: 25, maxStaleSec: 15
     });
-    assert.strictEqual(rStale.allowed, false);
-    assert.ok(rStale.refusals.some(r => r.includes('STALE_QUOTE_DATA')));
+    assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.rejectionCategory, 'HARD_SAFETY_VETO');
+    assert.ok(res.refusals.some(r => r.includes('STALE_QUOTE_DATA')), 'Must include STALE_QUOTE_DATA');
+  });
+
+  test('5.4 Structural Stop Invariant: missing stopPrice & ATR blocks with STRUCTURAL_STOP_MISSING', () => {
+    const engine = new DynamicRiskEngine(5000);
+    const res = engine.calculatePositionSize({
+      symbol: 'NSE:NIFTY29SEP22850CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29',
+      premium: 50, lotSize: 65, side: 'BUY'
+    });
+    assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.rejectionCategory, 'HARD_SAFETY_VETO');
+    assert.ok(res.refusals.some(r => r.includes('STRUCTURAL_STOP_MISSING')), 'Must include STRUCTURAL_STOP_MISSING');
+  });
+
+  test('5.5 Capital Ceiling Invariant: openPositionsNotional >= capitalInHand blocks with AFFORDABILITY_NO_TRADE', () => {
+    const engine = new DynamicRiskEngine(5000);
+    const res = engine.calculatePositionSize({
+      symbol: 'NSE:NIFTY29SEP22850CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29',
+      premium: 20, lotSize: 65, side: 'BUY', structuralStopPrice: 15, openPositionsNotional: 5000
+    });
+    assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.rejectionCategory, 'AFFORDABILITY_NO_TRADE');
+    assert.ok(res.refusals.some(r => r.includes('AFFORDABILITY_NO_TRADE')), 'Must include AFFORDABILITY_NO_TRADE');
   });
 
   console.log('\n--- CATEGORY 6: Structural Stop Verification ---');
