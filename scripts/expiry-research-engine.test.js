@@ -60,10 +60,10 @@ async function runExpiryResearchSuite() {
     // the Upstox desk's independently recorded lotSize. Official NSE/BSE circular
     // verification was UNAVAILABLE at the time of writing (exchange blocks
     // automated access) — do not describe these as "per circular" without a source.
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY'], 65);
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY50-INDEX'], 65);
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['BANKNIFTY'], 30);
-    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTYBANK-INDEX'], 30);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY'], 25);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTY50-INDEX'], 25);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['BANKNIFTY'], 15);
+    assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['NIFTYBANK-INDEX'], 15);
     assert.strictEqual(OFFICIAL_EXCHANGE_LOT_SIZES['SENSEX'], 20);
   });
 

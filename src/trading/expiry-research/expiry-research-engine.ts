@@ -54,11 +54,11 @@ export interface LotSizeResolution {
  * "per circular" without a fetched source.
  */
 export const OFFICIAL_EXCHANGE_LOT_SIZES: Record<string, number> = {
-  'NIFTY': 65,
-  'NIFTY50-INDEX': 65,
-  'BANKNIFTY': 30,
-  'NIFTYBANK-INDEX': 30,
-  'FINNIFTY': 65,
+  'NIFTY': 25,
+  'NIFTY50-INDEX': 25,
+  'BANKNIFTY': 15,
+  'NIFTYBANK-INDEX': 15,
+  'FINNIFTY': 25,
   'SENSEX': 20,
 };
 

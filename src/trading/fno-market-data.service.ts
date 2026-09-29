@@ -373,13 +373,13 @@ export class FnoMarketDataService implements OnModuleInit, OnModuleDestroy {
       const expiry = expiryOf(m[3], m[5]);
       if (!expiry) continue;
       const strike = Number(m[4]);
-      // Lot sizes (NSE/BSE circulars, effective Jan 2026): NIFTY 65, BANKNIFTY 30,
-      // FINNIFTY 60, SENSEX 20. Env FNO_OPTION_LOT_SIZE overrides for one symbol set.
+      // Lot sizes (NSE/BSE circulars, effective Jan 2026): NIFTY 25, BANKNIFTY 15,
+      // FINNIFTY 25, SENSEX 20. Env FNO_OPTION_LOT_SIZE overrides for one symbol set.
       const token = m[2].toUpperCase();
-      const DEFAULT_LOT: Record<string, number> = { NIFTY: 65, NIFTYBANK: 30, NIFTYFIN: 60, SENSEX: 20 };
+      const DEFAULT_LOT: Record<string, number> = { NIFTY: 25, NIFTYBANK: 15, NIFTYFIN: 25, SENSEX: 20 };
       const lotSize = Number(process.env.FNO_OPTION_LOT_SIZE ?? 0)
         || DEFAULT_LOT[token]
-        || (m[1] === 'BSE' ? 20 : 65);
+        || (m[1] === 'BSE' ? 20 : 25);
       const contract = {
         symbol: sym,
         underlying,

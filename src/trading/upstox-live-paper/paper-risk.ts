@@ -43,7 +43,7 @@
 export const RISK_POLICY_VERSION = 'paper-risk-v1';
 
 /** Default paper capital when nothing is configured. Configurable, not fixed. */
-export const DEFAULT_PAPER_CAPITAL = 5_000;
+export const DEFAULT_PAPER_CAPITAL = 100_000;
 /** Floor/ceiling for a configured cap: a typo must not create a ₹1 or ₹0 desk. */
 export const MIN_CONFIGURABLE_CAPITAL = 100;
 export const MAX_CONFIGURABLE_CAPITAL = 100_000_000;

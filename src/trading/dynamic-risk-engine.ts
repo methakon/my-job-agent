@@ -88,7 +88,7 @@ export class DynamicRiskEngine {
   private kellyCap: number = 0.5; // Upper bound on raw Kelly (safety rail)
   private chargesConfig: ChargesConfig;
 
-  constructor(initialCapital = 5000, chargesConfig = DEFAULT_CHARGES, kellyCap = 0.5) {
+  constructor(initialCapital = 100000, chargesConfig = DEFAULT_CHARGES, kellyCap = 0.5) {
     this.initialCapital = initialCapital;
     this.chargesConfig = chargesConfig;
     this.kellyCap = kellyCap;
