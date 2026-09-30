@@ -222,7 +222,11 @@ export function parseOptionSymbol(symbol: unknown, now = new Date()): {
   underlying: string | null; expiry: string | null; strike: number | null; optionType: 'CE' | 'PE' | null;
 } {
   const tail = String(symbol ?? '').trim().split('|').pop()!.split(':').pop()!;
-  const match = tail.toUpperCase().match(new RegExp(`^([A-Z]+?)(\\d{2})(${MONTH_NAMES})(\\d+(?:\\.\\d+)?)(CE|PE)$`));
+  // FYERS uses two expiry-code forms: DDMMM (26SEP) and DDO0MM (26O06, when the
+  // week and month repeat). Accepting only the first rejected every 26O06
+  // contract as unparseable, so live option ticks were dropped with
+  // "missing expiry/strike/right".
+  const match = tail.toUpperCase().match(new RegExp(`^([A-Z]+?)(\\d{2}(?:${MONTH_NAMES}|O\\d{2}))(\\d+(?:\\.\\d+)?)(CE|PE)$`));
   if (!match) {
     // The other documented broker order puts the right BEFORE the date and spells
     // the year out: UNDERLYING + STRIKE + CE|PE + DD + MON + YY (Upstox BSE F&O
@@ -238,9 +242,18 @@ export function parseOptionSymbol(symbol: unknown, now = new Date()): {
       optionType: alternate[3] as 'CE' | 'PE',
     };
   }
-  const strike = Number(match[4]);
-  const day = match[2].padStart(2, '0');
-  const month = MARKET_MONTHS[match[3]];
+  const strike = Number(match[3]);
+  // The expiry code does NOT encode the day: FYERS' own master shows 26SEP is the
+  // 29th, 26OCT the 27th, 26DEC the 29th. Deriving a day from the code produced
+  // a wrong expiry on every contract, so the code is used only for month/year
+  // and the day is carried by the broker's own expiry field when present.
+  // Callers that hold authoritative contract metadata must supply it via
+  // observation.expiry; the parsed value is a best-effort identity fallback.
+  const code = match[2];
+  const oForm = /^(\d{2})O(\d{2})$/.exec(code);
+  const day = oForm ? oForm[1] : code.slice(0, 2);
+  const month = oForm ? oForm[2] : MARKET_MONTHS[code.slice(2)];
+  if (!month) return { underlying: null, expiry: null, strike: null, optionType: null };
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   let year = now.getUTCFullYear();
   if (Date.parse(`${year}-${month}-${day}T00:00:00Z`) < today) year += 1;
@@ -248,7 +261,7 @@ export function parseOptionSymbol(symbol: unknown, now = new Date()): {
     underlying: match[1],
     expiry: `${year}-${month}-${day}`,
     strike: Number.isFinite(strike) ? strike : null,
-    optionType: match[5] as 'CE' | 'PE',
+    optionType: match[4] as 'CE' | 'PE',
   };
 }
 

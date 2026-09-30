@@ -35,7 +35,7 @@ const group = (n) => console.log(`\n${n}`);
 console.log('expiry learning loop tests');
 
 // ─────────────────────────── fixtures ───────────────────────────────────
-const CONTRACT = { symbol: 'NSE:NIFTY26SEP22800CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29', strike: 22800, optionType: 'CE', lotSize: 65 };
+const CONTRACT = { symbol: 'NSE:NIFTY26SEP22800CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29', strike: 22800, optionType: 'CE', ask: 50, bid: 49.5, ltp: 49.75, lotSize: 65 };
 
 /** A realistic, FRESH, liquid post-open cycle. */
 function liveCycle(over = {}) {

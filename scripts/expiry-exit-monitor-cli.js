@@ -29,10 +29,13 @@ async function quoteForPosition(conn, position) {
   const strike = position.strike;
   const type = position.optionType;
   if (!key || !Number.isFinite(Number(strike)) || !type) return null;
+  // fnf_option_quotes is where the live FYERS feed persists (fnf-option-chain
+  // .ingestQuote). unified_option_quotes is a separate store this feed never
+  // writes, so a position monitoring against it could never find its own quote.
   const [rows] = await conn.query(
-    `SELECT ltp, bid, ask, volume, oi, ts, source
-       FROM unified_option_quotes
-      WHERE instrumentKey = ? AND optionType = ?
+    `SELECT ltp, bid, ask, volume, openInterest, ts, provider
+       FROM fnf_option_quotes
+      WHERE contractSymbol = ? AND optionType = ?
       ORDER BY ts DESC LIMIT 1`,
     [key, type],
   );
@@ -49,7 +52,7 @@ async function quoteForPosition(conn, position) {
     ask: twoSided ? ask : null,
     spreadPctOfMid: twoSided ? Number((((ask - bid) / mid) * 100).toFixed(3)) : null,
     volume: Number(r.volume) || 0,
-    openInterest: Number(r.oi) || 0,
+    openInterest: Number(r.openInterest) || 0,
     source: r.source,
     freshnessBucket: C.freshnessBucket(C.ageMs(r.ts)),
     dataAgeMs: C.ageMs(r.ts),

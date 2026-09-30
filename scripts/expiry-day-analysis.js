@@ -40,11 +40,11 @@ const INDEXES = {
 // boundary, so 'NSE:NIFTY29SEP%' would also match 'NSE:BANKNIFTY29SEP…'.
 const OPTION_SERIES = {
   NIFTY: {
-    prefixes: ['NSE:NIFTY26SEP', 'NSE:NIFTY29SEP', 'NSE_INDEX:NIFTY26SEP', 'NSE_INDEX:NIFTY29SEP'],
+    prefixes: ['NSE:NIFTY26O06', 'NSE_INDEX:NIFTY26O06', 'NSE:NIFTY26SEP', 'NSE:NIFTY29SEP', 'NSE_INDEX:NIFTY26SEP', 'NSE_INDEX:NIFTY29SEP'],
     anchor: 'NSE:NIFTY',          // never matches NSE:BANKNIFTY
   },
   BANKNIFTY: {
-    prefixes: ['NSE:BANKNIFTY26SEP', 'NSE:BANKNIFTY29SEP', 'NSE_INDEX:BANKNIFTY26SEP', 'NSE_INDEX:BANKNIFTY29SEP'],
+    prefixes: ['NSE:BANKNIFTY26O06', 'NSE_INDEX:BANKNIFTY26O06', 'NSE:BANKNIFTY26SEP', 'NSE:BANKNIFTY29SEP', 'NSE_INDEX:BANKNIFTY26SEP', 'NSE_INDEX:BANKNIFTY29SEP'],
     anchor: 'NSE:BANKNIFTY',
   },
   SENSEX: {
@@ -80,11 +80,20 @@ function tapeSymbols(idx) {
 async function fetchIndexTicks(conn, symbol, dateIso) {
   const symbols = Array.isArray(symbol) ? symbol : [symbol];
   const inList = symbols.map(() => 'symbol = ?').join(' OR ');
+  // The LIVE tape lands in unified_market_snapshots (keyed NSE:NIFTY50 etc.);
+  // _history is the rollup the archiver writes later in the day. Reading only
+  // _history meant an in-session cycle saw no index ticks at all, so spot was
+  // null and every feature was UNKNOWN. Union both, live table first.
   const [rows] = await conn.query(
-    `SELECT ts, ltp, volume, symbol FROM unified_market_snapshots_history
-      WHERE (${inList}) AND ts >= ? AND ts < DATE_ADD(?, INTERVAL 1 DAY)
-      ORDER BY ts ASC`,
-    [...symbols, `${dateIso} 00:00:00`, `${dateIso} 00:00:00`],
+    `SELECT ts, ltp, volume, symbol FROM (
+       SELECT ts, ltp, volume, symbol FROM unified_market_snapshots
+        WHERE (${inList.replace(/symbol/g, 'symbol')}) AND ts >= ? AND ts < DATE_ADD(?, INTERVAL 1 DAY)
+       UNION ALL
+       SELECT ts, ltp, volume, symbol FROM unified_market_snapshots_history
+        WHERE (${inList}) AND ts >= ? AND ts < DATE_ADD(?, INTERVAL 1 DAY)
+     ) x ORDER BY ts ASC`,
+    [...symbols, `${dateIso} 00:00:00`, `${dateIso} 00:00:00`,
+      ...symbols, `${dateIso} 00:00:00`, `${dateIso} 00:00:00`],
   );
   return rows.map((r) => ({ ts: r.ts, ltp: Number(r.ltp), volume: Number(r.volume) || 0, symbol: r.symbol }));
 }
@@ -110,18 +119,25 @@ async function fetchOptionChain(conn, prefixes, dateIso, underlyingPrefix) {
   // the index boundary: LIKE has no word boundary, so 'NSE:NIFTY29SEP%' also
   // matches 'NSE:BANKNIFTY29SEP…'. That silently merged the BANKNIFTY ladder
   // into the NIFTY chain and made the ATM straddle unresolvable.
-  const like = prefixes.map(() => 'instrumentKey LIKE ?').join(' OR ');
+  const like = prefixes.map(() => 'contractSymbol LIKE ?').join(' OR ');
   const args = [...prefixes.map((p) => `${p}%`)];
-  const anchor = underlyingPrefix ? 'AND u.instrumentKey LIKE ?' : '';
+  const anchor = underlyingPrefix ? 'AND u.contractSymbol LIKE ?' : '';
   if (underlyingPrefix) args.push(`${underlyingPrefix}%`);
+  // The FYERS option feed persists into fnf_option_quotes (fnf-option-chain
+  // .ingestQuote). unified_option_quotes is a different store that this feed
+  // never writes, so reading it returned an empty chain and every cycle looked
+  // like 'no data'. Read the table the live feed actually fills, and alias its
+  // columns onto the shape the rest of this module already expects.
   const [rows] = await conn.query(
-    `SELECT u.instrumentKey, u.strike, u.optionType, u.ltp, u.bid, u.ask, u.bidQty, u.askQty,
-            u.volume, u.oi, u.previousOi, u.changeOi, u.iv, u.delta, u.gamma, u.theta, u.vega,
-            u.expiry, u.source, u.sourceTimestamp, u.receivedTimestamp, u.ts
-       FROM unified_option_quotes u
-       JOIN (SELECT instrumentKey, MAX(ts) mx FROM unified_option_quotes
-              WHERE ts >= ? AND (${like}) GROUP BY instrumentKey) t
-         ON t.instrumentKey = u.instrumentKey AND t.mx = u.ts
+    `SELECT u.contractSymbol AS instrumentKey, u.strike, u.optionType, u.ltp, u.bid, u.ask,
+            NULL AS bidQty, NULL AS askQty,
+            u.volume, u.openInterest AS oi, NULL AS previousOi, NULL AS changeOi,
+            u.impliedVolatility AS iv, u.delta, u.gamma, u.theta, u.vega,
+            u.expiry, u.provider AS source, NULL AS sourceTimestamp, NULL AS receivedTimestamp, u.ts
+       FROM fnf_option_quotes u
+       JOIN (SELECT contractSymbol, MAX(ts) mx FROM fnf_option_quotes
+              WHERE ts >= ? AND (${like}) GROUP BY contractSymbol) t
+         ON t.contractSymbol = u.contractSymbol AND t.mx = u.ts
       ${anchor}`,
     [`${dateIso} 00:00:00`, ...args],
   );

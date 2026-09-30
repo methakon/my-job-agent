@@ -35,6 +35,14 @@ async function runAll() {
 }
 
 const CONTRACT = { symbol: 'NSE:NIFTY26SEP22800CE', underlying: 'NIFTY50-INDEX', expiry: '2026-09-29', lotSize: 65 };
+/** Age an open position so the min-hold observation window has elapsed. */
+function ageBy(p, minutes) {
+  const st = L.loadState();
+  const pos = st.openPositions.find((x) => x.id === p.id);
+  if (pos?.entry) pos.entry.entryIstMs = Date.now() - minutes * 60_000;
+  L.saveState(st);
+  return p;
+}
 const openPos = (over = {}) => L.openPaperPosition({
   ...CONTRACT, key: 'TREND|A_ORB_VWAP', regime: 'TREND', setup: 'A_ORB_VWAP', dte: 0,
   premium: 20, entryAsk: 20, stopPremium: 16, liveDataAvailable: true, view: 'BULLISH', agreementShare: 0.65, ...over,
@@ -67,14 +75,14 @@ test('1. an open paper position is detected by the monitor', async () => {
   assert.equal(r.processed, 1);
 });
 test('3. dynamic decision can HOLD', async () => {
-  resetLedger(); openPos();
+  resetLedger(); ageBy(openPos(), 5);
   const r = await M.monitor({ quoteFor: async () => snap() });
   assert.equal(r.decisions[0].action, 'HOLD');
   assert.equal(r.exits, 0);
   assert.equal(L.loadState().openPositions.length, 1, 'a HOLD must not close anything');
 });
 test('4. dynamic decision can EXIT (structural boundary)', async () => {
-  resetLedger(); openPos();
+  resetLedger(); ageBy(openPos(), 5);
   const r = await M.monitor({ quoteFor: async () => snap({ ltp: 15, bid: 14.8, ask: 15.2 }) });
   assert.equal(r.decisions[0].action, 'EXIT');
   assert.equal(r.decisions[0].reason, M.EXIT_REASON.STOP);
@@ -105,7 +113,7 @@ test('5. no exit widens the original loss boundary', () => {
 // ── 6, 7, 8: economics ─────────────────────────────────────────────────
 group('monitor: net economics on exit');
 test('6/7/8. exit produces correct gross, charges and NET P&L', async () => {
-  resetLedger(); const rec = openPos({ key: 'ECON|test' });
+  resetLedger(); const rec = ageBy(openPos({ key: 'ECON|test' }), 5);
   const r = await M.monitor({ quoteFor: async () => snap({ ltp: 30, bid: 29.9, ask: 30.1, minutesToClose: 5 }) });
   const closed = r.results.find((x) => x.closed && x.closed.economics)?.closed;
   assert.ok(closed, 'the position must have closed');
@@ -119,7 +127,7 @@ test('6/7/8. exit produces correct gross, charges and NET P&L', async () => {
 // ── 9: capital release ─────────────────────────────────────────────────
 group('monitor: capital accounting');
 test('9. capital is released and the invariant holds after exit', async () => {
-  resetLedger(); const rec = openPos({ key: 'CAP|test' });
+  resetLedger(); const rec = ageBy(openPos({ key: 'CAP|test' }), 5);
   const before = L.account(L.loadState());
   assert.ok(before.COMMITTED_CAPITAL > 0, 'entry must commit capital');
   await M.monitor({ quoteFor: async () => snap({ ltp: 30, bid: 29.9, ask: 30.1, minutesToClose: 5 }) });
@@ -132,7 +140,7 @@ test('9b. a single-lot REDUCE becomes an honest full exit, never a silent 0-lot'
   // The sizing path takes a 1-lot probe, so floor(1 x 50%) = 0. That must NOT
   // fall through to a partial close of zero lots, nor silently masquerade as a
   // reduce: the position exits fully and says why.
-  resetLedger(); openPos({ key: 'REDUCE1|test', premium: 20, entryAsk: 20, stopPremium: 10 });
+  resetLedger(); ageBy(openPos({ key: 'REDUCE1|test', premium: 20, entryAsk: 20, stopPremium: 10 }), 5);
   const r = await M.monitor({ quoteFor: async () => snap({ ltp: 20, bid: 19, ask: 21, spreadPctOfMid: 40, volume: 0 }) });
   const d = r.decisions[0];
   assert.equal(d.action, 'REDUCE', 'the DECISION is a reduce');
@@ -148,7 +156,7 @@ test('9c. a multi-lot REDUCE releases part of the capital and keeps the rest ope
   resetLedger();
   // Force a genuinely multi-lot position by pre-seeding it, since the sizing
   // path deliberately starts at one lot.
-  const rec = openPos({ key: 'REDUCE2|test', premium: 20, entryAsk: 20, stopPremium: 10 });
+  const rec = ageBy(openPos({ key: 'REDUCE2|test', premium: 20, entryAsk: 20, stopPremium: 10 }), 5);
   const st = L.loadState();
   const p = st.openPositions.find((x) => x.id === rec.id);
   p.lots = 4; p.committedCapital = 4 * 20 * 65;
@@ -164,7 +172,7 @@ test('9c. a multi-lot REDUCE releases part of the capital and keeps the rest ope
 // ── 10: no learning before an actual close ─────────────────────────────
 group('monitor: the accounting rule — no learning before close');
 test('10. posterior updates ONLY after an actual close', async () => {
-  resetLedger(); const rec = openPos({ key: 'LEARN|test' });
+  resetLedger(); const rec = ageBy(openPos({ key: 'LEARN|test' }), 5);
   const bucketBefore = L.loadState().posteriors['LEARN|test'];
   assert.ok(!bucketBefore, 'no posterior before any close');
   // Mark repeatedly with a large unrealized gain — it must NOT train the model.
@@ -182,7 +190,7 @@ test('10. posterior updates ONLY after an actual close', async () => {
 // ── 11, 12: wins and losses both train ────────────────────────────────
 group('monitor: losses and wins are both training data');
 test('11. a losing trade updates learning correctly', async () => {
-  resetLedger(); openPos({ key: 'LOSE|test' });
+  resetLedger(); ageBy(openPos({ key: 'LOSE|test' }), 5);
   await M.monitor({ quoteFor: async () => snap({ ltp: 14, bid: 13.8, ask: 14.2 }) });
   const s = L.loadState();
   const p = s.posteriors['LOSE|test'];
@@ -191,7 +199,7 @@ test('11. a losing trade updates learning correctly', async () => {
   assert.equal(p.alpha, 1, 'a loss does not raise alpha');
 });
 test('12. a winning trade updates learning correctly', async () => {
-  resetLedger(); openPos({ key: 'WIN|test' });
+  resetLedger(); ageBy(openPos({ key: 'WIN|test' }), 5);
   await M.monitor({ quoteFor: async () => snap({ ltp: 40, bid: 39.9, ask: 40.1, minutesToClose: 3 }) });
   const p = L.loadState().posteriors['WIN|test'];
   assert.ok(p && p.n === 1);
@@ -202,7 +210,7 @@ test('12. a winning trade updates learning correctly', async () => {
 // ── 13: end of session ─────────────────────────────────────────────────
 group('monitor: end-of-session handling');
 test('13. end-of-session positions exit explicitly with END_OF_SESSION/TIME label', async () => {
-  resetLedger(); openPos({ key: 'EOS|test' });
+  resetLedger(); ageBy(openPos({ key: 'EOS|test' }), 5);
   const r = await M.monitor({ quoteFor: async () => snap({ ltp: 22, bid: 21.9, ask: 22.1, minutesToClose: 5 }) });
   const d = r.decisions[0];
   assert.equal(d.action, 'EXIT');
@@ -213,7 +221,7 @@ test('13. end-of-session positions exit explicitly with END_OF_SESSION/TIME labe
 // ── 14: duplicate exit impossible ─────────────────────────────────────
 group('monitor: idempotency');
 test('14. a duplicate exit cannot occur', async () => {
-  resetLedger(); const rec = openPos({ key: 'DUP|test' });
+  resetLedger(); const rec = ageBy(openPos({ key: 'DUP|test' }), 5);
   const q = async () => snap({ ltp: 10, bid: 9.8, ask: 10.2 });
   const r1 = await M.monitor({ quoteFor: q });
   const r2 = await M.monitor({ quoteFor: q });
@@ -227,7 +235,7 @@ test('14. a duplicate exit cannot occur', async () => {
 // ── 15: no live order ever ─────────────────────────────────────────────
 group('monitor: safety');
 test('15. no live order can ever be generated', async () => {
-  resetLedger(); openPos({ key: 'LIVE|test' });
+  resetLedger(); ageBy(openPos({ key: 'LIVE|test' }), 5);
   const r = await M.monitor({ quoteFor: async () => snap({ ltp: 5, bid: 4.9, ask: 5.1 }) });
   assert.equal(r.safety.canPlaceOrder, false);
   assert.equal(r.safety.LIVE_EXECUTION, 'DISABLED');
@@ -235,14 +243,14 @@ test('15. no live order can ever be generated', async () => {
   assert.ok(lines.every((x) => x.liveOrderCount === 0 || x.liveOrderCount === undefined));
 });
 test('15b. a stale quote never produces a fill', async () => {
-  resetLedger(); openPos({ key: 'STALE|test' });
+  resetLedger(); ageBy(openPos({ key: 'STALE|test' }), 5);
   const r = await M.monitor({ quoteFor: async () => snap({ freshnessBucket: 'STALE', dataAgeMs: 900000 }) });
   assert.equal(r.decisions[0].action, 'HOLD');
   assert.ok(r.decisions[0].blockedBy);
   assert.equal(L.loadState().openPositions.length, 1, 'a stale quote must not close a position');
 });
 test('15c. a missing quote produces a HOLD, not a fabricated exit', async () => {
-  resetLedger(); openPos({ key: 'NOQUOTE|test' });
+  resetLedger(); ageBy(openPos({ key: 'NOQUOTE|test' }), 5);
   const r = await M.monitor({ quoteFor: async () => null });
   assert.equal(r.decisions[0].action, 'HOLD');
   assert.equal(r.decisions[0].blockedBy, 'NO_LIVE_QUOTE');

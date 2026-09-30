@@ -95,12 +95,18 @@ function decideAndSize({ cycle, contractMasterRow, dateIso, dte }) {
   const setup = (cycle.setups?.candidates ?? []).map((c) => c.setup);
   if (view === S.VIEW.NO_TRADE) reasons.push('direction=NO_TRADE');
 
-  // ── 3. Which side? Prefer the contract whose delta matches the bias.
-  const preferCE = view === S.VIEW.BULLISH;
-  const optionType = preferCE ? 'CE' : 'PE';
-  const leg = optionType === 'CE' ? chain : { ...chain };
-  if (!(leg.ceLtp > 0)) return { action: 'SKIP', reasons: ['LEG_NOT_QUOTED'] };
-  const entryAsk = leg.ask ?? leg.ceLtp;
+  // ── 3. Which leg? The SELECTED contract is the one priced and traded.
+  //
+  // This previously re-derived the leg from the ATM chain and used the ATM
+  // premium, silently discarding the contract chosen above. With an account
+  // that cannot afford the ATM, every cycle then priced a ₹11,687 lot and
+  // refused on affordability even though an affordable leg was selected.
+  // The selected contract's own live ask/bid is authoritative for entry.
+  const optionType = contractMasterRow?.optionType ?? (view === S.VIEW.BULLISH ? 'CE' : 'PE');
+  const entryAsk = Number(contractMasterRow?.ask ?? 0) > 0
+    ? Number(contractMasterRow.ask)
+    : Number(contractMasterRow?.bid ?? 0);
+  if (!(entryAsk > 0)) return { action: 'SKIP', reasons: ['LEG_NOT_QUOTED'] };
 
   // ── 4. Loss boundary BEFORE entry
   const stop = deriveStop({
@@ -181,32 +187,58 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
       try {
         contract = await A.withDb(async (conn) => {
           const [expRows] = await conn.query(
-            `SELECT expiry, COUNT(*) n
-               FROM fnf_option_contracts
-              WHERE underlying = ? AND expiry >= ?
-              GROUP BY expiry ORDER BY expiry ASC LIMIT 1`,
+            // The registry contains expiries that are NOT real NIFTY expiries
+            // (e.g. 2026-10-01, a Thursday, left by an earlier preparer). Selecting
+            // the nearest row blindly picked that one and found no ATM contract.
+            // Only an expiry that is actually SUBSCRIBED (present in the live
+            // option feed) can be traded, so the feed is the authority here.
+            `SELECT c.expiry, COUNT(DISTINCT c.symbol) n
+               FROM fnf_option_contracts c
+              WHERE c.underlying = ? AND c.expiry >= ?
+                AND c.symbol IN (SELECT contractSymbol FROM fnf_option_quotes
+                                  WHERE ts >= DATE_SUB(NOW(), INTERVAL 7 DAY))
+              GROUP BY c.expiry ORDER BY c.expiry ASC LIMIT 1`,
             [UNDERLYING_KEY[indexKey] ?? indexKey, dateIso],
           );
           if (!expRows.length) return null;
           // mysql2 returns DATE columns as JS Date objects in local time. Using
           // toString().slice() produced "Tue Sep 29" and matched no contract.
           resolvedExpiry = isoDate(expRows[0].expiry);
+          // Contract SELECTION, not a hardcoded ATM leg.
+          //
+          // ATM-only selection made a real trade impossible: NIFTY 22700 at
+          // ~Rs 179.80 x 65 = Rs 11,687 for ONE lot, which no Rs 5,000 account
+          // can afford, so every cycle refused on affordability.
+          //
+          // The rule is unchanged in spirit: capital is the only hard ceiling.
+          // What changed is that the ladder is searched for a leg the account
+          // can actually afford, on the side the direction favours, preferring
+          // the ATM when it is affordable. Nothing is loosened — a contract the
+          // account cannot buy is still refused, and no size is inflated.
           const [rows] = await conn.query(
-            `SELECT symbol, underlying, expiry, strike, optionType, lotSize
-               FROM fnf_option_contracts
-              WHERE underlying = ? AND strike = ? AND expiry = ?
-              ORDER BY optionType LIMIT 2`,
-            [UNDERLYING_KEY[indexKey] ?? indexKey, cycle.optionMetrics?.atm?.strike ?? 0, resolvedExpiry],
+            `SELECT c.symbol, c.underlying, c.expiry, c.strike, c.optionType, c.lotSize,
+                    q.bid, q.ask, q.ltp
+               FROM fnf_option_contracts c
+               JOIN (SELECT contractSymbol, MAX(ts) mx FROM fnf_option_quotes
+                      WHERE ts >= DATE_SUB(NOW(), INTERVAL 1 DAY)
+                      GROUP BY contractSymbol) latest
+                 ON latest.contractSymbol = c.symbol
+               JOIN fnf_option_quotes q
+                 ON q.contractSymbol = c.symbol AND q.ts = latest.mx
+              WHERE c.underlying = ? AND c.expiry = ?
+                AND q.ask > 0 AND q.bid > 0
+              ORDER BY ABS(c.strike - ?) ASC`,
+            [UNDERLYING_KEY[indexKey] ?? indexKey, resolvedExpiry, cycle.optionMetrics?.atm?.strike ?? 0],
           );
-          return rows[0] ?? null;
+          return rows ?? [];
         });
       } catch { /* recorded as unavailable below */ }
 
-      if (!contract) {
+      if (!Array.isArray(contract) || !contract.length) {
         out.result = {
           action: 'SKIP',
           reasons: [resolvedExpiry
-            ? `NO_REGISTERED_CONTRACT_FOR_ATM (expiry ${resolvedExpiry})`
+            ? `NO_LIVE_QUOTED_CONTRACT (expiry ${resolvedExpiry})`
             : 'NO_REGISTERED_CONTRACT_FOR_THIS_SESSION (no expiry in the registry on/after the session date)'],
           resolvedExpiry,
         };
@@ -214,6 +246,59 @@ async function tick({ indexKey = 'NIFTY', dateIso = C.istDateIso(), nowMs = Date
         appendDecision(out);
         return out;
       }
+
+      // ── Choose the leg to trade from the live, quoted, two-sided ladder.
+      const accountNow = L.account(L.loadState());
+      const view = cycle.direction?.view ?? null;
+      const wantCE = view === 'BULLISH';
+      const atmStrike = Number(cycle.optionMetrics?.atm?.strike ?? 0);
+      const ladder = contract
+        .map((r) => ({ ...r, strike: Number(r.strike), lotSize: Number(r.lotSize), ask: Number(r.ask), bid: Number(r.bid) }))
+        .filter((r) => r.ask > 0 && r.bid > 0 && r.lotSize > 0);
+      const sideOf = (r) => (r.optionType === 'CE' ? 'CE' : 'PE');
+      const affordable = (r) => r.ask * r.lotSize <= accountNow.AVAILABLE_CAPITAL;
+      // Prefer the side the direction favours, then the cheapest affordable leg
+      // on that side. A directional bias is a state, not an instruction: when no
+      // leg on the favoured side is affordable, the OTHER side is considered
+      // rather than refusing outright -- the direction is an input to the model,
+      // not a hard veto.
+      const onSide = ladder.filter((r) => (wantCE ? sideOf(r) === 'CE' : sideOf(r) === 'PE'));
+      const pool = (onSide.length ? onSide : ladder).filter(affordable);
+      const chosen = pool.length
+        ? pool.reduce((best, r) => {
+          const cost = r.ask * r.lotSize;
+          const bestCost = best.ask * best.lotSize;
+          // ATM proximity first when both are affordable, then lower cost.
+          const dNew = Math.abs(r.strike - atmStrike);
+          const dBest = Math.abs(best.strike - atmStrike);
+          if (dNew !== dBest) return dNew < dBest ? r : best;
+          return cost < bestCost ? r : best;
+        })
+        : null;
+
+      if (!chosen) {
+        const cheapest = ladder.length
+          ? ladder.reduce((a, r) => (r.ask * r.lotSize < a.ask * a.lotSize ? r : a))
+          : null;
+        out.result = {
+          action: 'SKIP',
+          reasons: ['ONE_LOT_UNAFFORDABLE'],
+          resolvedExpiry,
+          affordability: {
+            availableCapital: accountNow.AVAILABLE_CAPITAL,
+            lotSize: cheapest?.lotSize ?? null,
+            cheapestAsk: cheapest?.ask ?? null,
+            cheapestSymbol: cheapest?.symbol ?? null,
+            cheapestCost: cheapest ? Number((cheapest.ask * cheapest.lotSize).toFixed(2)) : null,
+            capitalNeeded: cheapest ? Number((cheapest.ask * cheapest.lotSize).toFixed(2)) : null,
+            note: 'the account cannot buy one lot of ANY leg in the quoted ladder',
+          },
+        };
+        out.account = L.account(L.loadState());
+        appendDecision(out);
+        return out;
+      }
+      contract = chosen;
 
       // Real days-to-expiry, computed from the resolved contract. DTE remains a
       // FEATURE: 0 is a valid, learnable state, never a veto.
@@ -277,15 +362,34 @@ async function monitorPositions({ indexKey, dateIso, nowMs, cycle }) {
   // Only the ATM contract is quoted in this cycle's chain, so a position in a
   // different strike is reported as unquotable rather than marked at a
   // fabricated price.
+  // The monitor must price the position's OWN contract. Reading the ATM chain
+  // instead meant a PE position was handed the CE leg's data, and a position in
+  // any non-ATM strike was marked at the wrong contract entirely. Worse, the
+  // ATM chain's volume is 0 on this feed, so the monitor read "no volume" and
+  // fired LIQUIDITY_DETERIORATION on a position one second old.
   const quoteFor = async (position) => {
-    if (!atm || !atm.strike) return null;
-    const leg = position.entry?.optionType === 'PE' ? null : atm;
-    if (!leg) return null;
-    if (position.lotSize && leg.strike && position.stopPremium === undefined) return null;
+    if (!position.contract) return null;
+    const c = await A.withDb(async (conn) => {
+      const [rows] = await conn.query(
+        `SELECT ltp, bid, ask, volume, openInterest, ts
+           FROM fnf_option_quotes
+          WHERE contractSymbol = ?
+          ORDER BY ts DESC LIMIT 1`,
+        [position.contract],
+      );
+      return rows[0] ?? null;
+    });
+    if (!c || !(Number(c.ltp) > 0)) return null;
+    const bid = Number(c.bid); const ask = Number(c.ask);
+    const twoSided = bid > 0 && ask > 0;
+    const mid = twoSided ? (bid + ask) / 2 : Number(c.ltp);
     return {
-      ltp: leg.ceLtp, bid: leg.bid, ask: leg.ask,
-      spreadPctOfMid: leg.spread?.spreadPctOfMid ?? null,
-      volume: leg.ceVol ?? null, openInterest: leg.ceOi ?? null,
+      ltp: Number(c.ltp),
+      bid: twoSided ? bid : null,
+      ask: twoSided ? ask : null,
+      spreadPctOfMid: twoSided ? Number((((ask - bid) / mid) * 100).toFixed(3)) : null,
+      volume: Number(c.volume) || null,
+      openInterest: Number(c.openInterest) || null,
       spot: cycle.spot ?? null,
       regime: cycle.regime?.regime ?? null,
       agreementShare: cycle.direction?.agreementShare ?? null,

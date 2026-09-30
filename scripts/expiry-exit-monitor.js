@@ -50,6 +50,14 @@ const EXIT_REASON = {
 /** Fraction of the position to release on a REDUCE. Never all, never zero. */
 const REDUCE_FRACTION = 0.5;
 
+/**
+ * Minimum time a position is observed before a non-structural exit may fire.
+ * The loss boundary set at entry is NOT subject to this — it is enforceable
+ * from the first mark. This only prevents a decision being taken on a quote
+ * that is the entry print itself.
+ */
+const MIN_HOLD_MINUTES = 2;
+
 function log(rec) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.appendFileSync(EXITS, `${JSON.stringify(rec)}\n`);
@@ -161,6 +169,7 @@ function contextFor(position, snapshot, nowMs = Date.now()) {
     // Real elapsed time since entry. A placeholder date would make every
     // hold-duration feature wrong, which would poison the exit-quality data.
     heldMinutes: entryIstMs ? Number(((nowMs - entryIstMs) / 60000).toFixed(1)) : null,
+    minutesSinceEntry: entryIstMs ? Math.max(0, (nowMs - entryIstMs) / 60000) : null,
     chargesPerPoint: snapshot.chargesPerPoint ?? 0.06,
   };
 }
@@ -194,7 +203,23 @@ async function monitor({ quoteFor, nowMs = Date.now() } = {}) {
 
     // 2. Decide
     const ctx = contextFor(p, snap, nowMs);
-    const decision = decideExit({ position: { ...p, mfePremium: mark.mfePremium, maePremium: mark.maePremium }, ctx });
+
+    // A position cannot be judged on the same tick it was opened. The mark used
+    // here is the ENTRY price, not a later observation, so any exit decision
+    // would rest on zero elapsed time -- and that is how a position one second
+    // old was closed for LIQUIDITY_DETERIORATION on a bad quote read. The loss
+    // boundary still applies immediately; nothing else does.
+    const ageMin = ctx.minutesSinceEntry;
+    // Apply the window only when the age is actually known. A missing entry
+    // timestamp is a data gap, not evidence that the position is brand new, and
+    // guessing either way would be a fabricated observation.
+    const withinMinHold = Number.isFinite(ageMin) && ageMin < MIN_HOLD_MINUTES;
+    const decision = withinMinHold
+      ? {
+        action: 'HOLD', reason: null, rNow: null, movePct: 0,
+        why: `opened ${ageMin} min ago; below the ${MIN_HOLD_MINUTES}-min observation window`,
+      }
+      : decideExit({ position: { ...p, mfePremium: mark.mfePremium, maePremium: mark.maePremium }, ctx });
     const rec = {
       id: p.id, symbol: p.symbol, key: p.key,
       action: decision.action, reason: decision.reason ?? null,
