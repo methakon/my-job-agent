@@ -51,7 +51,11 @@ async function quoteForPosition(conn, position) {
     bid: twoSided ? bid : null,
     ask: twoSided ? ask : null,
     spreadPctOfMid: twoSided ? Number((((ask - bid) / mid) * 100).toFixed(3)) : null,
-    volume: Number(r.volume) || 0,
+    // FYERS supplies volume=0/oi=0 on every option tick, so 0 here means "not
+    // reported", not "no trading". Recording that distinction prevents the
+    // monitor from inventing a liquidity exit from missing data.
+    volume: r.volume === null || r.volume === undefined ? null : Number(r.volume),
+    volumeReported: r.volume !== null && r.volume !== undefined && Number(r.volume) > 0,
     openInterest: Number(r.openInterest) || 0,
     source: r.source,
     freshnessBucket: C.freshnessBucket(C.ageMs(r.ts)),

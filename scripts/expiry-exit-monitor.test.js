@@ -281,6 +281,45 @@ test('18. sizing remains bounded only by AVAILABLE_CAPITAL', () => {
   assert.equal(r.account.invariantHolds, true);
 });
 
+// ── Regression: unreported volume is not a liquidity signal ───────────
+group('monitor: missing data is not an exit signal');
+test('unreported volume (FYERS carries 0 on every tick) does NOT force an exit', async () => {
+  resetLedger(); ageBy(openPos({ key: 'NOVOL|test' }), 5);
+  // volume: null/0 with volumeReported false is exactly what FYERS delivers.
+  const r = await M.monitor({
+    quoteFor: async () => snap({ volume: 0, volumeReported: false }),
+  });
+  assert.equal(r.decisions[0].action, 'HOLD',
+    'a feed that does not report volume must not be read as an untradeable contract');
+  assert.equal(L.loadState().openPositions.length, 1, 'the position must stay open');
+});
+test('REPORTED zero volume still exits for liquidity', async () => {
+  resetLedger(); ageBy(openPos({ key: 'VOL0|test' }), 5);
+  const r = await M.monitor({
+    quoteFor: async () => snap({ volume: 0, volumeReported: true }),
+  });
+  assert.equal(r.decisions[0].action, 'REDUCE');
+  assert.equal(r.decisions[0].reason, M.EXIT_REASON.LIQUIDITY_DETERIORATION);
+});
+test('a wide spread is still honoured as liquidity evidence', async () => {
+  resetLedger(); ageBy(openPos({ key: 'WIDE|test' }), 5);
+  const r = await M.monitor({
+    quoteFor: async () => snap({ ltp: 25, bid: 17, ask: 33, spreadPctOfMid: 64, volume: 0, volumeReported: false }),
+  });
+  assert.equal(r.decisions[0].action, 'REDUCE');
+  assert.equal(r.decisions[0].reason, M.EXIT_REASON.LIQUIDITY_DETERIORATION);
+});
+test('a tight two-sided quote is treated as tradeable evidence', () => {
+  const p = { entryAsk: 20, stopPremium: 16, mfePremium: 21, entry: { regime: 'TREND', agreementShare: 0.65, dte: 3 } };
+  const d = M.decideExit({ position: p, ctx: {
+    premium: 20.5, bid: 20.4, ask: 20.6, spreadPctOfMid: 0.98, freshnessBucket: 'FRESH',
+    volume: 0, volumeReported: false, regime: 'TREND', agreementShare: 0.65,
+    minutesToClose: 180, minutesSinceEntry: 10,
+  } });
+  assert.equal(d.action, 'HOLD');
+  assert.notEqual(d.reason, M.EXIT_REASON.LIQUIDITY_DETERIORATION);
+});
+
 runAll().then(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
   console.log(`\nexpiry exit monitor: ${passed} passed, ${failed} failed`);

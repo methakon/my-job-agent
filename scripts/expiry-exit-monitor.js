@@ -102,8 +102,14 @@ function decideExit({ position, ctx }) {
   if (Number.isFinite(spreadPct) && spreadPct > (ctx.spreadCeilingPct ?? 12)) {
     return { action: 'REDUCE', reason: EXIT_REASON.LIQUIDITY_DETERIORATION, rNow, movePct, why: `spread ${spreadPct.toFixed(1)}% exceeds the level where the position can be traded at size` };
   }
-  if (Number.isFinite(ctx.volume) && ctx.volume <= 0) {
-    return { action: 'REDUCE', reason: EXIT_REASON.LIQUIDITY_DETERIORATION, rNow, movePct, why: 'no volume in the contract — exit is not fillable at size' };
+  // Zero volume is only a liquidity signal when volume is actually REPORTED.
+  // The FYERS feed carries volume=0 and oi=0 on every option tick (39,462/39,462
+  // rows), so treating 0 as "no volume" fabricated a LIQUIDITY_DETERIORATION exit
+  // on every position within minutes. Missing data is not evidence of an
+  // untradeable contract: a two-sided, tight quote is the real liquidity signal
+  // and it is observable here.
+  if (ctx.volumeReported && Number.isFinite(ctx.volume) && ctx.volume <= 0) {
+    return { action: 'REDUCE', reason: EXIT_REASON.LIQUIDITY_DETERIORATION, rNow, movePct, why: 'reported volume is zero — exit not fillable at size' };
   }
 
   // ── 3. Expectancy decay: a position that ran far in our favour and gave it
@@ -159,6 +165,8 @@ function contextFor(position, snapshot, nowMs = Date.now()) {
     ask: snapshot.ask,
     spreadPctOfMid: snapshot.spreadPctOfMid ?? null,
     volume: snapshot.volume ?? null,
+    // True only when the provider actually supplies volume for this instrument.
+    volumeReported: snapshot.volumeReported ?? false,
     openInterest: snapshot.openInterest ?? null,
     spot: snapshot.spot ?? null,
     regime: snapshot.regime ?? null,
