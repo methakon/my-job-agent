@@ -320,6 +320,51 @@ test('a tight two-sided quote is treated as tradeable evidence', () => {
   assert.notEqual(d.reason, M.EXIT_REASON.LIQUIDITY_DETERIORATION);
 });
 
+// ── Regression: tick noise cannot trigger an expectancy-decay exit ────
+group('monitor: give-back requires a real run');
+test('a tiny MFE (0.20 pts) does NOT trigger EXPECTANCY_DECAY', () => {
+  const p = { entryAsk: 72.5, stopPremium: 60, mfePremium: 72.7, entry: { regime: 'TREND', agreementShare: 0.65, dte: 3 } };
+  const d = M.decideExit({ position: p, ctx: {
+    premium: 66.6, bid: 66.6, ask: 66.8, spreadPctOfMid: 0.3, freshnessBucket: 'FRESH',
+    volumeReported: false, regime: 'TREND', agreementShare: 0.65,
+    minutesToClose: 200, minutesSinceEntry: 4,
+  } });
+  assert.notEqual(d.reason, M.EXIT_REASON.EXPECTANCY_DECAY,
+    'a 0.20-pt run is noise, not a give-back');
+});
+test('a genuine large run given back DOES trigger EXPECTANCY_DECAY', () => {
+  const p = { entryAsk: 20, stopPremium: 16, mfePremium: 28, entry: { regime: 'TREND', agreementShare: 0.65, dte: 3 } };
+  const d = M.decideExit({ position: p, ctx: {
+    premium: 20.4, bid: 20.3, ask: 20.5, spreadPctOfMid: 0.9, freshnessBucket: 'FRESH',
+    volumeReported: false, regime: 'TREND', agreementShare: 0.65,
+    minutesToClose: 200, minutesSinceEntry: 60,
+  } });
+  assert.equal(d.action, 'REDUCE');
+  assert.equal(d.reason, M.EXIT_REASON.EXPECTANCY_DECAY);
+});
+test('a real run that is HELD does not trigger EXPECTANCY_DECAY', () => {
+  const p = { entryAsk: 20, stopPremium: 16, mfePremium: 28, entry: { regime: 'TREND', agreementShare: 0.65, dte: 3 } };
+  const d = M.decideExit({ position: p, ctx: {
+    premium: 26, bid: 25.9, ask: 26.1, spreadPctOfMid: 0.7, freshnessBucket: 'FRESH',
+    volumeReported: false, regime: 'TREND', agreementShare: 0.65,
+    minutesToClose: 200, minutesSinceEntry: 30,
+  } });
+  assert.notEqual(d.reason, M.EXIT_REASON.EXPECTANCY_DECAY);
+});
+
+// ── Regression: state.outcomes must carry the full training record ───
+test('the closed position appears in state with its FULL training record', async () => {
+  resetLedger(); ageBy(openPos({ key: 'FULL|test' }), 5);
+  await M.monitor({ quoteFor: async () => snap({ ltp: 10, bid: 9.8, ask: 10.2 }) });
+  const o = L.loadState().outcomes.at(-1);
+  assert.ok(o, 'the outcome must be in state');
+  for (const k of ['entryState', 'economics', 'maePts', 'mfePts', 'holdDurationMin', 'capitalReleased']) {
+    assert.ok(k in o, `state outcome must carry ${k}`);
+  }
+  assert.ok(o.economics && typeof o.economics.netPnl === 'number', 'net P&L must be present');
+  assert.equal(o.liveOrderCount, 0);
+});
+
 runAll().then(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
   console.log(`\nexpiry exit monitor: ${passed} passed, ${failed} failed`);

@@ -341,7 +341,36 @@ function closePaperPosition({ id, exitBid, intrinsicExit = 0, exitReason, charge
   state.realizedGross += econ.grossPnl;
   state.realizedCharges += econ.totalCharges;
   state.realizedNet += econ.netPnl;
-  state.outcomes.push({ id, key, netPnl: econ.netPnl, rMultiple, exitReason, at: new Date().toISOString() });
+  // The in-state summary is the SAME record the ledger writes. It used to be a
+  // 6-key stub, which meant state.outcomes and paper-ledger.jsonl disagreed and
+  // anything reading the state (the learning report, my own audits) saw outcomes
+  // with no entry/exit state, no economics and no MAE/MFE. Keep one shape.
+  state.outcomes.push({
+    schema: 'expiry-paper-outcome/v1', id, key, exitReason,
+    entryState: {
+      regime: p.entry?.regime ?? null,
+      setup: p.entry?.setup ?? null,
+      dte: p.entry?.dte ?? null,
+      view: p.entry?.view ?? null,
+      agreementShare: p.entry?.agreementShare ?? null,
+      confidenceP: p.entry?.pHat ?? null,
+      mode: p.entry?.mode ?? null,
+      underlying: p.entry?.underlyingAtEntry ?? null,
+      spread: p.entry?.spreadAtEntry ?? null,
+      entryAsk: p.entryAsk, lots: p.lots, committedCapital: p.committedCapital,
+    },
+    economics: econ,
+    rMultiple,
+    maePremium: p.maePremium ?? p.entryAsk,
+    mfePremium: p.mfePremium ?? p.entryAsk,
+    maePts: Number(((p.maePremium ?? p.entryAsk) - p.entryAsk).toFixed(2)),
+    mfePts: Number(((p.mfePremium ?? p.entryAsk) - p.entryAsk).toFixed(2)),
+    holdDurationMin: Number(((Date.now() - (p.entry?.entryIstMs ?? Date.now())) / 60000).toFixed(1)),
+    marks: p.marks ?? 0,
+    capitalReleased: p.committedCapital,
+    liveOrderCount: 0,
+    at: new Date().toISOString(),
+  });
   saveState(state);
   const outcome = {
     schema: 'expiry-paper-outcome/v1', id, key, exitReason,

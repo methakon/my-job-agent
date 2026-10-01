@@ -114,8 +114,15 @@ function decideExit({ position, ctx }) {
 
   // ── 3. Expectancy decay: a position that ran far in our favour and gave it
   //    all back has stopped paying for its risk. Learned, not a fixed target.
+  // Give-back is only meaningful against a run large enough to BE a run. With a
+  // 0.20-pt MFE the ratio explodes ("gave back 3150%") and forced an exit minutes
+  // after entry on tick noise. Require the excursion to clear both a minimum
+  // premium move and a material fraction of the loss boundary before a
+  // give-back can even be considered.
+  const MIN_RUN_PTS = 0.5;
+  const runIsReal = mfePts >= MIN_RUN_PTS && mfePts >= 0.25 * stopDistance;
   const giveBack = mfePts > 0 ? (mfePts - movePts) / mfePts : 0;
-  if (mfePts > 0 && giveBack > 0.6 && rNow < 0.25) {
+  if (runIsReal && giveBack > 0.6 && rNow < 0.25) {
     return { action: 'REDUCE', reason: EXIT_REASON.EXPECTANCY_DECAY, rNow, movePct, why: `gave back ${(giveBack * 100).toFixed(0)}% of a ${mfePts.toFixed(2)}-pt run; remaining edge no longer pays for the risk` };
   }
 
