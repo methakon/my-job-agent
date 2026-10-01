@@ -228,5 +228,49 @@ test('report never claims a live order happened', () => {
 });
 
 fs.rmSync(TMP, { recursive: true, force: true });
+// ── Regression: an adverse mark cannot break the capital invariant ─────
+group('capital accounting vs unrealised marks');
+// Open one lot that commits most of the account, then mark it adverse. Done
+// per-test so the assertions do not depend on any earlier test's state.
+function openLargePosition() {
+  const rec = L.openPaperPosition({
+    symbol: 'NSE:NIFTY26O0622500PE', underlying: 'NIFTY50-INDEX', expiry: '2026-10-06',
+    key: 'BIG|lot', regime: 'REVERSAL', setup: 'H_NO_TRADE', dte: 5,
+    premium: 76.65, lotSize: 65, entryAsk: 76.65, stopPremium: 60,
+    liveDataAvailable: true, view: 'NO_TRADE', agreementShare: 0.4,
+  });
+  return rec;
+}
+
+test('an open position slightly adverse keeps the invariant TRUE', () => {
+  openLargePosition();
+  const p = L.loadState().openPositions.at(-1);
+  assert.ok(p.committedCapital > 4000, 'the setup must commit most of the account');
+  // Drive the mark below entry: unrealisedNet goes negative.
+  L.markPosition({ id: p.id, premium: p.entryAsk * 0.9, underlyingPrice: null });
+  const a = L.account(L.loadState());
+  assert.ok(a.UNREALIZED_NET < 0, 'the mark must actually be adverse for this test to mean anything');
+  assert.equal(a.invariantHolds, true,
+    `committed ${a.COMMITTED_CAPITAL} must not exceed realised equity ${a.ACCOUNT_EQUITY}`);
+  assert.ok(a.COMMITTED_CAPITAL <= a.ACCOUNT_EQUITY + 1e-9);
+});
+test('AVAILABLE_CAPITAL is not eroded by an open mark', () => {
+  openLargePosition();
+  const p = L.loadState().openPositions.at(-1);
+  const before = L.account(L.loadState());
+  L.markPosition({ id: p.id, premium: p.entryAsk * 0.95, underlyingPrice: null });
+  const after = L.account(L.loadState());
+  assert.equal(after.AVAILABLE_CAPITAL, before.AVAILABLE_CAPITAL,
+    'capital already committed cannot be withdrawn by a mark');
+});
+test('the adverse mark is still visible, separately', () => {
+  openLargePosition();
+  const p = L.loadState().openPositions.at(-1);
+  L.markPosition({ id: p.id, premium: p.entryAsk * 0.8, underlyingPrice: null });
+  const a = L.account(L.loadState());
+  assert.ok(a.MARKED_EQUITY < a.ACCOUNT_EQUITY, 'the mark must be reported');
+  assert.ok(a.MARKED_EQUITY < a.ACCOUNT_EQUITY, 'unrealised loss must not be hidden');
+});
+
 console.log(`\nexpiry paper ledger: ${passed} passed, ${failed} failed`);
 if (failed) { console.log('failed:', failures.join(' | ')); process.exit(1); }

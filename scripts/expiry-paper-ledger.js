@@ -120,13 +120,25 @@ function saveState(s) {
 }
 
 function account(state) {
-  const equity = state.initialCapital + state.realizedNet + state.unrealizedNet;
+  // Equity for SIZING is realised only. Unrealised P&L is a live estimate on a
+  // position whose capital is ALREADY committed; folding it in made equity dip
+  // below the committed sum the moment a position went slightly adverse, and the
+  // invariant then reported a breach that never happened (committed 4982.25 vs
+  // a mark-inflated equity of 4884.29). Capital that is committed cannot be
+  // un-committed by a mark.
+  //
+  // The mark is still reported, separately, so an adverse open position is
+  // visible without corrupting the capital accounting.
+  const realisedEquity = state.initialCapital + state.realizedNet;
+  const markedEquity = realisedEquity + state.unrealizedNet;
   const committed = state.openPositions.reduce((a, p) => a + Math.abs(p.committedCapital), 0);
   return {
-    ACCOUNT_EQUITY: Number(equity.toFixed(2)),
-    AVAILABLE_CAPITAL: Number(Math.max(0, equity - committed).toFixed(2)),
+    ACCOUNT_EQUITY: Number(realisedEquity.toFixed(2)),
+    MARKED_EQUITY: Number(markedEquity.toFixed(2)),
+    UNREALIZED_NET: Number(state.unrealizedNet.toFixed(2)),
+    AVAILABLE_CAPITAL: Number(Math.max(0, realisedEquity - committed).toFixed(2)),
     COMMITTED_CAPITAL: Number(committed.toFixed(2)),
-    invariantHolds: committed <= equity + 1e-9,
+    invariantHolds: committed <= realisedEquity + 1e-9,
   };
 }
 
