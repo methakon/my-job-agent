@@ -962,6 +962,12 @@
       "reason": "Make the paper loop tradeable against the live FYERS feed: DDO0MM symbol form, correct quote/index tables, real expiry selection, affordability-aware contract selection, position-own-contract pricing, minimum observation window. Paper-only; live execution disabled. Trading workstream; no /project-status roadmap row.",
       "workstream": "trading-expiry-learning",
       "authority": "operator-directive 2026-09-29 (first complete real-tick paper learning cycle)"
+    },
+    "b7a9e75494e91665d150d66c6fbc353761f27442": {
+      "short": "b7a9e75",
+      "reason": "Absent volume/OI must not be read as a liquidity exit signal (FYERS reports 0 on every option tick); per-day session scoping for the paper ledger. Removes 14 invalid outcomes. Paper-only; live execution disabled. Trading workstream; no /project-status roadmap row.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-09-29 (first complete real-tick paper learning cycle)"
     }
   }
 }
