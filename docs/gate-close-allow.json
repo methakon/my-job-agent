@@ -986,6 +986,12 @@
       "reason": "Port cpp-trading-agent feature/entry/exit/risk logic into the paper expiry engine (read-only source; nothing modified there). Fixed-threshold vetoes became sizing inputs per operator rules; capital remains the only hard financial invariant. Paper-only, live execution disabled. Trading workstream; no /project-status roadmap row.",
       "workstream": "trading-expiry-learning",
       "authority": "operator-directive 2026-10-02 (port their trading logic into this project)"
+    },
+    "1ba0f90ed1c7dadf9afa543fbfe0b626dd75f225": {
+      "short": "1ba0f90",
+      "reason": "Unified read surface over both canonical option feeds (FYERS fnf_option_quotes + Upstox unified_option_quotes). Read-side only; no production write path touched. Exchange-timestamp freshness, measured budget. Paper-only, live execution disabled. Trading workstream; no /project-status roadmap row.",
+      "workstream": "trading-expiry-learning",
+      "authority": "operator-directive 2026-10-02 (build the unified read; use the redundant feeds)"
     }
   }
 }
