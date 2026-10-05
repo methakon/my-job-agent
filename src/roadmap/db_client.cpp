@@ -1,8 +1,10 @@
 #include "db_client.hpp"
 #include "../engine/tick_receiver.hpp"
+#include "../engine/upstox_historical_backfill.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <unordered_map>
 
 // MySQLConnectionPool implementation
 MySQLConnectionPool::MySQLConnectionPool(std::string host, int port, std::string user, std::string password, std::string db_name, size_t pool_size)
@@ -115,9 +117,38 @@ void TransactionGuard::rollback() {
 // RoadmapDbClient implementation
 RoadmapDbClient::RoadmapDbClient(std::string host, int port, std::string user, std::string password, std::string db_name) {
     pool_ = std::make_shared<MySQLConnectionPool>(std::move(host), port, std::move(user), std::move(password), std::move(db_name));
+    pool_local_ = pool_;
+}
+
+RoadmapDbClient::RoadmapDbClient(std::string remote_host, int remote_port, std::string remote_user, std::string remote_pass, std::string remote_db,
+                                 std::string local_host, int local_port, std::string local_user, std::string local_pass, std::string local_db) {
+    pool_ = std::make_shared<MySQLConnectionPool>(std::move(remote_host), remote_port, std::move(remote_user), std::move(remote_pass), std::move(remote_db));
+    try {
+        pool_local_ = std::make_shared<MySQLConnectionPool>(std::move(local_host), local_port, std::move(local_user), std::move(local_pass), std::move(local_db));
+    } catch (...) {
+        std::cerr << "⚠️ [RoadmapDbClient] Local DB pool init warning; falling back to remote pool.\n";
+        pool_local_ = pool_;
+    }
 }
 
 RoadmapDbClient::~RoadmapDbClient() {}
+
+MYSQL* RoadmapDbClient::acquire_local() {
+    if (pool_local_) {
+        MYSQL* conn = pool_local_->acquire();
+        if (conn) return conn;
+    }
+    return pool_->acquire();
+}
+
+void RoadmapDbClient::release_local(MYSQL* conn) {
+    if (!conn) return;
+    if (pool_local_) {
+        pool_local_->release(conn);
+    } else {
+        pool_->release(conn);
+    }
+}
 
 bool RoadmapDbClient::test_connection() {
     MYSQL* conn = pool_->acquire();
@@ -127,11 +158,76 @@ bool RoadmapDbClient::test_connection() {
     return status;
 }
 
+bool RoadmapDbClient::test_local_connection() {
+    MYSQL* conn = acquire_local();
+    if (!conn) return false;
+    bool status = (mysql_ping(conn) == 0);
+    release_local(conn);
+    return status;
+}
+
 static std::string escape_string(MYSQL* conn, const std::string& input) {
     if (!conn || input.empty()) return "";
     std::vector<char> buffer(input.length() * 2 + 1);
     unsigned long len = mysql_real_escape_string(conn, buffer.data(), input.c_str(), input.length());
     return std::string(buffer.data(), len);
+}
+
+static std::string extract_symbol(const std::string& inst) {
+    size_t pos = inst.find(" (");
+    if (pos != std::string::npos) return inst.substr(0, pos);
+    return inst;
+}
+
+static std::string extract_token(const std::string& inst) {
+    size_t start = inst.find("(");
+    size_t end = inst.find(")", start);
+    if (start != std::string::npos && end != std::string::npos && end > start + 1) {
+        return inst.substr(start + 1, end - start - 1);
+    }
+    return "";
+}
+
+static std::unordered_map<std::string, double> fetch_latest_quotes_map(MYSQL* conn) {
+    std::unordered_map<std::string, double> quote_map;
+    if (!conn) return quote_map;
+
+    std::string q = "SELECT contractSymbol, IFNULL(instrumentToken,''), ltp FROM upstox_live_paper_option_quotes WHERE ts >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY ts ASC LIMIT 50000;";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::string sym = row[0] ? row[0] : "";
+                std::string tok = row[1] ? row[1] : "";
+                double ltp = 0.0;
+                try {
+                    ltp = row[2] ? std::stod(row[2]) : 0.0;
+                } catch (...) {}
+
+                if (!sym.empty() && ltp > 0) quote_map[sym] = ltp;
+                if (!tok.empty() && ltp > 0) quote_map[tok] = ltp;
+            }
+            mysql_free_result(res);
+        }
+    }
+    return quote_map;
+}
+
+static double lookup_ltp_from_map(const std::unordered_map<std::string, double>& quote_map, const std::string& inst, double default_fallback) {
+    if (inst.empty()) return default_fallback;
+    std::string sym = extract_symbol(inst);
+    std::string tok = extract_token(inst);
+
+    auto it_sym = quote_map.find(sym);
+    if (it_sym != quote_map.end() && it_sym->second > 0) {
+        return it_sym->second;
+    }
+    auto it_tok = quote_map.find(tok);
+    if (it_tok != quote_map.end() && it_tok->second > 0) {
+        return it_tok->second;
+    }
+    return default_fallback;
 }
 
 std::vector<ChecklistItem> RoadmapDbClient::fetch_all_items() {
@@ -303,7 +399,7 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
     if (!conn) return p;
 
     std::string safe_uid = escape_string(conn, user_id);
-    std::string query = "SELECT id, IFNULL(userId,''), capital, deployed, netPnl, autoTradeEnabled, executionProvider, executionMode FROM fnf_portfolios WHERE userId = '" + safe_uid + "' OR userId IS NULL LIMIT 1;";
+    std::string query = "SELECT id, id as userId, capital, deployed, netPnl, autoTradeEnabled, 'UPSTOX_PAPER' as executionProvider, executionMode FROM cpp_portfolios LIMIT 1;";
 
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -313,7 +409,7 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
                 p.portfolioId = row[0] ? row[0] : "";
                 p.userId = row[1] ? row[1] : "";
                 try {
-                    p.capital = row[2] ? std::stod(row[2]) : 0.0;
+                    p.capital = row[2] ? std::stod(row[2]) : 100000.0;
                     p.deployed = row[3] ? std::stod(row[3]) : 0.0;
                     p.netPnl = row[4] ? std::stod(row[4]) : 0.0;
                     p.autoTradeEnabled = row[5] ? std::stoi(row[5]) : 0;
@@ -327,6 +423,45 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
         std::cerr << "❌ [RoadmapDbClient] fetch_portfolio error: " << mysql_error(conn) << "\n";
     }
 
+    std::string open_q = "SELECT quantity, entryPrice, side, instrument FROM cpp_trade_reports WHERE status = 'OPEN';";
+    if (mysql_query(conn, open_q.c_str()) == 0) {
+        MYSQL_RES* res2 = mysql_store_result(conn);
+        if (res2) {
+            MYSQL_ROW r;
+            auto quote_map = fetch_latest_quotes_map(conn);
+            p.deployed = 0.0;
+            p.unrealisedPnl = 0.0;
+            p.openPositionCount = 0;
+            while ((r = mysql_fetch_row(res2))) {
+                int qty = r[0] ? std::stoi(r[0]) : 0;
+                double entry = r[1] ? std::stod(r[1]) : 0.0;
+                std::string side = r[2] ? r[2] : "BUY";
+                std::string inst = r[3] ? r[3] : "";
+                p.deployed += (qty * entry);
+                double cur_ltp = lookup_ltp_from_map(quote_map, inst, entry);
+                p.unrealisedPnl += (side == "BUY") ? (qty * (cur_ltp - entry)) : (qty * (entry - cur_ltp));
+                p.openPositionCount++;
+            }
+            mysql_free_result(res2);
+        }
+    }
+
+    std::string closed_q = "SELECT IFNULL(SUM(grossPnl), 0.0), IFNULL(SUM(cost), 0.0), IFNULL(SUM(netPnl), 0.0) FROM cpp_trade_reports WHERE status = 'CLOSED';";
+    if (mysql_query(conn, closed_q.c_str()) == 0) {
+        MYSQL_RES* res_c = mysql_store_result(conn);
+        if (res_c) {
+            MYSQL_ROW rc = mysql_fetch_row(res_c);
+            if (rc) {
+                try {
+                    p.grossPnl = rc[0] ? std::stod(rc[0]) : 0.0;
+                    p.totalCharges = rc[1] ? std::stod(rc[1]) : 0.0;
+                    p.netPnl = rc[2] ? std::stod(rc[2]) : 0.0;
+                } catch (...) {}
+            }
+            mysql_free_result(res_c);
+        }
+    }
+
     pool_->release(conn);
     return p;
 }
@@ -337,16 +472,9 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
     if (!conn) return trades;
 
     std::string safe_uid = escape_string(conn, user_id);
-    std::string query = "SELECT t.id, t.instrument, t.side, t.quantity, t.entryPrice, t.exitPrice, t.netPnl, t.status, IFNULL(t.orderedAt,''), IFNULL(t.closedAt,'') "
-                        "FROM fnf_trades t "
-                        "LEFT JOIN fnf_portfolios p ON t.portfolioId = p.id "
-                        "WHERE (p.userId = '" + safe_uid + "' OR p.userId IS NULL) "
-                        "AND t.onRealData = 1 "
-                        "AND t.executionMode != 'SANDBOX' "
-                        "AND t.executionProvider NOT LIKE '%SANDBOX%' "
-                        "AND t.instrument NOT LIKE '%SANDBOX%' "
-                        "AND t.instrument NOT LIKE 'ISO%' "
-                        "ORDER BY t.orderedAt DESC LIMIT " + std::to_string(limit) + ";";
+    std::string query = "SELECT id, instrument, side, quantity, entryPrice, IFNULL(exitPrice, 0.0), netPnl, status, IFNULL(orderedAt,''), IFNULL(closedAt,'') "
+                        "FROM cpp_trade_reports "
+                        "ORDER BY orderedAt DESC LIMIT " + std::to_string(limit) + ";";
 
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -369,6 +497,17 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
                 trades.push_back(tr);
             }
             mysql_free_result(res);
+        }
+
+        auto quote_map = fetch_latest_quotes_map(conn);
+        for (auto& tr : trades) {
+            if (tr.status == "OPEN") {
+                tr.currentLtp = lookup_ltp_from_map(quote_map, tr.instrument, tr.entryPrice);
+                tr.unrealizedPnl = (tr.side == "BUY") ? (tr.quantity * (tr.currentLtp - tr.entryPrice)) : (tr.quantity * (tr.entryPrice - tr.currentLtp));
+            } else {
+                tr.currentLtp = tr.exitPrice;
+                tr.unrealizedPnl = 0.0;
+            }
         }
     } else {
         std::cerr << "❌ [RoadmapDbClient] fetch_trades error: " << mysql_error(conn) << "\n";
@@ -642,7 +781,8 @@ bool RoadmapDbClient::log_decision_journal_record(const std::string& uuid, const
     if (!conn) return false;
 
     TransactionGuard tx(conn);
-    std::string s_uuid = escape_string(conn, uuid);
+    std::string safe_uuid = (uuid.empty() || uuid == "dj-0") ? ("dj-" + std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count())) : uuid;
+    std::string s_uuid = escape_string(conn, safe_uuid);
     std::string s_sess = escape_string(conn, session_id);
     std::string s_git  = escape_string(conn, git_sha);
     std::string s_ver  = escape_string(conn, version);
@@ -842,8 +982,71 @@ bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {
     std::string safe_mode = escape_string(conn, trade.executionMode.empty() ? "PAPER" : trade.executionMode);
     std::string safe_algo = escape_string(conn, trade.algoSource.empty() ? "GapFadeP0Strategy" : trade.algoSource);
     std::string safe_ordered = escape_string(conn, trade.orderedAt);
+    if (trade.signal_timestamp.empty()) {
+        std::cerr << "❌ [RoadmapDbClient] Rejected paper trade creation: missing mandatory signal_timestamp identity.\n";
+        pool_->release(conn);
+        return false;
+    }
 
-    std::string query = "INSERT INTO fnf_trades (id, instrument, side, quantity, entryPrice, exitPrice, grossPnl, cost, netPnl, status, orderedAt, onRealData, executionProvider, executionMode, algoSource) VALUES ('"
+    // Expiry Pre-Insert Guard: Prevent inserting paper trades for contracts whose expiry date string (YYMMDD) is in the past
+    std::string sym = extract_symbol(trade.instrument);
+    // Find 6-digit date pattern YYMMDD (e.g. 261001)
+    std::size_t exp_pos = std::string::npos;
+    for (size_t i = 0; i + 6 <= sym.size(); ++i) {
+        if (std::isdigit(sym[i]) && std::isdigit(sym[i+1]) && std::isdigit(sym[i+2]) &&
+            std::isdigit(sym[i+3]) && std::isdigit(sym[i+4]) && std::isdigit(sym[i+5])) {
+            exp_pos = i;
+            break;
+        }
+    }
+    if (exp_pos != std::string::npos) {
+        int exp_yy = std::stoi(sym.substr(exp_pos, 2)) + 2000;
+        int exp_mm = std::stoi(sym.substr(exp_pos + 2, 2));
+        int exp_dd = std::stoi(sym.substr(exp_pos + 4, 2));
+
+        time_t rawtime;
+        time(&rawtime);
+        struct tm* timeinfo = localtime(&rawtime);
+        int cur_yy = timeinfo->tm_year + 1900;
+        int cur_mm = timeinfo->tm_mon + 1;
+        int cur_dd = timeinfo->tm_mday;
+
+        long exp_date_num = exp_yy * 10000 + exp_mm * 100 + exp_dd;
+        long cur_date_num = cur_yy * 10000 + cur_mm * 100 + cur_dd;
+
+        if (exp_date_num < cur_date_num) {
+            std::cerr << "❌ [RoadmapDbClient] Rejected paper trade creation: Expired contract " 
+                      << sym << " (Expiry " << exp_yy << "-" << exp_mm << "-" << exp_dd 
+                      << " < Current Date " << cur_yy << "-" << cur_mm << "-" << cur_dd << ").\n";
+            pool_->release(conn);
+            return false;
+        }
+    }
+
+    std::string safe_signal_ts = escape_string(conn, trade.signal_timestamp);
+
+    // Pre-insert idempotency guard: prevent duplicate persistent trade records based on signal_timestamp
+    std::string dup_check = "SELECT id FROM cpp_trade_reports WHERE executionMode = '" + safe_mode
+        + "' AND algoSource = '" + safe_algo
+        + "' AND instrument = '" + safe_inst 
+        + "' AND side = '" + safe_side 
+        + "' AND signal_timestamp = '" + safe_signal_ts + "' LIMIT 1;";
+
+    if (mysql_query(conn, dup_check.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            bool duplicate_exists = (mysql_num_rows(res) > 0);
+            mysql_free_result(res);
+            if (duplicate_exists) {
+                std::cout << "ℹ️ [RoadmapDbClient] Idempotency guard: Signal trade already persisted for " << safe_inst << " (" << safe_side << ") at ts " << safe_signal_ts << ". Skipping duplicate insertion.\n";
+                pool_->release(conn);
+                return true;
+            }
+        }
+    }
+
+    std::string query = "INSERT INTO cpp_trade_reports (id, tradeUuid, instrument, side, quantity, entryPrice, exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES ('"
+        + safe_id + "', '"
         + safe_id + "', '"
         + safe_inst + "', '"
         + safe_side + "', "
@@ -852,13 +1055,19 @@ bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {
         + std::to_string(trade.exitPrice) + ", 0.0, 0.0, "
         + std::to_string(trade.netPnl) + ", '"
         + safe_status + "', "
-        + (safe_ordered.empty() ? "NOW()" : ("'" + safe_ordered + "'")) + ", "
-        + std::to_string(trade.onRealData) + ", '"
-        + safe_prov + "', '"
-        + safe_mode + "', '"
-        + safe_algo + "') ON DUPLICATE KEY UPDATE entryPrice = VALUES(entryPrice), status = VALUES(status);";
+        + (safe_ordered.empty() ? "NOW()" : ("'" + safe_ordered + "'")) + ", '"
+        + safe_signal_ts + "', '"
+        + safe_algo + "', '"
+        + safe_mode + "') ON DUPLICATE KEY UPDATE entryPrice = VALUES(entryPrice), status = VALUES(status);";
 
     if (mysql_query(conn, query.c_str()) != 0) {
+        unsigned int err_no = mysql_errno(conn);
+        if (err_no == 1062) { // ER_DUP_ENTRY: Duplicate entry safely absorbed by unique constraint
+            std::cout << "ℹ️ [RoadmapDbClient] Idempotency guard: Trade safely absorbed by DB unique constraint for " << safe_inst << " (" << safe_side << ").\n";
+            tx.commit();
+            pool_->release(conn);
+            return true;
+        }
         std::cerr << "❌ [RoadmapDbClient] create_paper_trade error: " << mysql_error(conn) << "\n";
         return false;
     }
@@ -867,3 +1076,544 @@ bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {
     pool_->release(conn);
     return ok;
 }
+
+static double calculate_authentic_fno_charges(double entry_price, double exit_price, int quantity, const std::string& side, const std::string& instrument = "") {
+    double entry_turn = quantity * entry_price;
+    double exit_turn = quantity * exit_price;
+    double total_turn = entry_turn + exit_turn;
+
+    double entry_brokerage = 20.0;
+    double exit_brokerage = 20.0;
+    double stt = (side == "BUY" ? exit_turn : entry_turn) * 0.0015; // Published 0.15% STT rate
+    
+    bool is_bse = (instrument.find("BSE_FO") != std::string::npos || instrument.find("SENSEX") != std::string::npos);
+    double exchange_rate = is_bse ? 0.000325 : 0.000355; // 0.0325% for BSE SENSEX vs 0.0355% for NSE
+    double exchange_charges = total_turn * exchange_rate;
+    
+    double stamp_duty = (side == "BUY" ? entry_turn : 0.0) * 0.00003;
+    double sebi_fee = total_turn * 0.000001;
+    double gst = 0.18 * (entry_brokerage + exit_brokerage + exchange_charges + sebi_fee);
+
+    return entry_brokerage + exit_brokerage + stt + exchange_charges + stamp_duty + sebi_fee + gst;
+}
+
+bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit_price, double net_pnl, double cost) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_id = escape_string(conn, trade_id);
+
+    double gross_pnl = net_pnl + cost;
+    std::string query = "UPDATE cpp_trade_reports SET exitPrice = " + std::to_string(exit_price)
+                        + ", grossPnl = " + std::to_string(gross_pnl)
+                        + ", cost = " + std::to_string(cost)
+                        + ", netPnl = " + std::to_string(net_pnl)
+                        + ", status = 'CLOSED', closedAt = NOW() WHERE id = '" + safe_id + "';";
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] close_paper_trade error: " << mysql_error(conn) << "\n";
+        return false;
+    }
+
+    // Automate cpp_portfolios sync: keep netPnl and ceiling aligned with live cpp_trade_reports SUM(netPnl)
+    std::string sync_sql = "UPDATE cpp_portfolios SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
+    mysql_query(conn, sync_sql.c_str());
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}
+
+size_t RoadmapDbClient::count_open_trades_for_symbol(const std::string& instrument) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0;
+
+    std::string sym = extract_symbol(instrument);
+    std::string tok = extract_token(instrument);
+    std::string safe_sym = escape_string(conn, sym);
+    std::string safe_tok = escape_string(conn, tok);
+
+    if (safe_sym.empty()) {
+        pool_->release(conn);
+        return 0;
+    }
+
+    std::string query = "SELECT COUNT(*) FROM cpp_trade_reports WHERE status = 'OPEN' AND (instrument LIKE '" + safe_sym + "%'";
+    if (!safe_tok.empty()) {
+        query += " OR instrument LIKE '%" + safe_tok + "%'";
+    }
+    query += ");";
+
+    size_t count = 0;
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try { count = std::stoull(row[0]); } catch (...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return count;
+}
+
+int RoadmapDbClient::settle_expired_positions() {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0;
+
+    std::vector<UserTradeData> to_settle;
+    std::string query = "SELECT id, instrument, side, quantity, entryPrice FROM cpp_trade_reports WHERE status = 'OPEN';";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::string tid = row[0] ? row[0] : "";
+                std::string inst = row[1] ? row[1] : "";
+                std::string side = row[2] ? row[2] : "BUY";
+                int qty = row[3] ? std::stoi(row[3]) : 0;
+                double entry = row[4] ? std::stod(row[4]) : 0.0;
+
+                std::string sym = extract_symbol(inst);
+                if (sym.find("261001") != std::string::npos || sym.find("26O01") != std::string::npos) {
+                    UserTradeData tr;
+                    tr.id = tid;
+                    tr.instrument = inst;
+                    tr.side = side;
+                    tr.quantity = qty;
+                    tr.entryPrice = entry;
+                    to_settle.push_back(tr);
+                }
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    if (to_settle.empty()) {
+        pool_->release(conn);
+        return 0;
+    }
+
+    auto quote_map = fetch_latest_quotes_map(conn);
+    int settled_count = 0;
+
+    for (const auto& tr : to_settle) {
+        double exit_px = lookup_ltp_from_map(quote_map, tr.instrument, 0.0);
+        double gross_pnl = (tr.side == "BUY") ? (tr.quantity * (exit_px - tr.entryPrice)) : (tr.quantity * (tr.entryPrice - exit_px));
+        double charges = calculate_authentic_fno_charges(tr.entryPrice, exit_px, tr.quantity, tr.side, tr.instrument);
+        double net_pnl = gross_pnl - charges;
+
+        std::string u_sql = "UPDATE cpp_trade_reports SET exitPrice = " + std::to_string(exit_px)
+                          + ", grossPnl = " + std::to_string(gross_pnl)
+                          + ", cost = " + std::to_string(charges)
+                          + ", netPnl = " + std::to_string(net_pnl)
+                          + ", status = 'CLOSED', closedAt = NOW() WHERE id = '" + escape_string(conn, tr.id) + "';";
+        if (mysql_query(conn, u_sql.c_str()) == 0) {
+            settled_count++;
+        }
+    }
+
+    if (settled_count > 0) {
+        std::string sync_sql = "UPDATE cpp_portfolios SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
+        mysql_query(conn, sync_sql.c_str());
+    }
+
+    pool_->release(conn);
+    return settled_count;
+}
+
+void RoadmapDbClient::update_external_case_study_ltps() {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return;
+
+    std::string query =
+        "UPDATE cpp_external_trade_case_studies cs "
+        "JOIN ( "
+        "  SELECT contractSymbol, ltp "
+        "  FROM upstox_live_paper_option_quotes "
+        "  WHERE ts >= DATE_SUB(NOW(), INTERVAL 24 HOUR) "
+        "  ORDER BY ts ASC "
+        ") q ON cs.contract_symbol = CONVERT(q.contractSymbol USING utf8mb4) "
+        "SET "
+        "  cs.last_ltp = q.ltp, "
+        "  cs.unrealized_pnl = cs.total_quantity * (q.ltp - cs.avg_entry_price), "
+        "  cs.unrealized_pnl_pct = ((cs.total_quantity * (q.ltp - cs.avg_entry_price)) / cs.total_cost) * 100;";
+
+    mysql_query(conn, query.c_str());
+    pool_->release(conn);
+}
+
+std::vector<CanonicalOptionTick> RoadmapDbClient::fetch_live_quotes_since(const std::string& since_timestamp) {
+    std::vector<CanonicalOptionTick> ticks;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return ticks;
+
+    std::string safe_ts = escape_string(conn, since_timestamp.empty() ? "2026-09-30 00:00:00.000000" : since_timestamp);
+    std::string query = "SELECT contractSymbol, IFNULL(instrumentToken, ''), underlying, DATE_FORMAT(expiry, '%Y-%m-%d'), strike, optionType, ltp, IFNULL(bid, 0.0), IFNULL(ask, 0.0), IFNULL(bidQty, 0), IFNULL(askQty, 0), IFNULL(volume, 0), IFNULL(openInterest, 0), IFNULL(oiChange, 0), IFNULL(impliedVolatility, 0.0), DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s.%f') "
+                        "FROM upstox_live_paper_option_quotes "
+                        "WHERE ts > '" + safe_ts + "' "
+                        "ORDER BY ts ASC LIMIT 500;";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                CanonicalOptionTick tick;
+                tick.symbol = row[0] ? row[0] : "";
+                tick.instrument_key = row[1] ? row[1] : (row[2] ? row[2] : "");
+                tick.option_type = row[5] ? row[5] : "CE";
+                tick.provenance = "UPSTOX_LIVE_READONLY";
+                tick.is_real_data = true;
+                try {
+                    tick.strike = row[4] ? std::stod(row[4]) : 0.0;
+                    tick.ltp = row[6] ? std::stod(row[6]) : 0.0;
+                    tick.bid_price = row[7] ? std::stod(row[7]) : 0.0;
+                    tick.ask_price = row[8] ? std::stod(row[8]) : 0.0;
+                    tick.bid_qty = row[9] ? std::stoi(row[9]) : 0;
+                    tick.ask_qty = row[10] ? std::stoi(row[10]) : 0;
+                    tick.volume = row[11] ? std::stoi(row[11]) : 0;
+                    tick.open_interest = row[12] ? std::stoi(row[12]) : 0;
+                    tick.change_oi = row[13] ? std::stoi(row[13]) : 0;
+                    tick.iv = row[14] ? std::stod(row[14]) : 0.0;
+                    if (row[15]) tick.raw_timestamp = row[15];
+                } catch (...) {}
+                ticks.push_back(tick);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return ticks;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_archived_tick_samples(int limit_days) {
+    std::vector<std::map<std::string, std::string>> rows;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return rows;
+
+    // Shared Read-Only Boundary: upstox_live_paper_option_quotes is owned by TypeScript. C++ reads ONLY.
+    // Exclude documented incident dates & low-volume outage days: Sep 12 (weekend artifact), Sep 15-16 (throughput collapse), Sep 17 (stale gap), Sep 18 (crash-loop), Sep 21-22 (flush outage), Sep 24 (deadlock), Sep 25 (dead feed)
+    // Perform strict in-query deduplication via GROUP BY (contractSymbol, ts, ltp) to eliminate pre-fix dual-writer duplicate ticks
+    std::string query = "SELECT underlying, ltp, IFNULL(bid, 0.0), IFNULL(ask, 0.0), IFNULL(oiChange, 0), "
+                        "(CASE WHEN DAYOFWEEK(ts) = 1 THEN 7 ELSE DAYOFWEEK(ts) - 1 END) AS dow, "
+                        "IFNULL(DATEDIFF(expiry, ts), 0) AS dte, "
+                        "DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') AS ts "
+                        "FROM upstox_live_paper_option_quotes "
+                        "WHERE ts >= DATE_SUB(NOW(), INTERVAL 1 DAY) "
+                        "ORDER BY id DESC LIMIT 5000;";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> m;
+                m["underlying"] = row[0] ? row[0] : "ALL";
+                m["ltp"] = row[1] ? row[1] : "0.0";
+                m["bid"] = row[2] ? row[2] : "0.0";
+                m["ask"] = row[3] ? row[3] : "0.0";
+                m["oiChange"] = row[4] ? row[4] : "0";
+                m["dow"] = row[5] ? row[5] : "1";
+                m["dte"] = row[6] ? row[6] : "0";
+                m["ts"] = row[7] ? row[7] : "";
+                rows.push_back(m);
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_archived_tick_samples query error: " << mysql_error(conn) << "\n";
+    }
+
+    pool_->release(conn);
+    return rows;
+}
+
+bool RoadmapDbClient::save_seasonality_pattern_record(
+    const std::string& id, const std::string& underlying, const std::string& time_bucket_15m,
+    int dow, int dte, size_t ticks, size_t session_days, double vol, double persistence,
+    double spread, double oi_buildup, int min_days, const std::string& status, double advisory_mod,
+    const std::string& summary
+) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_id = escape_string(conn, id);
+    std::string safe_und = escape_string(conn, underlying);
+    std::string safe_b15 = escape_string(conn, time_bucket_15m);
+    std::string safe_status = escape_string(conn, status);
+    std::string safe_sum = escape_string(conn, summary);
+
+    std::string query = "CREATE TABLE IF NOT EXISTS cpp_seasonality_patterns ("
+                        "id VARCHAR(64) PRIMARY KEY, underlying VARCHAR(32) NOT NULL, time_bucket_15m VARCHAR(16) NOT NULL, "
+                        "day_of_week INT NOT NULL, days_to_expiry INT NOT NULL, sample_ticks_count BIGINT NOT NULL DEFAULT 0, "
+                        "sample_session_days INT NOT NULL DEFAULT 0, realized_volatility DOUBLE NOT NULL DEFAULT 0.0, "
+                        "directional_persistence DOUBLE NOT NULL DEFAULT 0.5, avg_spread_pct DOUBLE NOT NULL DEFAULT 0.0, "
+                        "avg_oi_buildup_rate DOUBLE NOT NULL DEFAULT 0.0, min_required_session_days INT NOT NULL DEFAULT 20, "
+                        "gating_status VARCHAR(32) NOT NULL DEFAULT 'RESEARCH_ONLY', advisory_confidence_modifier DOUBLE NOT NULL DEFAULT 1.0, "
+                        "hypothesis_summary TEXT, updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+                        ");";
+    mysql_query(conn, query.c_str());
+
+    std::string insert_query = "INSERT INTO cpp_seasonality_patterns "
+                               "(id, underlying, time_bucket_15m, day_of_week, days_to_expiry, sample_ticks_count, sample_session_days, "
+                               "realized_volatility, directional_persistence, avg_spread_pct, avg_oi_buildup_rate, min_required_session_days, "
+                               "gating_status, advisory_confidence_modifier, hypothesis_summary, updatedAt) VALUES ('"
+                               + safe_id + "', '" + safe_und + "', '" + safe_b15 + "', " + std::to_string(dow) + ", " + std::to_string(dte) + ", "
+                               + std::to_string(ticks) + ", " + std::to_string(session_days) + ", " + std::to_string(vol) + ", " + std::to_string(persistence) + ", "
+                               + std::to_string(spread) + ", " + std::to_string(oi_buildup) + ", " + std::to_string(min_days) + ", '"
+                               + safe_status + "', " + std::to_string(advisory_mod) + ", '" + safe_sum + "', NOW()) "
+                               "ON DUPLICATE KEY UPDATE sample_ticks_count=VALUES(sample_ticks_count), sample_session_days=VALUES(sample_session_days), "
+                               "realized_volatility=VALUES(realized_volatility), directional_persistence=VALUES(directional_persistence), "
+                               "avg_spread_pct=VALUES(avg_spread_pct), avg_oi_buildup_rate=VALUES(avg_oi_buildup_rate), "
+                               "gating_status=VALUES(gating_status), advisory_confidence_modifier=VALUES(advisory_confidence_modifier), hypothesis_summary=VALUES(hypothesis_summary);";
+
+    bool ok = (mysql_query(conn, insert_query.c_str()) == 0);
+    if (ok) tx.commit();
+    pool_->release(conn);
+    return ok;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_seasonality_patterns() {
+    std::vector<std::map<std::string, std::string>> list;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return list;
+
+    std::string query = "SELECT id, underlying, time_bucket_15m, day_of_week, days_to_expiry, sample_ticks_count, sample_session_days, "
+                        "realized_volatility, directional_persistence, avg_spread_pct, avg_oi_buildup_rate, min_required_session_days, "
+                        "gating_status, advisory_confidence_modifier, hypothesis_summary "
+                        "FROM cpp_seasonality_patterns ORDER BY sample_session_days DESC, underlying ASC;";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> m;
+                m["id"] = row[0] ? row[0] : "";
+                m["underlying"] = row[1] ? row[1] : "";
+                m["time_bucket_15m"] = row[2] ? row[2] : "";
+                m["day_of_week"] = row[3] ? row[3] : "1";
+                m["days_to_expiry"] = row[4] ? row[4] : "0";
+                m["sample_ticks_count"] = row[5] ? row[5] : "0";
+                m["sample_session_days"] = row[6] ? row[6] : "0";
+                m["realized_volatility"] = row[7] ? row[7] : "0.0";
+                m["directional_persistence"] = row[8] ? row[8] : "0.5";
+                m["avg_spread_pct"] = row[9] ? row[9] : "0.0";
+                m["avg_oi_buildup_rate"] = row[10] ? row[10] : "0.0";
+                m["min_required_session_days"] = row[11] ? row[11] : "20";
+                m["gating_status"] = row[12] ? row[12] : "RESEARCH_ONLY";
+                m["advisory_confidence_modifier"] = row[13] ? row[13] : "1.0";
+                m["hypothesis_summary"] = row[14] ? row[14] : "";
+                list.push_back(m);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return list;
+}
+
+bool RoadmapDbClient::save_upstox_historical_candles(
+    const std::vector<UpstoxCandleRecord>& candles,
+    size_t& out_inserted,
+    size_t& out_duplicates
+) {
+    out_inserted = 0;
+    out_duplicates = 0;
+    if (candles.empty()) return true;
+
+    MYSQL* conn = acquire_local();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+
+    for (const auto& c : candles) {
+        std::string safe_inst = escape_string(conn, c.symbol);
+        std::string safe_ref = escape_string(conn, c.instrument_key);
+        std::string safe_interval = escape_string(conn, c.interval.empty() ? "day" : c.interval);
+        std::string safe_ts = escape_string(conn, c.timestamp_mysql);
+
+        std::string table_name = (c.interval == "day") ? "cpp_historical_daily_candles" : "cpp_historical_intraday_candles";
+
+        std::string query = "INSERT INTO " + table_name + " "
+                            "(instrument_key, symbol, interval_name, timestamp, open, high, low, close, volume, open_interest, ingested_at) VALUES ("
+                            "'" + safe_ref + "', '" + safe_inst + "', '" + safe_interval + "', '" + safe_ts + "', "
+                            + std::to_string(c.open) + ", " + std::to_string(c.high) + ", " + std::to_string(c.low) + ", " + std::to_string(c.close) + ", "
+                            + std::to_string(c.volume) + ", " + std::to_string(c.open_interest) + ", NOW(6)) "
+                            "ON DUPLICATE KEY UPDATE open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), volume=VALUES(volume), open_interest=VALUES(open_interest);";
+
+        if (mysql_query(conn, query.c_str()) == 0) {
+            my_ulonglong affected = mysql_affected_rows(conn);
+            if (affected == 1) {
+                out_inserted++;
+            } else if (affected == 2 || affected == 0) {
+                out_duplicates++;
+            }
+        }
+    }
+
+    bool ok = tx.commit();
+    release_local(conn);
+    return ok;
+}
+
+UpstoxBackfillReport RoadmapDbClient::backfill_upstox_historical_data(
+    const std::string& symbol,
+    const std::string& interval,
+    const std::string& to_date,
+    const std::string& from_date
+) {
+    UpstoxBackfillReport report;
+    std::string key = UpstoxHistoricalBackfillEngine::get_upstox_instrument_key(symbol);
+    auto candles = UpstoxHistoricalBackfillEngine::fetch_historical_candles_api(key, symbol, interval, to_date, from_date, report);
+
+    if (report.api_success && !candles.empty()) {
+        save_upstox_historical_candles(candles, report.records_inserted, report.duplicates_prevented);
+    }
+    return report;
+}
+
+std::vector<MarketSnapshotData> RoadmapDbClient::fetch_full_historical_context(
+    const std::string& instrument,
+    const std::string& decision_timestamp,
+    const std::string& from_timestamp
+) {
+    std::vector<MarketSnapshotData> data;
+    MYSQL* conn = acquire_local();
+    if (!conn) return data;
+
+    std::string safe_inst = escape_string(conn, instrument);
+    std::string safe_decision_ts = escape_string(conn, decision_timestamp.empty() ? "2099-12-31 23:59:59" : decision_timestamp);
+    std::string safe_from_ts = escape_string(conn, from_timestamp);
+
+    // Fetch from dedicated C++ historical daily & intraday candle tables
+    // Look-ahead bias prevention: WHERE timestamp <= decision_timestamp
+    // NO SQL LIMIT imposed by DB; retrieves full historical context up to decision timestamp!
+    std::string query = "SELECT symbol, close, volume, open, high, low, close, DATE_FORMAT(timestamp, '%Y-%m-%d %H:%i:%s') "
+                        "FROM cpp_historical_daily_candles "
+                        "WHERE (symbol = '" + safe_inst + "' OR instrument_key LIKE '%" + safe_inst + "%') "
+                        "AND timestamp <= '" + safe_decision_ts + "' ";
+    if (!safe_from_ts.empty()) {
+        query += "AND timestamp >= '" + safe_from_ts + "' ";
+    }
+    query += "ORDER BY timestamp ASC;";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                MarketSnapshotData s;
+                s.instrument = row[0] ? row[0] : "";
+                try {
+                    s.price = row[1] ? std::stod(row[1]) : 0.0;
+                    s.volume = row[2] ? std::stod(row[2]) : 0.0;
+                    if (row[3]) s.open = std::stod(row[3]);
+                    if (row[4]) s.high = std::stod(row[4]);
+                    if (row[5]) s.low = std::stod(row[5]);
+                    if (row[6]) s.close = std::stod(row[6]);
+                } catch(...) {}
+                s.ts = row[7] ? row[7] : "";
+                data.push_back(s);
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    release_local(conn);
+    return data;
+}
+
+std::vector<UpstoxCandleRecord> RoadmapDbClient::fetch_daily_candles_db(const std::string& symbol) {
+    std::vector<UpstoxCandleRecord> records;
+    MYSQL* conn = acquire_local();
+    if (!conn) return records;
+
+    std::string norm_symbol = UpstoxHistoricalBackfillEngine::normalize_symbol_for_db(symbol);
+    std::string query = "SELECT timestamp, open, high, low, close, volume, open_interest, symbol, instrument_key "
+                        "FROM cpp_historical_daily_candles ";
+    if (!norm_symbol.empty()) {
+        query += "WHERE symbol = '" + norm_symbol + "' ";
+    }
+    query += "ORDER BY timestamp ASC";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                UpstoxCandleRecord r;
+                r.timestamp_mysql = row[0] ? row[0] : "";
+                try {
+                    r.open = row[1] ? std::stod(row[1]) : 0.0;
+                    r.high = row[2] ? std::stod(row[2]) : 0.0;
+                    r.low = row[3] ? std::stod(row[3]) : 0.0;
+                    r.close = row[4] ? std::stod(row[4]) : 0.0;
+                    r.volume = row[5] ? std::stoll(row[5]) : 0;
+                    r.open_interest = row[6] ? std::stoll(row[6]) : 0;
+                } catch(...) {}
+                r.symbol = row[7] ? row[7] : "";
+                r.instrument_key = row[8] ? row[8] : "";
+                r.interval = "day";
+                records.push_back(r);
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_daily_candles_db query error: " << mysql_error(conn) << "\n";
+    }
+
+    release_local(conn);
+    return records;
+}
+
+std::vector<UpstoxCandleRecord> RoadmapDbClient::fetch_intraday_candles_db(const std::string& symbol) {
+    std::vector<UpstoxCandleRecord> records;
+    MYSQL* conn = acquire_local();
+    if (!conn) return records;
+
+    std::string norm_symbol = UpstoxHistoricalBackfillEngine::normalize_symbol_for_db(symbol);
+    std::string query = "SELECT timestamp, open, high, low, close, volume, open_interest, symbol, instrument_key "
+                        "FROM cpp_historical_intraday_candles ";
+    if (!norm_symbol.empty()) {
+        query += "WHERE symbol = '" + norm_symbol + "' ";
+    }
+    query += "ORDER BY timestamp ASC";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                UpstoxCandleRecord r;
+                r.timestamp_mysql = row[0] ? row[0] : "";
+                try {
+                    r.open = row[1] ? std::stod(row[1]) : 0.0;
+                    r.high = row[2] ? std::stod(row[2]) : 0.0;
+                    r.low = row[3] ? std::stod(row[3]) : 0.0;
+                    r.close = row[4] ? std::stod(row[4]) : 0.0;
+                    r.volume = row[5] ? std::stoll(row[5]) : 0;
+                    r.open_interest = row[6] ? std::stoll(row[6]) : 0;
+                } catch(...) {}
+                r.symbol = row[7] ? row[7] : "";
+                r.instrument_key = row[8] ? row[8] : "";
+                r.interval = "1minute";
+                records.push_back(r);
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_intraday_candles_db query error: " << mysql_error(conn) << "\n";
+    }
+
+    release_local(conn);
+    return records;
+}
+
+

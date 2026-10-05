@@ -90,6 +90,8 @@ struct UserPortfolioData {
     std::string userId;
     double capital = 0.0;
     double deployed = 0.0;
+    double grossPnl = 0.0;
+    double totalCharges = 0.0;
     double netPnl = 0.0;
     double unrealisedPnl = 0.0;
     int autoTradeEnabled = 0;
@@ -104,10 +106,13 @@ struct UserTradeData {
     std::string side;
     int quantity = 0;
     double entryPrice = 0.0;
+    double currentLtp = 0.0;
     double exitPrice = 0.0;
     double netPnl = 0.0;
+    double unrealizedPnl = 0.0;
     std::string status;
     std::string orderedAt;
+    std::string signal_timestamp;
     std::string closedAt;
     std::string executionProvider = "UPSTOX_PAPER";
     std::string executionMode = "PAPER";
@@ -120,6 +125,10 @@ struct MarketSnapshotData {
     double price{0.0};
     double changePct{0.0};
     double volume{0.0};
+    double open{0.0};
+    double high{0.0};
+    double low{0.0};
+    double close{0.0};
     std::string ts;
 };
 
@@ -204,9 +213,12 @@ typedef UpstoxTokenInfo BrokerTokenInfo;
 class RoadmapDbClient {
 public:
     RoadmapDbClient(std::string host, int port, std::string user, std::string password, std::string db_name);
+    RoadmapDbClient(std::string remote_host, int remote_port, std::string remote_user, std::string remote_pass, std::string remote_db,
+                    std::string local_host, int local_port, std::string local_user, std::string local_pass, std::string local_db);
     ~RoadmapDbClient();
 
     bool test_connection();
+    bool test_local_connection();
     std::vector<ChecklistItem> fetch_all_items();
     RoadmapOverview compute_overview(const std::vector<ChecklistItem>& items);
     std::vector<CppRoadmapItem> fetch_cpp_roadmap_items();
@@ -218,6 +230,10 @@ public:
     UserPortfolioData fetch_user_portfolio(const std::string& user_id);
     std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 10);
     bool create_paper_trade(const UserTradeData& trade);
+    bool close_paper_trade(const std::string& trade_id, double exit_price, double net_pnl, double cost = 40.0);
+    size_t count_open_trades_for_symbol(const std::string& instrument);
+    int settle_expired_positions();
+    void update_external_case_study_ltps();
 
     UpstoxTokenInfo fetch_upstox_token_status();
     bool save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at);
@@ -226,6 +242,7 @@ public:
     std::string fetch_active_broker_token_raw(const std::string& provider);
     bool save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at);
     bool save_canonical_market_snapshot(const CanonicalOptionTick& tick);
+    std::vector<CanonicalOptionTick> fetch_live_quotes_since(const std::string& since_timestamp);
 
     // FNF Market Data, Decay, Learning, and Internal Sandbox Methods
     std::vector<MarketSnapshotData> fetch_market_snapshots();
@@ -245,8 +262,24 @@ public:
     bool log_decision_journal_record(const std::string& uuid, const std::string& session_id, const std::string& git_sha, const std::string& version, const std::string& symbol, const std::string& action, double confidence, double margin, const std::string& reason, const std::string& snapshot_json);
     bool fetch_decision_journal_record(const std::string& uuid, std::string& out_session_id, std::string& out_git_sha, std::string& out_version, std::string& out_symbol, std::string& out_action, double& out_confidence, double& out_margin, std::string& out_reason, std::string& out_snapshot_json);
 
+    // Gate 22: Cyclical / Seasonality Pattern Hypothesis Registry Methods
+    bool save_seasonality_pattern_record(const std::string& id, const std::string& underlying, const std::string& time_bucket_15m, int dow, int dte, size_t ticks, size_t session_days, double vol, double persistence, double spread, double oi_buildup, int min_days, const std::string& status, double advisory_mod, const std::string& summary);
+    std::vector<std::map<std::string, std::string>> fetch_archived_tick_samples(int limit_days = 30);
+    std::vector<std::map<std::string, std::string>> fetch_seasonality_patterns();
+
+    // Upstox Historical Data V3 API Ingestion & Prediction Context Methods
+    bool save_upstox_historical_candles(const std::vector<struct UpstoxCandleRecord>& candles, size_t& out_inserted, size_t& out_duplicates);
+    struct UpstoxBackfillReport backfill_upstox_historical_data(const std::string& symbol, const std::string& interval, const std::string& to_date, const std::string& from_date);
+    std::vector<MarketSnapshotData> fetch_full_historical_context(const std::string& instrument, const std::string& decision_timestamp, const std::string& from_timestamp = "");
+    std::vector<struct UpstoxCandleRecord> fetch_daily_candles_db(const std::string& symbol);
+    std::vector<struct UpstoxCandleRecord> fetch_intraday_candles_db(const std::string& symbol);
+
 private:
-    std::shared_ptr<MySQLConnectionPool> pool_;
+    std::shared_ptr<MySQLConnectionPool> pool_;        // Remote Server pool for common data & tokens
+    std::shared_ptr<MySQLConnectionPool> pool_local_;  // Local DB pool for high-frequency ticks & historical candles
+
+    MYSQL* acquire_local();
+    void release_local(MYSQL* conn);
 };
 
 #endif // ROADMAP_DB_CLIENT_HPP

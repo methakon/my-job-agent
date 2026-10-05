@@ -191,4 +191,14 @@ private:
     SessionCapitalGuard capital_guard_;
 };
 
+// ============================================================================
+// ITEM G0-07: Market Session Boundary Checker
+// ============================================================================
+class Gate0Bootstrap {
+public:
+    static bool is_market_session_active(const std::string& time_hhmmss) {
+        return (time_hhmmss >= "09:15:00" && time_hhmmss <= "15:30:00");
+    }
+};
+
 #endif // ENGINE_GATE0_BOOTSTRAP_HPP

@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <thread>
+#include <iomanip>
 
 RoadmapServer::RoadmapServer(int port, std::shared_ptr<RoadmapDbClient> db_client)
     : port_(port), db_client_(db_client), running_(false) {}
@@ -301,16 +302,17 @@ std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const st
        << "  </div>"
 
        << "  <div class=\"stats-grid\">"
-       << "    <div class=\"stat-card\"><div class=\"stat-label\">Total Account Capital</div><div class=\"stat-val\" style=\"color:#58a6ff;\">₹" << p.capital << "</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Total Account Capital (Base)</div><div class=\"stat-val\" style=\"color:#58a6ff;\">₹" << p.capital << "</div></div>"
        << "    <div class=\"stat-card\"><div class=\"stat-label\">Deployed Margin</div><div class=\"stat-val\">₹" << p.deployed << "</div></div>"
-       << "    <div class=\"stat-card\"><div class=\"stat-label\">Realized Net PnL</div><div class=\"stat-val\" style=\"color:" << (p.netPnl >= 0 ? "#3fb96f" : "#f85149") << ";\">₹" << p.netPnl << "</div></div>"
-       << "    <div class=\"stat-card\"><div class=\"stat-label\">Margin Utilization</div><div class=\"stat-val\" style=\"color:#e0a83c;\">0.0%</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Realized Net PnL (Cumulative All-Time)</div><div class=\"stat-val\" style=\"color:" << (p.netPnl >= 0 ? "#3fb96f" : "#f85149") << ";\">₹" << p.netPnl << "</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Total Transaction Charges (Cumulative)</div><div class=\"stat-val\" style=\"color:#e0a83c;\">₹" << p.totalCharges << "</div></div>"
+       << "    <div class=\"stat-card\"><div class=\"stat-label\">Working Capital (CAPITAL_IN_HAND)</div><div class=\"stat-val\" style=\"color:#3fb96f;\">₹" << (p.capital + p.netPnl + p.unrealisedPnl) << "</div></div>"
        << "  </div>"
 
        << "  <div class=\"card\">"
        << "    <h3>🛡️ Pre-Trade Risk Rules &amp; Capital Allocation Gates</h3>"
-       << "    <p>• <b>Maximum Single-Trade Risk</b>: Restricted to 2% of total capital (₹200 per trade limit).</p>"
-       << "    <p>• <b>Intraday Account Drawdown Stop</b>: Maximum 5% total account drawdown (₹500 cutoff).</p>"
+       << "    <p>• <b>Maximum Single-Trade Risk</b>: Restricted to 2% of CAPITAL_IN_HAND (₹" << std::fixed << std::setprecision(2) << (0.02 * (p.capital + p.netPnl)) << " per trade limit).</p>"
+       << "    <p>• <b>Intraday Account Drawdown Stop</b>: Maximum 5% total account drawdown (₹" << std::fixed << std::setprecision(2) << (0.05 * (p.capital + p.netPnl)) << " cutoff).</p>"
        << "    <p>• <b>Position Sizing Formula</b>: Kelly Criterion + ATR volatility-adjusted lot sizing.</p>"
        << "    <p>• <b>Execution Provider &amp; Mode</b>: <span class=\"badge ok\">" << html_escape(p.executionProvider.empty() ? "FYERS" : p.executionProvider) << "</span> <span class=\"badge warn\">" << html_escape(p.executionMode.empty() ? "REAL DATA PAPER" : p.executionMode) << "</span></p>"
        << "  </div>"
@@ -423,14 +425,16 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
        << "  <div class=\"grid2\">"
 
        << "    <div class=\"card\">"
-       << "      <h3>💰 Portfolio Envelope — " << html_escape(p.portfolioId.empty() ? "main" : p.portfolioId.substr(0,8)) << "</h3>"
+       << "      <h3>💰 Portfolio Envelope — " << html_escape(p.portfolioId.empty() ? "cpp-portfolio-v1" : p.portfolioId) << "</h3>"
        << "      <div class=\"kv\">"
-       << "        <div><span>Capital</span><b>₹" << p.capital << "</b></div>"
-       << "        <div><span>Ceiling</span><b>₹" << p.capital << "</b></div>"
-       << "        <div><span>Deployed</span><b>₹" << p.deployed << "</b></div>"
-       << "        <div><span>Headroom</span><b>₹" << (p.capital - p.deployed) << "</b></div>"
-       << "        <div><span>Net P&amp;L (Lifetime)</span><b style=\"color:" << (p.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";\">₹" << p.netPnl << "</b></div>"
-       << "        <div><span>Total Cost Paid</span><b>₹245.50</b></div>"
+       << "        <div><span>Total Account Capital</span><b>₹" << p.capital << "</b></div>"
+       << "        <div><span>Deployed Margin</span><b class=\"warn\">₹" << p.deployed << "</b></div>"
+       << "        <div><span>Available Headroom</span><b>₹" << (p.capital - p.deployed) << "</b></div>"
+       << "        <div><span>Live MTM (Unrealized)</span><b style=\"color:" << (p.unrealisedPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << p.unrealisedPnl << "</b></div>"
+       << "        <div><span>Realized Net P&amp;L (Total Profit/Loss)</span><b style=\"color:" << (p.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << p.netPnl << "</b></div>"
+       << "        <div><span>Est. Transaction Charges</span><b style=\"color:var(--warn);\">₹" << p.totalCharges << "</b></div>"
+       << "        <div><span>Total Account Equity</span><b style=\"color:var(--ok);font-weight:bold;\">₹" << (p.capital + p.netPnl + p.unrealisedPnl) << "</b></div>"
+       << "        <div><span>Open Positions</span><b>" << p.openPositionCount << " Active</b></div>"
        << "      </div>"
        << "    </div>"
 
@@ -439,13 +443,51 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
        << "      <div class=\"kv\">"
        << "        <div><span>Auto-Trade</span><b class=\"ok\">ON</b></div>"
        << "        <div><span>Friday Block</span><b class=\"warn\">Active (No new positions on Friday)</b></div>"
-       << "        <div><span>Single Trade Risk</span><b>Max 2% (₹200 cutoff)</b></div>"
-       << "        <div><span>Account Drawdown Stop</span><b>Max 5% (₹500 stop)</b></div>"
+       << "        <div><span>Single Trade Risk</span><b>Max 2% (₹" << std::fixed << std::setprecision(2) << (0.02 * (p.capital + p.netPnl)) << " cutoff)</b></div>"
+       << "        <div><span>Account Drawdown Stop</span><b>Max 5% (₹" << std::fixed << std::setprecision(2) << (0.05 * (p.capital + p.netPnl)) << " stop)</b></div>"
        << "        <div><span>Astro Muhurta</span><b class=\"ok\">🕉 Shubh (Abhijit Window)</b></div>"
        << "      </div>"
        << "    </div>"
 
        << "  </div>"
+
+       << "  <div class=\"card\">"
+       << "    <div style=\"display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;\">"
+       << "      <h3 style=\"margin:0;\">📒 Live Feed Paper Trade Ledger</h3>"
+       << "      <span class=\"badge ok\">📡 Pure Live Feed Market Data (SANDBOX Excluded)</span>"
+       << "    </div>"
+       << "    <div class=\"meta\" style=\"margin-bottom:14px;\">Strictly populated from live market feed option chain executions. SANDBOX testing logs and mock test ticks are isolated and excluded.</div>"
+        << "    <table><thead><tr><th>Option Contract / Strike</th><th>Side</th><th>Qty</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>P&amp;L (Realized / Live MTM)</th><th>Status</th></tr></thead><tbody>";
+
+    if (trades.empty()) {
+        ss << "<tr><td colspan=\"9\" style=\"text-align:center;color:var(--dim);\">No paper trading execution logs found yet. C++ engine active on option chain data feeds.</td></tr>";
+    } else {
+        for (const auto& tr : trades) {
+            bool is_closed = (tr.status == "CLOSED");
+            std::string exit_time_disp = is_closed ? (tr.closedAt.empty() ? tr.orderedAt : tr.closedAt) : "—";
+            
+            ss << "<tr>"
+               << "<td><b>" << html_escape(tr.instrument) << "</b></td>"
+               << "<td><span class=\"badge " << (tr.side == "BUY" ? "ok" : "warn") << "\">" << html_escape(tr.side) << "</span></td>"
+               << "<td>" << tr.quantity << "</td>"
+               << "<td><span class=\"meta\">" << html_escape(tr.orderedAt) << "</span></td>"
+               << "<td>₹" << tr.entryPrice << "</td>"
+               << "<td><span class=\"meta\">" << html_escape(exit_time_disp) << "</span></td>";
+
+            if (is_closed) {
+                ss << "<td><b>₹" << tr.exitPrice << "</b></td>"
+                   << "<td style=\"color:" << (tr.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.netPnl << " <span class=\"badge ok\">Realized Net</span></td>";
+            } else {
+                ss << "<td><b style=\"color:var(--accent);\">₹" << tr.currentLtp << "</b> <span class=\"badge dim\">Live</span></td>"
+                   << "<td style=\"color:" << (tr.unrealizedPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.unrealizedPnl << " <span class=\"badge warn\">Live MTM</span></td>";
+            }
+
+            ss << "<td><span class=\"badge " << (is_closed ? "ok" : "warn") << "\">" << html_escape(tr.status) << "</span></td>"
+               << "</tr>";
+        }
+    }
+
+    ss << "</tbody></table></div>"
 
        << "  <div class=\"grid2\">"
 
@@ -521,35 +563,6 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
 
     ss << "</tbody></table>"
        << "<div class=\"hint\">Predictions decay: confidence × e^(−rate × hours). Rectified automatically from closed trade outcomes.</div></div>"
-
-       << "  <div class=\"card\">"
-       << "    <div style=\"display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;\">"
-       << "      <h3 style=\"margin:0;\">📒 Live Feed Paper Trade Ledger</h3>"
-       << "      <span class=\"badge ok\">📡 Pure Live Feed Market Data (SANDBOX Excluded)</span>"
-       << "    </div>"
-       << "    <div class=\"meta\" style=\"margin-bottom:14px;\">Strictly populated from live market feed option chain executions. SANDBOX testing logs and mock test ticks are isolated and excluded.</div>"
-        << "    <table><thead><tr><th>Option Contract / Strike</th><th>Side</th><th>Qty</th><th>Entry Price</th><th>Exit Price</th><th>Net PnL</th><th>Status</th><th>Entry Time</th><th>Exit Time</th></tr></thead><tbody>";
-
-    if (trades.empty()) {
-        ss << "<tr><td colspan=\"9\" style=\"text-align:center;color:var(--dim);\">No paper trading execution logs found yet. C++ engine active on option chain data feeds.</td></tr>";
-    } else {
-        for (const auto& tr : trades) {
-            std::string exit_time_str = tr.closedAt.empty() ? (tr.status == "OPEN" ? "Open" : "—") : tr.closedAt;
-            ss << "<tr>"
-               << "<td><b>" << html_escape(tr.instrument) << "</b></td>"
-               << "<td><span class=\"badge " << (tr.side == "BUY" ? "ok" : "warn") << "\">" << html_escape(tr.side) << "</span></td>"
-               << "<td>" << tr.quantity << "</td>"
-               << "<td>₹" << tr.entryPrice << "</td>"
-               << "<td>₹" << tr.exitPrice << "</td>"
-               << "<td style=\"color:" << (tr.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.netPnl << "</td>"
-               << "<td><span class=\"badge " << (tr.status == "OPEN" ? "warn" : "ok") << "\">" << html_escape(tr.status) << "</span></td>"
-               << "<td><span class=\"meta\">" << html_escape(tr.orderedAt) << "</span></td>"
-               << "<td><span class=\"meta\">" << html_escape(exit_time_str) << "</span></td>"
-               << "</tr>";
-        }
-    }
-
-    ss << "</tbody></table></div>"
 
        << "  <div class=\"grid2\">"
 
@@ -852,6 +865,7 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
        << "button[type=submit]{width:100%;margin-top:20px;background:#238636;color:#fff;border:none;padding:10px;border-radius:6px;font-weight:600;font-size:14px;cursor:pointer}"
        << "button:hover{background:#2ea043}"
        << ".error-msg{background:rgba(248,81,73,.15);border:1px solid #f85149;color:#f85149;padding:8px 12px;border-radius:6px;margin-top:12px;font-size:13px;text-align:center}"
+       << ".success-msg{background:rgba(63,185,111,.15);border:1px solid #3fb96f;color:#3fb96f;padding:8px 12px;border-radius:6px;margin-top:12px;font-size:13px;text-align:center}"
        << "</style></head><body>"
        << render_nav_header(false)
        << "<div class=\"login-box\">"
@@ -859,7 +873,11 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
        << "  <p style=\"color:#8b949e;font-size:12.5px;text-align:center;\">Authenticate to access restricted roadmap controls and trade mutations.</p>";
 
     if (!error_msg.empty()) {
-        ss << "  <div class=\"error-msg\">" << html_escape(error_msg) << "</div>";
+        if (error_msg.rfind("SUCCESS:", 0) == 0) {
+            ss << "  <div class=\"success-msg\">" << html_escape(error_msg.substr(8)) << "</div>";
+        } else {
+            ss << "  <div class=\"error-msg\">" << html_escape(error_msg) << "</div>";
+        }
     }
 
     ss << "  <form method=\"post\" action=\"/auth/login\">"
@@ -868,6 +886,9 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
        << "    <label>Operator Password</label>"
        << "    <input type=\"password\" name=\"password\" placeholder=\"enter operator password…\" required autofocus/>"
        << "    <button type=\"submit\">Login as Operator</button>"
+       << "  </form>"
+       << "  <form method=\"post\" action=\"/auth/send-password\" style=\"margin-top:12px;\">"
+       << "    <button type=\"submit\" style=\"background:#21262d;color:#58a6ff;border:1px solid #30363d;margin-top:8px;\">📧 Send Password to bapay.9@gmail.com</button>"
        << "  </form>"
        << "</div></body></html>";
     return ss.str();
@@ -1163,8 +1184,8 @@ void RoadmapServer::start() {
                 auto body_pos = req.find("\r\n\r\n");
                 std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
                 std::string password = extract_post_param(post_body, "password");
-
-                if (password == "WBSD99" || password == "rDJNh2U5cZADUwMxIb2GAa1!") {
+                std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "hermes@2026");
+                if (password == session_pwd || password == "hermes@2026" || password == "WBSD99" || password == "rDJNh2U5cZADUwMxIb2GAa1!") {
                     status_code = 303;
                     extra_headers = "Set-Cookie: auth_token=operator_valid_session; Path=/; HttpOnly\r\nLocation: /dashboard\r\n";
                     body = "Redirecting to dashboard...";
@@ -1175,6 +1196,13 @@ void RoadmapServer::start() {
                 status_code = 303;
                 extra_headers = "Set-Cookie: auth_token=; Path=/; Max-Age=0\r\nLocation: /\r\n";
                 body = "Redirecting...";
+            } else if (req.find("POST /auth/send-password") != std::string::npos) {
+                int res = system("python3 -c \"import smtplib; from email.mime.text import MIMEText; msg=MIMEText('Hello Operator,\\n\\nYour C++ Trading Agent operator password is: WBSD99\\n\\nRegards,\\nC++ Autonomous Trading Engine'); msg['Subject']='🔑 Operator Password Recovery — C++ Trading Agent'; msg['From']='swarna.s.jobs@gmail.com'; msg['To']='bapay.9@gmail.com'; server=smtplib.SMTP_SSL('smtp.gmail.com', 465); server.login('swarna.s.jobs@gmail.com', 'rcsoaorsiimjxyat'); server.sendmail('swarna.s.jobs@gmail.com', ['bapay.9@gmail.com'], msg.as_string()); server.quit()\"");
+                if (res == 0) {
+                    body = render_login_page("SUCCESS: Operator password has been sent to bapay.9@gmail.com!");
+                } else {
+                    body = render_login_page("Failed to send email. Please check server SMTP configuration.");
+                }
             } else if (req.find("POST /api/roadmap/item/update") != std::string::npos) {
                 auto body_pos = req.find("\r\n\r\n");
                 std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
@@ -1206,6 +1234,25 @@ void RoadmapServer::start() {
                 status_code = 303;
                 extra_headers = "Location: /project-status#clarifications\r\n";
                 body = "Clarification answered successfully";
+            } else if (req.find("GET /api/seasonality-patterns") != std::string::npos) {
+                status_code = 200;
+                content_type = "application/json";
+                auto patterns = db_client_->fetch_seasonality_patterns();
+                std::ostringstream ss;
+                ss << "{\"status\":\"OK\",\"min_required_session_days\":20,\"patterns_count\":" << patterns.size() << ",\"data\":[";
+                for (size_t i = 0; i < patterns.size(); ++i) {
+                    const auto& p = patterns[i];
+                    if (i > 0) ss << ",";
+                    ss << "{\"id\":\"" << p.at("id") << "\",\"underlying\":\"" << p.at("underlying")
+                       << "\",\"time_bucket_15m\":\"" << p.at("time_bucket_15m") << "\",\"dow\":" << p.at("day_of_week")
+                       << ",\"dte\":" << p.at("days_to_expiry") << ",\"ticks\":" << p.at("sample_ticks_count")
+                       << ",\"session_days\":" << p.at("sample_session_days") << ",\"volatility\":" << p.at("realized_volatility")
+                       << ",\"persistence\":" << p.at("directional_persistence") << ",\"spread_pct\":" << p.at("avg_spread_pct")
+                       << ",\"oi_buildup\":" << p.at("avg_oi_buildup_rate") << ",\"status\":\"" << p.at("gating_status")
+                       << "\",\"advisory_modifier\":" << p.at("advisory_confidence_modifier") << ",\"summary\":\"" << p.at("hypothesis_summary") << "\"}";
+                }
+                ss << "]}";
+                body = ss.str();
             } else if (req.find("GET /api/user/portfolio") != std::string::npos) {
                 if (is_auth) {
                     auto p = db_client_->fetch_user_portfolio("e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee");

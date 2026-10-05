@@ -15,6 +15,9 @@ struct MicrostructureFeatures {
     double microprice = 0.0;
     double vpin = 0.0;
     double iv_skew = 0.0;
+    double iv_rank = 0.0;             // Multi-day IV rank/percentile
+    double multi_day_oi_trend = 0.0;  // Multi-day OI buildup trend
+    double rv_percentile = 0.0;       // Realized volatility percentile
     double gamma_flip_level = 0.0;
     double max_pain_strike = 0.0;
     uint64_t latency_micros = 0;

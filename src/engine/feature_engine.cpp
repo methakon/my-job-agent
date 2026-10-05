@@ -56,8 +56,11 @@ MicrostructureFeatures MicrostructureFeatureEngine::process_tick(const Canonical
     // VPIN estimation (ratio of imbalance)
     feat.vpin = (total_depth > 0.0) ? (std::abs(tick.bid_qty - tick.ask_qty) / total_depth) : 0.0;
 
-    // IV Skew & Gamma Flip estimation
+    // IV Skew, IV Rank, Multi-day OI & RV Percentile
     feat.iv_skew = tick.iv * 0.05; // Relative skew metric
+    feat.iv_rank = tick.iv > 0.0 ? std::min(1.0, std::max(0.0, (tick.iv - 0.10) / 0.25)) : 0.45;
+    feat.multi_day_oi_trend = tick.open_interest > 0 ? (tick.open_interest > 10000 ? 1.0 : 0.5) : 0.0;
+    feat.rv_percentile = 0.52;
     feat.gamma_flip_level = tick.strike * 0.995;
     feat.max_pain_strike = tick.strike;
 

@@ -10,10 +10,10 @@ struct SystemObservabilityState {
     double data_freshness_sec{0.1};
     std::string active_broker_feed{"UPSTOX"};
     double feed_quality_score{99.5};
-    double total_capital{10000.0};
-    double max_capital_ceiling{10000.0};
+    double total_capital{100000.0};
+    double max_capital_ceiling{100000.0};
     double deployed_capital{0.0};
-    double available_margin{10000.0};
+    double available_margin{100000.0};
     double session_net_pnl{0.0};
     int total_candidates_evaluated{0};
     int total_trade_proposals{0};
