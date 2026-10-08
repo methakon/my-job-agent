@@ -165,6 +165,23 @@ IndependentRiskVeto IndependentRiskEngine::verify_order_proposal(
     return veto;
 }
 
+IndependentRiskVeto IndependentRiskEngine::verify_feed_freshness(
+    uint64_t tick_timestamp_ms,
+    uint64_t current_time_ms,
+    uint64_t max_allowed_staleness_ms
+) {
+    IndependentRiskVeto veto;
+    if (tick_timestamp_ms > 0 && current_time_ms > tick_timestamp_ms && (current_time_ms - tick_timestamp_ms) > max_allowed_staleness_ms) {
+        veto.risk_approved = false;
+        double age_sec = (current_time_ms - tick_timestamp_ms) / 1000.0;
+        veto.veto_reason = "STALE_FEED_VETO: Tick age (" + std::to_string(age_sec) + "s) exceeds " + std::to_string(max_allowed_staleness_ms / 1000.0) + "s threshold";
+        return veto;
+    }
+    veto.risk_approved = true;
+    veto.veto_reason = "FEED_FRESH";
+    return veto;
+}
+
 IndependentRiskVeto IndependentRiskEngine::evaluate_circuit_breakers(
     size_t consecutive_losing_trades,
     double feed_quality_score

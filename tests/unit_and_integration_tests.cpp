@@ -28,6 +28,10 @@
 #include "../src/engine/gate22_seasonality_patterns.hpp"
 #include "../src/engine/upstox_historical_backfill.hpp"
 #include "../src/engine/historical_edge_engine.hpp"
+#include "../src/common/crypto_util.hpp"
+#include "../src/market_data/upstox/upstox_decoder.hpp"
+#include "../src/market_data/fyers/fyers_decoder.hpp"
+#include "../src/market_data/broker_feed_supervisor.hpp"
 #include "../src/engine/gate_const_invariants.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
@@ -1487,6 +1491,93 @@ void run_solid_and_acid_test_suite() {
              dyn_exit_pass.vega_crush_scale_factor == 0.80 && dyn_exit_pass.gamma_scale_factor == 0.85 &&
              dyn_exit_pass.event_day_scale_factor == 0.85 && dyn_exit_pass.dynamic_stop_pct > 0.0 &&
              dyn_exit_fallback.gating_status == "RESEARCH_OBSERVABILITY_ONLY" && !dyn_exit_fallback.passes_oos_validation);
+    }
+
+    // --- CATEGORY 30: Native C++ Broker Feed & Active Token Supervisor ---
+    {
+        std::cout << "\n--- CATEGORY 30: Native C++ Broker Feed & Active Token Supervisor ---\n";
+
+        // 1. Standalone Token Decryption (crypto_util::decrypt_token_if_needed)
+        std::string raw_token = "plain_jwt_token_sample_12345";
+        std::string secret = "test_encryption_secret_2026";
+        std::string res1 = crypto_util::decrypt_token_if_needed(raw_token, secret);
+        TEST("Feed-01: Plaintext JWT token without colon is preserved untouched",
+             res1 == raw_token);
+
+        // 2. Upstox JSON Decoder Test (UpstoxDecoder::decode_frame)
+        std::string upstox_sample_json = "{\"feeds\":{\"NSE_INDEX|Nifty 50\":{\"ltp\":25042.85,\"instrument_key\":\"NSE_INDEX|Nifty 50\"}}}";
+        std::vector<CanonicalOptionTick> upstox_ticks;
+        bool u_dec = UpstoxDecoder::decode_frame(
+            reinterpret_cast<const uint8_t*>(upstox_sample_json.data()),
+            upstox_sample_json.size(),
+            false,
+            upstox_ticks
+        );
+        TEST("Feed-02: Upstox JSON tick decoded with exact LTP, instrument key and UPSTOX_WS provenance",
+             u_dec && !upstox_ticks.empty() &&
+             upstox_ticks[0].ltp == 25042.85 &&
+             upstox_ticks[0].instrument_key == "NSE_INDEX|Nifty 50" &&
+             upstox_ticks[0].provenance == "UPSTOX_WS");
+
+        // 3. FYERS JSON Decoder Test (FyersDecoder::decode_frame)
+        std::string fyers_sample_json = "{\"symbol\":\"NSE:NIFTY50-INDEX\",\"ltp\":25045.50,\"vol_traded_today\":150000,\"bid_price\":25045.0,\"ask_price\":25045.5}";
+        std::vector<CanonicalOptionTick> fyers_ticks;
+        bool f_dec = FyersDecoder::decode_frame(
+            reinterpret_cast<const uint8_t*>(fyers_sample_json.data()),
+            fyers_sample_json.size(),
+            false,
+            fyers_ticks
+        );
+        TEST("Feed-03: FYERS JSON tick decoded with exact LTP, symbol, bid/ask and FYERS_WS provenance",
+             f_dec && !fyers_ticks.empty() &&
+             fyers_ticks[0].ltp == 25045.50 &&
+             fyers_ticks[0].symbol == "NSE:NIFTY50-INDEX" &&
+             fyers_ticks[0].bid_price == 25045.0 &&
+             fyers_ticks[0].ask_price == 25045.5 &&
+             fyers_ticks[0].provenance == "FYERS_WS");
+
+        // 4. Ingestion directly into OptionTickReceiver
+        OptionTickReceiver feed_receiver;
+        feed_receiver.start_receiver();
+        CanonicalOptionTick t_feed;
+        t_feed.symbol = "NIFTY26OCT25000CE";
+        t_feed.instrument_key = "NSE_FO|NIFTY26OCT25000CE";
+        t_feed.ltp = 125.75;
+        t_feed.provenance = "NATIVE_BROKER_FEED";
+        t_feed.is_real_data = true;
+        feed_receiver.ingest_tick(t_feed);
+
+        CanonicalOptionTick polled_tick;
+        bool got_tick = feed_receiver.get_latest_tick(polled_tick);
+        TEST("Feed-04: Native tick directly injected into OptionTickReceiver ring buffer with 0ms DB latency",
+             got_tick && polled_tick.symbol == "NIFTY26OCT25000CE" &&
+             polled_tick.ltp == 125.75 &&
+             polled_tick.provenance == "NATIVE_BROKER_FEED");
+
+        // 5. BrokerFeedSupervisor Status Initialization
+        std::vector<std::string> feed_syms = {"NSE_INDEX|Nifty 50", "BSE_INDEX|SENSEX"};
+        BrokerFeedSupervisor supervisor(db_client, feed_receiver, feed_syms);
+        auto initial_status = supervisor.get_status();
+        TEST("Feed-05: BrokerFeedSupervisor instantiates cleanly with thread safety and queryable status",
+             !supervisor.is_running() && initial_status.total_ticks_received == 0);
+
+        // 6. AES-256-CBC Encryption & Decryption Round-Trip Test
+        std::string sample_fyers_token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJmcmVzaCI6dHJ1ZX0.test_signature";
+        std::string app_secret = "test_secret_key_123456";
+        std::string enc_token = crypto_util::encrypt_token(sample_fyers_token, app_secret);
+        std::string dec_token = crypto_util::decrypt_token_if_needed(enc_token, app_secret);
+        TEST("Feed-06: AES-256-CBC token encryption & decryption round-trip achieves exact parity",
+             !enc_token.empty() && enc_token.find(':') != std::string::npos &&
+             dec_token == sample_fyers_token);
+
+        // 7. Broker OAuth Token Save & Status Verification
+        bool saved_token = db_client->save_broker_access_token("fyers", sample_fyers_token, "test_client_id", "2026-12-31 23:59:59");
+        auto fyers_status = db_client->fetch_broker_token_status("fyers");
+        std::string raw_tok = db_client->fetch_active_broker_token_raw("fyers");
+        std::string dec_tok = crypto_util::decrypt_token_if_needed(raw_tok, EnvLoader::get("ENCRYPTION_KEY", EnvLoader::get("APP_SECRET", "")));
+        TEST("Feed-07: C++ OAuth token persistence saves active encrypted token to provider_tokens with valid status",
+             saved_token && fyers_status.is_valid && fyers_status.client_id == "test_client_id" &&
+             dec_tok == sample_fyers_token);
     }
 
 

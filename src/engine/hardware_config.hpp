@@ -24,9 +24,10 @@ public:
         if (spec.total_logical_cores == 0) spec.total_logical_cores = 4;
 
         // Reserve 25% cores for I/O, DB connection pool, HTTP portal & systemd logging (min 2, max 10)
-        spec.reserved_io_threads = std::max(2u, std::min(10u, spec.total_logical_cores / 4));
-        spec.allocated_worker_threads = spec.total_logical_cores - spec.reserved_io_threads;
-        spec.total_memory_mb = 16384; // 16GB local RAM
+        spec.reserved_io_threads = std::max(1u, std::min(4u, spec.total_logical_cores / 4));
+        unsigned int worker_calc = (spec.total_logical_cores > spec.reserved_io_threads) ? (spec.total_logical_cores - spec.reserved_io_threads) : 1u;
+        spec.allocated_worker_threads = std::min(4u, std::max(1u, worker_calc));
+        spec.total_memory_mb = 1024;
 
         return spec;
     }

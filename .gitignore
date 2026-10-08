@@ -56,3 +56,8 @@ __pycache__/
 
 # Database backups — local files, never commit
 backups/
+
+# C++ Build & Vendored Dependencies
+build/
+lib/
+include/

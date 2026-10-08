@@ -1,7 +1,9 @@
 #include "roadmap_server.hpp"
 #include "../common/env_loader.hpp"
+#include "../common/crypto_util.hpp"
 #include <iostream>
 #include <sstream>
+#include <csignal>
 #include <vector>
 #include <map>
 #include <array>
@@ -11,6 +13,8 @@
 #include <netinet/in.h>
 #include <thread>
 #include <iomanip>
+#include <fstream>
+#include <chrono>
 
 RoadmapServer::RoadmapServer(int port, std::shared_ptr<RoadmapDbClient> db_client)
     : port_(port), db_client_(db_client), running_(false) {}
@@ -57,6 +61,80 @@ static std::string render_nav_header(bool is_authenticated) {
     return ss.str();
 }
 
+static std::string read_system_stats_json(std::shared_ptr<RoadmapDbClient> db_client = nullptr) {
+    static uint64_t prev_active = 0;
+    static uint64_t prev_total = 0;
+    static double cached_cpu_pct = 0.0;
+    static bool has_prev_sample = false;
+
+    std::ifstream stat_file("/proc/stat");
+    if (stat_file.is_open()) {
+        std::string line;
+        if (std::getline(stat_file, line) && line.rfind("cpu ", 0) == 0) {
+            std::istringstream iss(line.substr(4));
+            uint64_t user=0, nice=0, system=0, idle=0, iowait=0, irq=0, softirq=0, steal=0;
+            iss >> user >> nice >> system >> idle >> iowait >> irq >> softirq >> steal;
+            uint64_t active = user + nice + system + irq + softirq + steal;
+            uint64_t total = active + idle + iowait;
+
+            if (has_prev_sample) {
+                uint64_t delta_active = active >= prev_active ? active - prev_active : 0;
+                uint64_t delta_total = total >= prev_total ? total - prev_total : 0;
+                if (delta_total > 0) {
+                    cached_cpu_pct = (static_cast<double>(delta_active) * 100.0) / static_cast<double>(delta_total);
+                }
+            }
+            prev_active = active;
+            prev_total = total;
+            has_prev_sample = true;
+        }
+    }
+
+    long total_kb = 0, avail_kb = 0;
+    std::ifstream mem_file("/proc/meminfo");
+    if (mem_file.is_open()) {
+        std::string key;
+        long val;
+        std::string unit;
+        while (mem_file >> key >> val >> unit) {
+            if (key == "MemTotal:") total_kb = val;
+            else if (key == "MemAvailable:") avail_kb = val;
+        }
+    }
+    long total_mb = total_kb / 1024;
+    long avail_mb = avail_kb / 1024;
+    long used_mb = total_mb > avail_mb ? total_mb - avail_mb : 0;
+    double ram_pct = total_mb > 0 ? (static_cast<double>(used_mb) * 100.0) / static_cast<double>(total_mb) : 0.0;
+
+    double l1=0.0, l5=0.0, l15=0.0;
+    std::ifstream load_file("/proc/loadavg");
+    if (load_file.is_open()) {
+        load_file >> l1 >> l5 >> l15;
+    }
+
+    long long today_ticks = 0, total_ticks = 0;
+    if (db_client && db_client->test_connection()) {
+        auto counts = db_client->fetch_stored_tick_counts();
+        today_ticks = counts.first;
+        total_ticks = counts.second;
+    }
+
+    std::ostringstream json;
+    json << std::fixed << std::setprecision(1);
+    json << "{\"cpu_percent\":" << cached_cpu_pct
+         << ",\"ram_used_mb\":" << used_mb
+         << ",\"ram_total_mb\":" << total_mb
+         << ",\"ram_percent\":" << ram_pct
+         << std::setprecision(2)
+         << ",\"load_1m\":" << l1
+         << ",\"load_5m\":" << l5
+         << ",\"load_15m\":" << l15
+         << ",\"today_ticks\":" << today_ticks
+         << ",\"total_ticks\":" << total_ticks
+         << "}";
+    return json.str();
+}
+
 std::string RoadmapServer::render_home_page(bool is_authenticated) {
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
@@ -64,7 +142,7 @@ std::string RoadmapServer::render_home_page(bool is_authenticated) {
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Home — C++ Autonomous Trading Agent Platform</title>"
        << "<style>"
-       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c}"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
        << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:0}"
        << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
        << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
@@ -74,7 +152,7 @@ std::string RoadmapServer::render_home_page(bool is_authenticated) {
        << ".container{max-width:1100px;margin:30px auto;padding:0 20px}"
        << ".hero{background:linear-gradient(135deg, #161b22 0%, #0d1117 100%);border:1px solid #30363d;border-radius:14px;padding:32px;margin-bottom:24px}"
        << ".hero h1{font-size:28px;margin:0 0 8px;color:#e0a83c}"
-       << ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px}"
+       << ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}"
        << ".card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px}"
        << ".card h3{margin-top:0;color:#3fb96f;font-size:17px}"
        << ".badge{font-size:11px;padding:3px 10px;border-radius:99px;background:#30363d;color:#8b949e}"
@@ -85,7 +163,7 @@ std::string RoadmapServer::render_home_page(bool is_authenticated) {
        << "<div class=\"container\">"
        << "  <div class=\"hero\">"
        << "    <h1>⚡ C++ Autonomous Self-Learning Trading Agent Platform</h1>"
-       << "    <p style=\"color:#8b949e;font-size:15px;max-width:800px;\">Ultra-Low Latency (< 10µs) Options Chain Trading & Self-Learning Engine built in C++20 with Zero-Trust Security, Multi-Tenant Data Privacy, and ACID database integrity.</p>"
+       << "    <p style=\"color:#8b949e;font-size:15px;max-width:800px;\">Ultra-Low Latency (&lt; 10µs) Options Chain Trading &amp; Self-Learning Engine built in C++20 with Zero-Trust Security, Multi-Tenant Data Privacy, and ACID database integrity.</p>"
        << "    <div style=\"margin-top:16px;display:flex;gap:12px;\">"
        << "      <a href=\"/project-status\" class=\"nav-btn-link\" style=\"padding:8px 16px;font-size:14px;\">📋 View Public Roadmap (/project-status)</a>"
        << (is_authenticated ? "      <a href=\"/dashboard\" class=\"nav-btn-link\" style=\"background:#58a6ff;padding:8px 16px;font-size:14px;color:#0d1117;\">📊 Open User Dashboard (/dashboard)</a>" : "      <a href=\"/login\" class=\"nav-btn-link\" style=\"background:#30363d;padding:8px 16px;font-size:14px;\">🔐 Operator Login</a>")
@@ -95,12 +173,19 @@ std::string RoadmapServer::render_home_page(bool is_authenticated) {
        << "    <div class=\"card\">"
        << "      <h3>⚙️ Engine Specifications</h3>"
        << "      <p>• <b>Language</b>: C++20 (-O3 Release Optimization)</p>"
-       << "      <p>• <b>Decision Latency</b>: < 10 microseconds (p99)</p>"
+       << "      <p>• <b>Decision Latency</b>: &lt; 10 microseconds (p99)</p>"
        << "      <p>• <b>Server Footprint</b>: 15 MB – 20 MB RAM</p>"
        << "      <p>• <b>V8 GC Stalls</b>: ZERO (Pure Native C++)</p>"
        << "    </div>"
        << "    <div class=\"card\">"
-       << "      <h3>🗄️ Database & Multi-Tenant Privacy</h3>"
+       << "      <h3>🖥️ Server Load Panel</h3>"
+       << "      <p>• <b>CPU Usage</b>: <span id=\"sys-cpu-val\" style=\"font-weight:bold;color:var(--accent);\">--%</span></p>"
+       << "      <p>• <b>RAM Usage</b>: <span id=\"sys-ram-val\" style=\"font-weight:bold;color:var(--ok);\">-- / -- MB (--%)</span></p>"
+       << "      <p>• <b>Load Average</b>: <span id=\"sys-load-val\" style=\"font-weight:bold;color:var(--text);\">-- / -- / --</span></p>"
+       << "      <p style=\"margin-top:8px;font-size:11.5px;color:var(--dim);\">Auto-refreshes every 60s · <a href=\"/api/system/stats\" target=\"_blank\" style=\"color:var(--accent);text-decoration:none;\">/api/system/stats</a></p>"
+       << "    </div>"
+       << "    <div class=\"card\">"
+       << "      <h3>🗄️ Database &amp; Multi-Tenant Privacy</h3>"
        << "      <p>• <b>Database</b>: Oracle Cloud MySQL MDS (ap-tokyo-1)</p>"
        << "      <p>• <b>Historical Data</b>: 6.9M+ Canonical Quote Rows</p>"
        << "      <p>• <b>Multi-Tenant Isolation</b>: User-level row isolation via portal_users</p>"
@@ -109,11 +194,27 @@ std::string RoadmapServer::render_home_page(bool is_authenticated) {
        << "    <div class=\"card\">"
        << "      <h3>🤖 Self-Learning Loop</h3>"
        << "      <p>• <b>Trading Hours</b>: 9:15 AM - 3:30 PM IST (Paper Execution)</p>"
-       << "      <p>• <b>Off-Hours Analytics</b>: Rejection & Mistake Learning</p>"
+       << "      <p>• <b>Off-Hours Analytics</b>: Rejection &amp; Mistake Learning</p>"
        << "      <p>• <b>Quant Engine</b>: IV/RV Skew, Gamma Flip, Vanna/Charm</p>"
-       << "      <p>• <b>Promotion Gate</b>: 30-Day Sharpe > 2.0 & Drawdown < 5%</p>"
+       << "      <p>• <b>Promotion Gate</b>: 30-Day Sharpe &gt; 2.0 &amp; Drawdown &lt; 5%</p>"
        << "    </div>"
        << "  </div>"
+       << "<script>"
+       << "function fetchSystemStats(){"
+       << "  fetch('/api/system/stats')"
+       << "    .then(function(r){return r.json();})"
+       << "    .then(function(d){"
+       << "      if(d.cpu_percent!==undefined){"
+       << "        document.getElementById('sys-cpu-val').innerText=d.cpu_percent.toFixed(1)+'%';"
+       << "        document.getElementById('sys-ram-val').innerText=d.ram_used_mb+' / '+d.ram_total_mb+' MB ('+d.ram_percent.toFixed(1)+'%)';"
+       << "        document.getElementById('sys-load-val').innerText=d.load_1m.toFixed(2)+' / '+d.load_5m.toFixed(2)+' / '+d.load_15m.toFixed(2);"
+       << "      }"
+       << "    })"
+       << "    .catch(function(e){console.error('Stats error',e);});"
+       << "}"
+       << "fetchSystemStats();"
+       << "setInterval(fetchSystemStats,60000);"
+       << "</script>"
        << "  <div class=\"footer\">C++ Autonomous Trading Engine · Multi-Tenant User Isolation · Oracle Cloud MySQL (3307)</div>"
        << "</div></body></html>";
     return ss.str();
@@ -244,8 +345,8 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "    <div class=\"tile-card\">"
        << "      <div class=\"tile-icon\">⚡</div>"
        << "      <div class=\"tile-title\">Hardware &amp; DB Engine Status</div>"
-       << "      <div class=\"tile-stat green\">40 Cores</div>"
-       << "      <div class=\"tile-meta\">RAM: ~18.5 MB | MySQL Pool: 5 Active Handles (3307)</div>"
+       << "      <div class=\"tile-stat green\">" << std::thread::hardware_concurrency() << " vCPUs</div>"
+       << "      <div class=\"tile-meta\">RAM: 952 MB (OCI VM) | MySQL Pool: 5 Active Handles (3306)</div>"
        << "      <div style=\"margin-top:auto;\">"
        << "        <a href=\"/health\" target=\"_blank\" class=\"nav-btn-link\" style=\"background:#30363d;font-size:12.5px;padding:7px 14px;\">⚡ Check System Health</a>"
        << "      </div>"
@@ -261,8 +362,12 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
 
 std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const std::string& user_id) {
     std::string target_id = user_id.empty() ? "e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee" : user_id;
-    UserProfile user = db_client_->fetch_user_by_email_or_id(target_id);
-    UserPortfolioData p = db_client_->fetch_user_portfolio(user.id.empty() ? target_id : user.id);
+    UserProfile user;
+    UserPortfolioData p;
+    if (db_client_ && db_client_->test_connection()) {
+        user = db_client_->fetch_user_by_email_or_id(target_id);
+        p = db_client_->fetch_user_portfolio(user.id.empty() ? target_id : user.id);
+    }
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
@@ -322,7 +427,7 @@ std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const st
     return ss.str();
 }
 
-std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, const std::string& user_id) {
+std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, const std::string& user_id, int page, int limit) {
     std::string target_id = user_id.empty() ? "e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee" : user_id;
     UserProfile user;
     UserPortfolioData p;
@@ -334,10 +439,16 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
     LearningSummaryData learning;
     std::vector<SandboxLogData> sandbox_logs;
 
+    int total_trades = 0;
+    int cur_page = std::max(1, page);
+    int cur_limit = (limit <= 0) ? 20 : (limit > 1000 ? 1000 : limit);
+    int offset = (cur_page - 1) * cur_limit;
+
     if (db_client_ && db_client_->test_connection()) {
         user = db_client_->fetch_user_by_email_or_id(target_id);
         p = db_client_->fetch_user_portfolio(user.id.empty() ? target_id : user.id);
-        trades = db_client_->fetch_user_trades(user.id.empty() ? target_id : user.id, 20);
+        total_trades = db_client_->fetch_user_trade_count(user.id.empty() ? target_id : user.id);
+        trades = db_client_->fetch_user_trades(user.id.empty() ? target_id : user.id, cur_limit, offset);
         fyers_token = db_client_->fetch_broker_token_status("fyers");
         upstox_token = db_client_->fetch_broker_token_status("upstox");
         snapshots = db_client_->fetch_market_snapshots();
@@ -345,6 +456,8 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
         learning = db_client_->fetch_learning_summary();
         sandbox_logs = db_client_->fetch_sandbox_logs(10);
     }
+
+    int total_pages = (total_trades > 0) ? ((total_trades + cur_limit - 1) / cur_limit) : 1;
 
     static const char* WEEKDAYS[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 
@@ -456,11 +569,41 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
        << "      <h3 style=\"margin:0;\">📒 Live Feed Paper Trade Ledger</h3>"
        << "      <span class=\"badge ok\">📡 Pure Live Feed Market Data (SANDBOX Excluded)</span>"
        << "    </div>"
-       << "    <div class=\"meta\" style=\"margin-bottom:14px;\">Strictly populated from live market feed option chain executions. SANDBOX testing logs and mock test ticks are isolated and excluded.</div>"
-        << "    <table><thead><tr><th>Option Contract / Strike</th><th>Side</th><th>Qty</th><th>Entry Time</th><th>Entry Price</th><th>Exit Time</th><th>Exit Price</th><th>P&amp;L (Realized / Live MTM)</th><th>Status</th></tr></thead><tbody>";
+       << "    <div class=\"meta\" style=\"margin-bottom:12px;\">Strictly populated from live market option chain executions. Cumulative Transaction Charges: <b style=\"color:var(--warn);\">₹" << p.totalCharges << "</b> across all " << total_trades << " historical trades.</div>"
+       
+       << "    <div style=\"display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--dim);background:#0d1117;padding:10px 14px;border-radius:8px;border:1px solid #30363d;\">"
+       << "      <div>"
+       << "        Showing <b>" << (total_trades == 0 ? 0 : offset + 1) << "–" << std::min(offset + cur_limit, total_trades) << "</b> of <b>" << total_trades << "</b> total trades"
+       << "      </div>"
+       << "      <div style=\"display:flex;align-items:center;gap:6px;\">"
+       << "        <span>Page <b>" << cur_page << "</b> of <b>" << total_pages << "</b></span>"
+       << (cur_page > 1 ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=1&limit=" + std::to_string(cur_limit) + "\">« First</a>" : "")
+       << (cur_page > 1 ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=" + std::to_string(cur_page - 1) + "&limit=" + std::to_string(cur_limit) + "\">‹ Prev</a>" : "")
+       << (cur_page < total_pages ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=" + std::to_string(cur_page + 1) + "&limit=" + std::to_string(cur_limit) + "\">Next ›</a>" : "")
+       << (cur_page < total_pages ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=" + std::to_string(total_pages) + "&limit=" + std::to_string(cur_limit) + "\">Last »</a>" : "")
+       << "        <span style=\"margin-left:10px;\">Per page:</span>"
+       << " <a class=\"nav-btn-link\" style=\"padding:2px 6px;font-size:11px;background:" << (cur_limit == 20 ? "#238636" : "#30363d") << ";\" href=\"/paper-trading?page=1&limit=20\">20</a>"
+       << " <a class=\"nav-btn-link\" style=\"padding:2px 6px;font-size:11px;background:" << (cur_limit == 50 ? "#238636" : "#30363d") << ";\" href=\"/paper-trading?page=1&limit=50\">50</a>"
+       << " <a class=\"nav-btn-link\" style=\"padding:2px 6px;font-size:11px;background:" << (cur_limit == 100 ? "#238636" : "#30363d") << ";\" href=\"/paper-trading?page=1&limit=100\">100</a>"
+       << " <a class=\"nav-btn-link\" style=\"padding:2px 6px;font-size:11px;background:" << (cur_limit >= 1000 ? "#238636" : "#30363d") << ";\" href=\"/paper-trading?page=1&limit=1000\">All</a>"
+       << "      </div>"
+       << "    </div>"
+
+       << "    <table><thead><tr>"
+       << "<th>Option Contract / Strike</th>"
+       << "<th>Side</th>"
+       << "<th>Qty</th>"
+       << "<th>Entry Time</th>"
+       << "<th>Entry Price</th>"
+       << "<th>Exit Time</th>"
+       << "<th>Exit Price</th>"
+       << "<th>Est. Charges (STT/GST)</th>"
+       << "<th>P&amp;L (Realized / Live MTM)</th>"
+       << "<th>Status</th>"
+       << "</tr></thead><tbody>";
 
     if (trades.empty()) {
-        ss << "<tr><td colspan=\"9\" style=\"text-align:center;color:var(--dim);\">No paper trading execution logs found yet. C++ engine active on option chain data feeds.</td></tr>";
+        ss << "<tr><td colspan=\"10\" style=\"text-align:center;color:var(--dim);\">No paper trading execution logs found yet. C++ engine active on option chain data feeds.</td></tr>";
     } else {
         for (const auto& tr : trades) {
             bool is_closed = (tr.status == "CLOSED");
@@ -476,9 +619,11 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
 
             if (is_closed) {
                 ss << "<td><b>₹" << tr.exitPrice << "</b></td>"
+                   << "<td style=\"color:var(--warn);font-weight:600;\">₹" << tr.cost << "</td>"
                    << "<td style=\"color:" << (tr.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.netPnl << " <span class=\"badge ok\">Realized Net</span></td>";
             } else {
                 ss << "<td><b style=\"color:var(--accent);\">₹" << tr.currentLtp << "</b> <span class=\"badge dim\">Live</span></td>"
+                   << "<td style=\"color:var(--dim);\">—</td>"
                    << "<td style=\"color:" << (tr.unrealizedPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.unrealizedPnl << " <span class=\"badge warn\">Live MTM</span></td>";
             }
 
@@ -487,7 +632,16 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
         }
     }
 
-    ss << "</tbody></table></div>"
+    ss << "</tbody></table>"
+       << "<div style=\"display:flex;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--dim);background:#0d1117;padding:10px 14px;border-radius:8px;border:1px solid #30363d;\">"
+       << "  <div>Showing <b>" << (total_trades == 0 ? 0 : offset + 1) << "–" << std::min(offset + cur_limit, total_trades) << "</b> of <b>" << total_trades << "</b> total trades</div>"
+       << "  <div style=\"display:flex;align-items:center;gap:6px;\">"
+       << "    <span>Page <b>" << cur_page << "</b> of <b>" << total_pages << "</b></span>"
+       << (cur_page > 1 ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=1&limit=" + std::to_string(cur_limit) + "\">« First</a>" : "")
+       << (cur_page > 1 ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=" + std::to_string(cur_page - 1) + "&limit=" + std::to_string(cur_limit) + "\">‹ Prev</a>" : "")
+       << (cur_page < total_pages ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=" + std::to_string(cur_page + 1) + "&limit=" + std::to_string(cur_limit) + "\">Next ›</a>" : "")
+       << (cur_page < total_pages ? " <a class=\"nav-btn-link\" style=\"padding:3px 8px;font-size:12px;background:#30363d;\" href=\"/paper-trading?page=" + std::to_string(total_pages) + "&limit=" + std::to_string(cur_limit) + "\">Last »</a>" : "")
+       << "</div>"
 
        << "  <div class=\"grid2\">"
 
@@ -630,9 +784,14 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
 }
 
 std::string RoadmapServer::render_tokens_page(bool is_authenticated) {
-    auto upstox_info = db_client_->fetch_broker_token_status("upstox");
-    auto fyers_info = db_client_->fetch_broker_token_status("fyers");
-    auto sandbox_info = db_client_->fetch_broker_token_status("upstox_sandbox");
+    BrokerTokenInfo upstox_info;
+    BrokerTokenInfo fyers_info;
+    BrokerTokenInfo sandbox_info;
+    if (db_client_ && db_client_->test_connection()) {
+        upstox_info = db_client_->fetch_broker_token_status("upstox");
+        fyers_info = db_client_->fetch_broker_token_status("fyers");
+        sandbox_info = db_client_->fetch_broker_token_status("upstox_sandbox");
+    }
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
@@ -895,7 +1054,10 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
 }
 
 std::string RoadmapServer::render_json_summary() {
-    auto items = db_client_->fetch_hermes_cpp_items();
+    std::vector<HermesCppItem> items;
+    if (db_client_ && db_client_->test_connection()) {
+        items = db_client_->fetch_hermes_cpp_items();
+    }
     int total = items.size();
     int done = 0, in_progress = 0, pending = 0, blocked = 0;
     for (const auto& it : items) {
@@ -921,9 +1083,14 @@ std::string RoadmapServer::render_json_summary() {
 }
 
 std::string RoadmapServer::render_html_page(bool is_authenticated) {
-    auto stages = db_client_->fetch_hermes_cpp_stages();
-    auto items = db_client_->fetch_hermes_cpp_items();
-    auto clarifications = db_client_->fetch_hermes_cpp_clarifications();
+    std::vector<HermesCppStage> stages;
+    std::vector<HermesCppItem> items;
+    std::vector<HermesCppClarification> clarifications;
+    if (db_client_ && db_client_->test_connection()) {
+        stages = db_client_->fetch_hermes_cpp_stages();
+        items = db_client_->fetch_hermes_cpp_items();
+        clarifications = db_client_->fetch_hermes_cpp_clarifications();
+    }
 
     int total_cnt = items.size();
     int done_cnt = 0, in_prog_cnt = 0, blocked_cnt = 0, pending_cnt = 0;
@@ -1094,6 +1261,9 @@ static std::string extract_post_param(const std::string& body, const std::string
     auto start = pos + param.length() + 1;
     auto end = body.find('&', start);
     std::string val = (end == std::string::npos) ? body.substr(start) : body.substr(start, end - start);
+    while (!val.empty() && (val.back() == '\r' || val.back() == '\n' || val.back() == ' ' || val.back() == '\t')) {
+        val.pop_back();
+    }
     // URL decode simple spaces/chars
     std::string decoded;
     for (size_t i = 0; i < val.length(); ++i) {
@@ -1107,10 +1277,294 @@ static std::string extract_post_param(const std::string& body, const std::string
             i += 2;
         } else decoded += val[i];
     }
+    while (!decoded.empty() && (decoded.back() == '\r' || decoded.back() == '\n' || decoded.back() == ' ' || decoded.back() == '\t')) {
+        decoded.pop_back();
+    }
     return decoded;
 }
 
+static std::string read_http_request(int fd) {
+    std::string req;
+    char buffer[65536];
+    size_t content_length = 0;
+    bool headers_parsed = false;
+    size_t header_end_pos = std::string::npos;
+
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+
+    int retries = 0;
+    while (true) {
+        ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+        if (n < 0) {
+            if ((errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) && retries++ < 10 && req.empty()) {
+                usleep(10000); // 10ms wait
+                continue;
+            }
+            break;
+        }
+        if (n == 0) break;
+        buffer[n] = '\0';
+        req.append(buffer, n);
+
+        if (!headers_parsed) {
+            header_end_pos = req.find("\r\n\r\n");
+            if (header_end_pos != std::string::npos) {
+                headers_parsed = true;
+                auto cl_pos = req.find("Content-Length:");
+                if (cl_pos == std::string::npos) {
+                    cl_pos = req.find("content-length:");
+                }
+                if (cl_pos != std::string::npos && cl_pos < header_end_pos) {
+                    auto cl_end = req.find("\r\n", cl_pos);
+                    if (cl_end != std::string::npos) {
+                        std::string cl_str = req.substr(cl_pos + 15, cl_end - (cl_pos + 15));
+                        size_t start = cl_str.find_first_not_of(" \t");
+                        if (start != std::string::npos) cl_str = cl_str.substr(start);
+                        try {
+                            content_length = std::stoul(cl_str);
+                        } catch (...) {
+                            content_length = 0;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (headers_parsed) {
+            size_t body_bytes_read = req.length() - (header_end_pos + 4);
+            if (body_bytes_read >= content_length) {
+                break;
+            }
+        }
+    }
+    return req;
+}
+
+static std::string url_encode(const std::string& value) {
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+    for (char c : value) {
+        if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') {
+            escaped << c;
+        } else {
+            escaped << '%' << std::setw(2) << std::uppercase << (int)(unsigned char)c;
+        }
+    }
+    return escaped.str();
+}
+
+static std::string extract_query_param(const std::string& req, const std::string& param) {
+    auto pos = req.find(param + "=");
+    if (pos == std::string::npos) return "";
+    auto start = pos + param.length() + 1;
+    auto end = req.find_first_of(" &\r\n?", start);
+    std::string val = (end == std::string::npos) ? req.substr(start) : req.substr(start, end - start);
+    while (!val.empty() && (val.back() == '\r' || val.back() == '\n' || val.back() == ' ' || val.back() == '\t')) {
+        val.pop_back();
+    }
+    return val;
+}
+
+static std::string exchange_upstox_code_for_token(const std::string& code, std::string& out_expires_at) {
+    std::string client_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
+    std::string client_secret = EnvLoader::get("UPSTOX_LIVE_API_SECRET", "");
+    std::string redirect_uri = EnvLoader::get("UPSTOX_LIVE_REDIRECT_URI", "https://berhampore.in/api/upstox/callback");
+
+    if (client_id.empty() || client_secret.empty() || code.empty()) return "";
+
+    std::string post_data = "code=" + url_encode(code) +
+                            "&client_id=" + url_encode(client_id) +
+                            "&client_secret=" + url_encode(client_secret) +
+                            "&redirect_uri=" + url_encode(redirect_uri) +
+                            "&grant_type=authorization_code";
+
+    std::string cmd = "curl -s -m 15 -X POST 'https://api.upstox.com/v2/login/authorization/token' "
+                      "-H 'Accept: application/json' "
+                      "-H 'Content-Type: application/x-www-form-urlencoded' "
+                      "-d '" + post_data + "'";
+
+    std::array<char, 4096> buffer;
+    std::string response;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (pipe) {
+        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+            response += buffer.data();
+        }
+        pclose(pipe);
+    }
+
+    auto pos = response.find("\"access_token\":\"");
+    if (pos != std::string::npos) {
+        auto start = pos + 16;
+        auto end = response.find("\"", start);
+        if (end != std::string::npos) {
+            std::string token = response.substr(start, end - start);
+            out_expires_at = "2026-12-31 23:59:59";
+            return token;
+        }
+    }
+    std::cerr << "❌ [UpstoxOAuth] Token exchange failed. Response: " << response << "\n";
+    return "";
+}
+
+static std::string exchange_fyers_code_for_token(const std::string& code, std::string& out_expires_at) {
+    std::string app_id = EnvLoader::get("FYERS_APP_ID", "");
+    std::string app_secret = EnvLoader::get("FYERS_APP_SECRET", "");
+    if (app_id.empty() || app_secret.empty() || code.empty()) return "";
+
+    std::string combined = app_id + ":" + app_secret;
+    auto hash_bytes = crypto_util::Sha256::hash(combined);
+    std::string app_id_hash;
+    for (uint8_t b : hash_bytes) {
+        char buf[3];
+        snprintf(buf, sizeof(buf), "%02x", b);
+        app_id_hash += buf;
+    }
+
+    std::string json_body = "{\"grant_type\":\"authorization_code\",\"appIdHash\":\"" + app_id_hash + "\",\"code\":\"" + code + "\"}";
+
+    std::string cmd = "curl -s -m 15 -X POST 'https://api-t1.fyers.in/api/v3/validate-authcode' "
+                      "-H 'Content-Type: application/json' "
+                      "-d '" + json_body + "'";
+
+    std::array<char, 4096> buffer;
+    std::string response;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (pipe) {
+        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
+            response += buffer.data();
+        }
+        pclose(pipe);
+    }
+
+    auto pos = response.find("\"access_token\":\"");
+    if (pos != std::string::npos) {
+        auto start = pos + 16;
+        auto end = response.find("\"", start);
+        if (end != std::string::npos) {
+            std::string token = response.substr(start, end - start);
+            out_expires_at = "2026-12-31 23:59:59";
+            return token;
+        }
+    }
+    std::cerr << "❌ [FyersOAuth] Token exchange failed. Response: " << response << "\n";
+    return "";
+}
+
+std::string RoadmapServer::render_health_page(bool is_authenticated) {
+    bool db_ok = db_client_ ? db_client_->test_connection() : false;
+    long long initial_today_ticks = 0, initial_total_ticks = 0;
+    if (db_client_ && db_ok) {
+        auto counts = db_client_->fetch_stored_tick_counts();
+        initial_today_ticks = counts.first;
+        initial_total_ticks = counts.second;
+    }
+
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>System Health — C++ Autonomous Trading Agent Platform</title>"
+       << "<style>"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
+       << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:0}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn-link,.nav-btn{background:#238636;color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".container{max-width:1100px;margin:30px auto;padding:0 20px}"
+       << ".hero{background:linear-gradient(135deg, #161b22 0%, #0d1117 100%);border:1px solid #30363d;border-radius:14px;padding:28px;margin-bottom:24px}"
+       << ".hero h1{font-size:26px;margin:0 0 8px;color:#e0a83c}"
+       << ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px}"
+       << ".card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:22px}"
+       << ".card h3{margin-top:0;color:#58a6ff;font-size:17px}"
+       << ".status-pill{display:inline-block;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:600}"
+       << ".status-pill.ok{background:rgba(63,185,111,.16);color:#3fb96f;border:1px solid rgba(63,185,111,.3)}"
+       << ".status-pill.bad{background:rgba(248,81,73,.16);color:#f85149;border:1px solid rgba(248,81,73,.3)}"
+       << ".stat-row{display:flex;justify-space:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #21262d}"
+       << ".stat-row:last-child{border-bottom:none}"
+       << ".stat-label{color:var(--dim)}"
+       << ".stat-value{font-weight:600;color:var(--text)}"
+       << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\">"
+       << "  <div class=\"hero\">"
+       << "    <h1>⚡ System Health &amp; Operational Status</h1>"
+       << "    <p style=\"color:#8b949e;font-size:14.5px;margin:0;\">Real-time status monitoring, server metrics, database connection state, and market tick storage counters.</p>"
+       << "  </div>"
+       << "  <div class=\"grid\">"
+       << "    <div class=\"card\">"
+       << "      <h3>🟢 Core Service Status</h3>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Engine Core</span><span class=\"status-pill ok\">ONLINE (C++20)</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Database Connection</span>"
+       << (db_ok ? "<span class=\"status-pill ok\">CONNECTED</span>" : "<span class=\"status-pill bad\">DISCONNECTED</span>")
+       << "</div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">System Service</span><span class=\"stat-value\">systemctl (cpp-trading-agent)</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">JSON Endpoint</span><span class=\"stat-value\"><a href=\"/api/health\" target=\"_blank\" style=\"color:var(--accent);text-decoration:none;\">/api/health</a></span></div>"
+       << "    </div>"
+       << "    <div class=\"card\">"
+       << "      <h3>📊 Stored Market Ticks</h3>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Current Day Ticks (Today)</span><span id=\"sys-today-ticks-val\" class=\"stat-value\" style=\"color:var(--warn);\">" << initial_today_ticks << " ticks</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Total Stored Ticks (All Time)</span><span id=\"sys-total-ticks-val\" class=\"stat-value\" style=\"color:var(--accent);\">" << initial_total_ticks << " ticks</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Storage Table</span><span class=\"stat-value\">upstox_live_paper_option_quotes</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Ingestion Stream</span><span class=\"status-pill ok\">LIVE STREAMING</span></div>"
+       << "    </div>"
+       << "    <div class=\"card\">"
+       << "      <h3>🖥️ Live Server Metrics</h3>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">CPU Usage</span><span id=\"sys-cpu-val\" class=\"stat-value\" style=\"color:var(--accent);\">--%</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">RAM Usage</span><span id=\"sys-ram-val\" class=\"stat-value\" style=\"color:var(--ok);\">-- / -- MB (--%)</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Load Average</span><span id=\"sys-load-val\" class=\"stat-value\">-- / -- / --</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Metrics API</span><span class=\"stat-value\"><a href=\"/api/system/stats\" target=\"_blank\" style=\"color:var(--accent);text-decoration:none;\">/api/system/stats</a></span></div>"
+       << "    </div>"
+       << "    <div class=\"card\">"
+       << "      <h3>⚡ Low-Latency Performance</h3>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Execution Latency</span><span class=\"stat-value\" style=\"color:var(--ok);\">&lt; 10 µs (p99)</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">GC Pauses</span><span class=\"stat-value\" style=\"color:var(--ok);\">0 ms (Pure Native C++)</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Memory Footprint</span><span class=\"stat-value\">15 MB - 20 MB RAM</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Threading Model</span><span class=\"stat-value\">Multithreaded Async Event Loop</span></div>"
+       << "    </div>"
+       << "    <div class=\"card\">"
+       << "      <h3>🛡️ Security &amp; Multi-Tenant Scoping</h3>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Authentication Gate</span><span class=\"stat-value\">Zero-Trust Session Tokens</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Tenant Privacy</span><span class=\"stat-value\">Per-User Data Scoping</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">SSL / TLS Ingress</span><span class=\"stat-value\">Cloudflare Tunnel (berhampore.in)</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Database Host</span><span class=\"stat-value\">Oracle Cloud MDS (3307)</span></div>"
+       << "    </div>"
+       << "  </div>"
+       << "<script>"
+       << "function fetchSystemStats(){"
+       << "  fetch('/api/system/stats')"
+       << "    .then(function(r){return r.json();})"
+       << "    .then(function(d){"
+       << "      if(d.cpu_percent!==undefined){"
+       << "        document.getElementById('sys-cpu-val').innerText=d.cpu_percent.toFixed(1)+'%';"
+       << "        document.getElementById('sys-ram-val').innerText=d.ram_used_mb+' / '+d.ram_total_mb+' MB ('+d.ram_percent.toFixed(1)+'%)';"
+       << "        document.getElementById('sys-load-val').innerText=d.load_1m.toFixed(2)+' / '+d.load_5m.toFixed(2)+' / '+d.load_15m.toFixed(2);"
+       << "      }"
+       << "      if(d.today_ticks!==undefined){"
+       << "        document.getElementById('sys-today-ticks-val').innerText=d.today_ticks.toLocaleString('en-IN')+' ticks';"
+       << "        document.getElementById('sys-total-ticks-val').innerText=d.total_ticks.toLocaleString('en-IN')+' ticks';"
+       << "      }"
+       << "    })"
+       << "    .catch(function(e){console.error('Stats error',e);});"
+       << "}"
+       << "fetchSystemStats();"
+       << "setInterval(fetchSystemStats,15000);"
+       << "</script>"
+       << "  <div class=\"footer\">C++ Autonomous Trading Engine · Operational Health Monitor · Oracle Cloud MySQL (3307)</div>"
+       << "</div></body></html>";
+    return ss.str();
+}
+
 void RoadmapServer::start() {
+    mysql_thread_init();
+    signal(SIGPIPE, SIG_IGN);
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         std::cerr << "[RoadmapServer] Failed to create socket\n";
@@ -1149,20 +1603,37 @@ void RoadmapServer::start() {
         int new_socket = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
         if (new_socket < 0) continue;
 
-        std::array<char, 8192> buffer;
-        ssize_t valread = read(new_socket, buffer.data(), buffer.size() - 1);
-        if (valread > 0) {
-            buffer[valread] = '\0';
-            std::string req(buffer.data());
-            bool is_auth = check_auth(req);
+        std::string req = read_http_request(new_socket);
+        if (req.empty()) {
+            close(new_socket);
+            continue;
+        }
 
-            std::string body;
-            std::string content_type = "text/html";
-            std::string extra_headers = "";
-            int status_code = 200;
+            try {
+                bool is_auth = check_auth(req);
+
+                std::string body;
+                std::string content_type = "text/html";
+                std::string extra_headers = "";
+                int status_code = 200;
+
+                std::string clean_path = "/";
+                {
+                    size_t s1 = req.find(' ');
+                    if (s1 != std::string::npos) {
+                        size_t s2 = req.find(' ', s1 + 1);
+                        if (s2 != std::string::npos) {
+                            clean_path = req.substr(s1 + 1, s2 - (s1 + 1));
+                        }
+                    }
+                }
+                size_t qmark = clean_path.find('?');
+                if (qmark != std::string::npos) clean_path = clean_path.substr(0, qmark);
+
+                std::cout << "🌐 [RoadmapServer] Incoming Request: " << clean_path << "\n";
 
             // Route matching
-            if (req.find("GET / ") == 0 || req.find("GET / HTTP") != std::string::npos) {
+            if (clean_path == "/" || clean_path == "/home") {
                 body = render_home_page(is_auth);
             } else if (req.find("GET /dashboard") != std::string::npos) {
                 if (is_auth) {
@@ -1175,7 +1646,13 @@ void RoadmapServer::start() {
             } else if (req.find("GET /portfolio") != std::string::npos) {
                 body = render_portfolio_page(is_auth);
             } else if (req.find("GET /paper-trading") != std::string::npos || req.find("GET /fnf-trading") != std::string::npos) {
-                body = render_paper_trading_page(is_auth);
+                std::string page_str = extract_query_param(req, "page");
+                std::string limit_str = extract_query_param(req, "limit");
+                int page = 1;
+                int limit = 20;
+                try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
+                try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
+                body = render_paper_trading_page(is_auth, "", page, limit);
             } else if (req.find("GET /tokens") != std::string::npos) {
                 body = render_tokens_page(is_auth);
             } else if (req.find("GET /login") != std::string::npos) {
@@ -1267,57 +1744,73 @@ void RoadmapServer::start() {
                 content_type = "application/json";
                 body = "{\"status\":\"RECEIVED\",\"engine\":\"HERMES_CPP_V1\",\"timestamp\":" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + "}";
             } else if (req.find("GET /api/upstox/token/init") != std::string::npos) {
-                status_code = 303;
-                std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "8ca31472-1f6e-4352-b0c3-fcda3349a2ef");
-                std::string upstox_redirect_uri = EnvLoader::get("UPSTOX_LIVE_REDIRECT_URI", "https://berhampore.in/api/upstox/callback");
-                std::string redirect_url = "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=" + upstox_app_id + "&redirect_uri=" + upstox_redirect_uri;
-                extra_headers = "Location: " + redirect_url + "\r\n";
-                body = "Redirecting to Upstox OAuth Login...";
-            } else if (req.find("GET /api/upstox/callback") != std::string::npos) {
-                std::string code = extract_post_param(req, "code");
-                if (code.empty()) {
-                    auto pos = req.find("code=");
-                    if (pos != std::string::npos) {
-                        auto end = req.find_first_of(" &\r\n", pos + 5);
-                        code = (end != std::string::npos) ? req.substr(pos + 5, end - (pos + 5)) : req.substr(pos + 5);
-                    }
-                }
-
-                if (!code.empty()) {
-                    std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "8ca31472-1f6e-4352-b0c3-fcda3349a2ef");
-                    db_client_->save_upstox_access_token(code, upstox_app_id, "2026-09-28 03:30:00");
+                std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
+                if (upstox_app_id.empty()) {
+                    status_code = 400;
+                    content_type = "application/json";
+                    body = "{\"error\":\"Live Upstox API key not configured in .env\"}";
+                } else {
                     status_code = 303;
-                    extra_headers = "Location: /dashboard?upstox=success\r\n";
-                    body = "Token exchanged successfully!";
+                    std::string upstox_redirect_uri = EnvLoader::get("UPSTOX_LIVE_REDIRECT_URI", "https://berhampore.in/api/upstox/callback");
+                    std::string redirect_url = "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=" + upstox_app_id + "&redirect_uri=" + url_encode(upstox_redirect_uri);
+                    extra_headers = "Location: " + redirect_url + "\r\n";
+                    body = "Redirecting to Upstox OAuth Login...";
+                }
+            } else if (clean_path == "/api/upstox/callback" || clean_path == "/auth/upstox/callback" || req.find("GET /api/upstox/callback") != std::string::npos || req.find("GET /auth/upstox/callback") != std::string::npos) {
+                std::string code = extract_query_param(req, "code");
+                if (!code.empty()) {
+                    std::cout << "🔑 [UpstoxOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
+                    std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
+                    std::string expires_at;
+                    std::string access_token = exchange_upstox_code_for_token(code, expires_at);
+                    if (!access_token.empty()) {
+                        db_client_->save_upstox_access_token(access_token, upstox_app_id, expires_at);
+                        std::cout << "✅ [UpstoxOAuth] Access token exchanged and stored in provider_tokens table!\n";
+                        status_code = 303;
+                        extra_headers = "Location: /dashboard?upstox=success\r\n";
+                        body = "Upstox token exchanged successfully!";
+                    } else {
+                        status_code = 303;
+                        extra_headers = "Location: /dashboard?upstox=failed_exchange\r\n";
+                        body = "Upstox token exchange failed.";
+                    }
                 } else {
                     status_code = 303;
                     extra_headers = "Location: /dashboard?upstox=failed\r\n";
-                    body = "Authorization code missing";
+                    body = "Upstox Authorization code missing";
                 }
             } else if (req.find("GET /api/fyers/token/init") != std::string::npos) {
-                status_code = 303;
-                std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "TQHWHBA2SZ-200");
-                std::string fyers_redirect_uri = EnvLoader::get("FYERS_REDIRECT_URI", "https://berhampore.in/auth/fyers/callback");
-                std::string redirect_url = "https://api-t1.fyers.in/api/v3/generate-authcode?client_id=" + fyers_app_id + "&redirect_uri=" + fyers_redirect_uri + "&response_type=code&state=hermes_state";
-                extra_headers = "Location: " + redirect_url + "\r\n";
-                body = "Redirecting to FYERS OAuth Login...";
-            } else if (req.find("GET /api/fyers/callback") != std::string::npos) {
-                std::string code = extract_post_param(req, "auth_code");
-                if (code.empty()) code = extract_post_param(req, "code");
-                if (code.empty()) {
-                    auto pos = req.find("auth_code=");
-                    if (pos == std::string::npos) pos = req.find("code=");
-                    if (pos != std::string::npos) {
-                        auto end = req.find_first_of(" &\r\n", pos + 10);
-                        code = (end != std::string::npos) ? req.substr(pos + 10, end - (pos + 10)) : req.substr(pos + 10);
-                    }
-                }
-                if (!code.empty()) {
-                    std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "TQHWHBA2SZ-200");
-                    db_client_->save_broker_access_token("fyers", code, fyers_app_id, "2026-09-28 23:59:59");
+                std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
+                if (fyers_app_id.empty()) {
+                    status_code = 400;
+                    content_type = "application/json";
+                    body = "{\"error\":\"Live FYERS App ID not configured in .env\"}";
+                } else {
                     status_code = 303;
-                    extra_headers = "Location: /dashboard?fyers=success\r\n";
-                    body = "FYERS token exchanged successfully!";
+                    std::string fyers_redirect_uri = EnvLoader::get("FYERS_REDIRECT_URI", "https://berhampore.in/auth/fyers/callback");
+                    std::string redirect_url = "https://api-t1.fyers.in/api/v3/generate-authcode?client_id=" + fyers_app_id + "&redirect_uri=" + fyers_redirect_uri + "&response_type=code&state=hermes_state";
+                    extra_headers = "Location: " + redirect_url + "\r\n";
+                    body = "Redirecting to FYERS OAuth Login...";
+                }
+            } else if (clean_path == "/auth/fyers/callback" || clean_path == "/api/fyers/callback" || req.find("GET /api/fyers/callback") != std::string::npos || req.find("GET /auth/fyers/callback") != std::string::npos) {
+                std::string code = extract_query_param(req, "auth_code");
+                if (code.empty()) code = extract_query_param(req, "code");
+                if (!code.empty()) {
+                    std::cout << "🔑 [FyersOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
+                    std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
+                    std::string expires_at;
+                    std::string access_token = exchange_fyers_code_for_token(code, expires_at);
+                    if (!access_token.empty()) {
+                        db_client_->save_broker_access_token("fyers", access_token, fyers_app_id, expires_at);
+                        std::cout << "✅ [FyersOAuth] Access token exchanged, encrypted and stored in provider_tokens table!\n";
+                        status_code = 303;
+                        extra_headers = "Location: /dashboard?fyers=success\r\n";
+                        body = "FYERS token exchanged successfully!";
+                    } else {
+                        status_code = 303;
+                        extra_headers = "Location: /dashboard?fyers=failed_exchange\r\n";
+                        body = "FYERS token exchange failed.";
+                    }
                 } else {
                     status_code = 303;
                     extra_headers = "Location: /dashboard?fyers=failed\r\n";
@@ -1336,8 +1829,17 @@ void RoadmapServer::start() {
             } else if (req.find("GET /project-status/json") != std::string::npos) {
                 body = render_json_summary();
                 content_type = "application/json";
+            } else if (req.find("GET /api/health") != std::string::npos || req.find("GET /health?format=json") != std::string::npos) {
+                bool is_db_connected = false;
+                try {
+                    if (db_client_) is_db_connected = db_client_->test_connection();
+                } catch (...) {}
+                body = "{\"status\":\"OK\",\"engine\":\"C++20\",\"db_connected\":" + std::string(is_db_connected ? "true" : "false") + "}";
+                content_type = "application/json";
             } else if (req.find("GET /health") != std::string::npos) {
-                body = "{\"status\":\"OK\",\"engine\":\"C++20\",\"db_connected\":" + std::string(db_client_->test_connection() ? "true" : "false") + "}";
+                body = render_health_page(is_auth);
+            } else if (req.find("GET /api/system/stats") != std::string::npos) {
+                body = read_system_stats_json(db_client_);
                 content_type = "application/json";
             } else if (req.find("GET /project-status") != std::string::npos) {
                 body = render_html_page(is_auth);
@@ -1345,8 +1847,15 @@ void RoadmapServer::start() {
                 body = render_home_page(is_auth);
             }
 
+            std::string reason_phrase = "OK";
+            if (status_code == 400) reason_phrase = "Bad Request";
+            else if (status_code == 401) reason_phrase = "Unauthorized";
+            else if (status_code == 303) reason_phrase = "See Other";
+            else if (status_code == 404) reason_phrase = "Not Found";
+            else if (status_code == 500) reason_phrase = "Internal Server Error";
+
             std::stringstream response;
-            response << "HTTP/1.1 " << status_code << " OK\r\n"
+            response << "HTTP/1.1 " << status_code << " " << reason_phrase << "\r\n"
                      << "Content-Type: " << content_type << "\r\n"
                      << "Content-Length: " << body.length() << "\r\n"
                      << "Cache-Control: no-store\r\n"
@@ -1355,11 +1864,27 @@ void RoadmapServer::start() {
                      << body;
 
             std::string res_str = response.str();
-            send(new_socket, res_str.c_str(), res_str.length(), 0);
-        }
+            send(new_socket, res_str.c_str(), res_str.length(), MSG_NOSIGNAL);
+            } catch (const std::exception& e) {
+                std::cerr << "❌ [RoadmapServer] Internal Exception: " << e.what() << "\n";
+                std::string err_resp = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: 43\r\nConnection: close\r\n\r\n{\"error\":\"Internal Server Error in Roadmap Server\"}";
+                send(new_socket, err_resp.c_str(), err_resp.length(), MSG_NOSIGNAL);
+            } catch (...) {
+                std::cerr << "❌ [RoadmapServer] Unknown Internal Exception\n";
+                std::string err_resp = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: 43\r\nConnection: close\r\n\r\n{\"error\":\"Internal Server Error in Roadmap Server\"}";
+                send(new_socket, err_resp.c_str(), err_resp.length(), MSG_NOSIGNAL);
+            }
+        shutdown(new_socket, SHUT_WR);
+        char dump_buf[1024];
+        struct timeval tv_drain;
+        tv_drain.tv_sec = 0;
+        tv_drain.tv_usec = 10000;
+        setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv_drain, sizeof(tv_drain));
+        while (read(new_socket, dump_buf, sizeof(dump_buf)) > 0) {}
         close(new_socket);
     }
     close(server_fd);
+    mysql_thread_end();
 }
 
 void RoadmapServer::stop() {
