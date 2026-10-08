@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "fb93ff34829ee21abd20855b07d310f520f3e23a": {
+      "short": "fb93ff3",
+      "reason": "Trading Agent workstream — fix(db): eliminate connection leak in error paths and track all created pool connections",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "a26fc7ed16c05dda280467cfbaedf2ac1c8f3a64": {
       "short": "a26fc7e",
       "reason": "Phase 3 candidate evidence/CV: evidence library, CV strategy, customization, drift protection, ATS scoring",
