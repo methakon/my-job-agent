@@ -48,6 +48,29 @@ void BrokerFeedSupervisor::stop() {
     }
 }
 
+PaperTradingState BrokerFeedSupervisor::get_paper_trading_state() const {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    return paper_state_;
+}
+
+bool BrokerFeedSupervisor::is_paper_trading_active() const {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    return (paper_state_ == PaperTradingState::ACTIVE_PAPER_TRADING);
+}
+
+std::string BrokerFeedSupervisor::get_paper_trading_state_string() const {
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    switch (paper_state_) {
+        case PaperTradingState::ACTIVE_PAPER_TRADING: return "ACTIVE_PAPER_TRADING";
+        case PaperTradingState::IDLE_OFF_HOURS: return "IDLE_OFF_HOURS";
+        case PaperTradingState::IDLE_WAITING_TOKEN: return "IDLE_WAITING_TOKEN";
+        case PaperTradingState::CONNECTING_FEED: return "CONNECTING_FEED";
+        case PaperTradingState::FEED_HEALTH_VERIFYING: return "FEED_HEALTH_VERIFYING";
+        case PaperTradingState::SESSION_CLOSED: return "SESSION_CLOSED";
+        default: return "IDLE";
+    }
+}
+
 SupervisorStatus BrokerFeedSupervisor::get_status() const {
     std::lock_guard<std::mutex> lock(status_mutex_);
     SupervisorStatus s;
@@ -56,6 +79,18 @@ SupervisorStatus BrokerFeedSupervisor::get_status() const {
     s.total_ticks_received = total_ticks_;
     s.last_tick_timestamp_ms = last_tick_ts_;
     s.last_error = last_error_;
+    s.session_phase = hermes::MarketCalendar::session_phase_to_string(current_phase_);
+    s.is_trading_day = is_trading_day_;
+    s.is_paper_trading_active = (paper_state_ == PaperTradingState::ACTIVE_PAPER_TRADING);
+    switch (paper_state_) {
+        case PaperTradingState::ACTIVE_PAPER_TRADING: s.paper_trading_state = "ACTIVE_PAPER_TRADING"; break;
+        case PaperTradingState::IDLE_OFF_HOURS: s.paper_trading_state = "IDLE_OFF_HOURS"; break;
+        case PaperTradingState::IDLE_WAITING_TOKEN: s.paper_trading_state = "IDLE_WAITING_TOKEN"; break;
+        case PaperTradingState::CONNECTING_FEED: s.paper_trading_state = "CONNECTING_FEED"; break;
+        case PaperTradingState::FEED_HEALTH_VERIFYING: s.paper_trading_state = "FEED_HEALTH_VERIFYING"; break;
+        case PaperTradingState::SESSION_CLOSED: s.paper_trading_state = "SESSION_CLOSED"; break;
+        default: s.paper_trading_state = "IDLE"; break;
+    }
     return s;
 }
 
@@ -257,14 +292,107 @@ void BrokerFeedSupervisor::handle_disconnect(const std::string& reason) {
     should_reconnect_ = true;
 }
 
+void BrokerFeedSupervisor::update_state_machine() {
+    uint64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    bool force_open = (EnvLoader::get("FORCE_MARKET_OPEN", "false") == "true");
+    bool trading_day = hermes::MarketCalendar::is_trading_day(now_ms);
+    auto phase = hermes::MarketCalendar::get_session_phase(now_ms);
+    if (force_open) {
+        trading_day = true;
+        phase = hermes::SessionPhase::MARKET_OPEN;
+    }
+
+    bool conn_ok = active_client_ && active_client_->is_connected();
+    
+    // Feed freshness: tick received within last 15 seconds
+    bool feed_fresh = false;
+    {
+        std::lock_guard<std::mutex> lock(status_mutex_);
+        current_phase_ = phase;
+        is_trading_day_ = trading_day;
+        if (total_ticks_ > 0 && last_tick_ts_ > 0 && (now_ms >= last_tick_ts_) && (now_ms - last_tick_ts_ <= 15000)) {
+            feed_fresh = true;
+        }
+    }
+
+    PaperTradingState new_state = PaperTradingState::IDLE_OFF_HOURS;
+
+    if (!trading_day || phase == hermes::SessionPhase::CLOSED) {
+        new_state = PaperTradingState::IDLE_OFF_HOURS;
+    } else if (phase == hermes::SessionPhase::POST_OPEN) {
+        new_state = PaperTradingState::SESSION_CLOSED;
+    } else if (phase == hermes::SessionPhase::PRE_OPEN || phase == hermes::SessionPhase::OPEN_AUCTION) {
+        // Pre-market (09:00 - 09:15 IST): connect feed, paper trading stays inactive
+        if (active_provider_name_.empty()) {
+            new_state = PaperTradingState::IDLE_WAITING_TOKEN;
+        } else if (!conn_ok) {
+            new_state = PaperTradingState::CONNECTING_FEED;
+        } else {
+            new_state = PaperTradingState::FEED_HEALTH_VERIFYING;
+        }
+    } else if (phase == hermes::SessionPhase::MARKET_OPEN) {
+        // Continuous trading (09:15 - 15:30 IST): requires Valid Token + WebSocket Connected + Fresh Feed
+        if (active_provider_name_.empty()) {
+            new_state = PaperTradingState::IDLE_WAITING_TOKEN;
+        } else if (!conn_ok) {
+            new_state = PaperTradingState::CONNECTING_FEED;
+        } else if (!feed_fresh) {
+            new_state = PaperTradingState::FEED_HEALTH_VERIFYING;
+        } else {
+            new_state = PaperTradingState::ACTIVE_PAPER_TRADING;
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(status_mutex_);
+    if (new_state != paper_state_) {
+        std::string prev_str = "IDLE";
+        switch (paper_state_) {
+            case PaperTradingState::ACTIVE_PAPER_TRADING: prev_str = "ACTIVE_PAPER_TRADING"; break;
+            case PaperTradingState::IDLE_OFF_HOURS: prev_str = "IDLE_OFF_HOURS"; break;
+            case PaperTradingState::IDLE_WAITING_TOKEN: prev_str = "IDLE_WAITING_TOKEN"; break;
+            case PaperTradingState::CONNECTING_FEED: prev_str = "CONNECTING_FEED"; break;
+            case PaperTradingState::FEED_HEALTH_VERIFYING: prev_str = "FEED_HEALTH_VERIFYING"; break;
+            case PaperTradingState::SESSION_CLOSED: prev_str = "SESSION_CLOSED"; break;
+        }
+        paper_state_ = new_state;
+        std::cout << "🔄 [BrokerFeedSupervisor] State Transition: " << prev_str << " -> ";
+        switch (paper_state_) {
+            case PaperTradingState::ACTIVE_PAPER_TRADING:
+                std::cout << "ACTIVE_PAPER_TRADING (Market Open & Live Feed Verified!)\n";
+                break;
+            case PaperTradingState::IDLE_OFF_HOURS:
+                std::cout << "IDLE_OFF_HOURS (Outside market hours / exchange holiday)\n";
+                break;
+            case PaperTradingState::IDLE_WAITING_TOKEN:
+                std::cout << "IDLE_WAITING_TOKEN (Standing by for valid broker token)\n";
+                break;
+            case PaperTradingState::CONNECTING_FEED:
+                std::cout << "CONNECTING_FEED (Establishing broker WebSocket)\n";
+                break;
+            case PaperTradingState::FEED_HEALTH_VERIFYING:
+                std::cout << "FEED_HEALTH_VERIFYING (Waiting for confirmed market ticks)\n";
+                break;
+            case PaperTradingState::SESSION_CLOSED:
+                std::cout << "SESSION_CLOSED (15:30 IST Market Close)\n";
+                break;
+        }
+    }
+}
+
 void BrokerFeedSupervisor::supervisor_loop() {
-    int check_interval_sec = 5;
+    int check_interval_sec = 2;
 
     while (running_.load()) {
         try {
+            update_state_machine();
+
             bool conn_ok = active_client_ && active_client_->is_connected();
             if (!conn_ok || should_reconnect_.load()) {
                 evaluate_and_connect();
+                update_state_machine();
             }
         } catch (const std::exception& e) {
             std::cerr << "❌ [BrokerFeedSupervisor] Loop error: " << e.what() << "\n";

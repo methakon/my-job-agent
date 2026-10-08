@@ -289,6 +289,17 @@ int main(int argc, char* argv[]) {
                         veto = feed_freshness;
                     }
 
+                    // Strict State Machine & Session Gate:
+                    // Paper trading activates only when:
+                    // 1. Valid trading day & continuous market hours (09:15 - 15:30 IST)
+                    // 2. Active broker token exists & is verified in provider_tokens
+                    // 3. Broker WebSocket is connected & transmitting fresh market ticks
+                    if (!feed_supervisor->is_paper_trading_active()) {
+                        std::string state_str = feed_supervisor->get_paper_trading_state_string();
+                        veto.risk_approved = false;
+                        veto.veto_reason = "PAPER_TRADING_INACTIVE (State: " + state_str + ")";
+                    }
+
                     auto now_ns = std::chrono::high_resolution_clock::now().time_since_epoch().count();
                     std::string uuid = "dj-" + std::to_string(now_ns) + "-" + std::to_string(decision_seq.fetch_add(1));
 

@@ -1587,7 +1587,12 @@ void run_solid_and_acid_test_suite() {
     }
 }
 
+#include <openssl/crypto.h>
+
 int main() {
     run_solid_and_acid_test_suite();
+    mysql_thread_end();
+    mysql_library_end();
+    OPENSSL_cleanup();
     return 0;
 }

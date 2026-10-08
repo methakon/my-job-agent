@@ -33,6 +33,7 @@ MySQLConnectionPool::~MySQLConnectionPool() {
             mysql_close(conn);
         }
     }
+    mysql_thread_end();
     mysql_library_end();
 }
 

@@ -1,6 +1,7 @@
 #include "roadmap_server.hpp"
 #include "../common/env_loader.hpp"
 #include "../common/crypto_util.hpp"
+#include "../engine/market_calendar.hpp"
 #include <iostream>
 #include <sstream>
 #include <csignal>
@@ -119,6 +120,12 @@ static std::string read_system_stats_json(std::shared_ptr<RoadmapDbClient> db_cl
         total_ticks = counts.second;
     }
 
+    uint64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+    auto session_phase = hermes::MarketCalendar::get_session_phase(now_ms);
+    bool is_trading_day = hermes::MarketCalendar::is_trading_day(now_ms);
+
     std::ostringstream json;
     json << std::fixed << std::setprecision(1);
     json << "{\"cpu_percent\":" << cached_cpu_pct
@@ -131,6 +138,9 @@ static std::string read_system_stats_json(std::shared_ptr<RoadmapDbClient> db_cl
          << ",\"load_15m\":" << l15
          << ",\"today_ticks\":" << today_ticks
          << ",\"total_ticks\":" << total_ticks
+         << ",\"session_phase\":\"" << hermes::MarketCalendar::session_phase_to_string(session_phase) << "\""
+         << ",\"is_trading_day\":" << (is_trading_day ? "true" : "false")
+         << ",\"is_market_open\":" << (session_phase == hermes::SessionPhase::MARKET_OPEN ? "true" : "false")
          << "}";
     return json.str();
 }
