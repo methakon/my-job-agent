@@ -26,12 +26,14 @@ MySQLConnectionPool::MySQLConnectionPool(std::string host, int port, std::string
 
 MySQLConnectionPool::~MySQLConnectionPool() {
     std::lock_guard<std::mutex> lock(mutex_);
-    while (!pool_.empty()) {
-        MYSQL* conn = pool_.front();
-        pool_.pop();
+    for (MYSQL* conn : all_created_connections_) {
         if (conn) {
             mysql_close(conn);
         }
+    }
+    all_created_connections_.clear();
+    while (!pool_.empty()) {
+        pool_.pop();
     }
     mysql_thread_end();
     mysql_library_end();
@@ -55,25 +57,25 @@ MYSQL* MySQLConnectionPool::create_connection() {
         return nullptr;
     }
 
+    all_created_connections_.insert(conn);
     return conn;
 }
 
 MYSQL* MySQLConnectionPool::acquire() {
     std::unique_lock<std::mutex> lock(mutex_);
+    MYSQL* conn = nullptr;
     if (pool_.empty()) {
-        return create_connection();
+        conn = create_connection();
+    } else {
+        conn = pool_.front();
+        pool_.pop();
     }
-
-    MYSQL* conn = pool_.front();
-    pool_.pop();
 
     if (!conn) {
-        return create_connection();
-    }
-
-    if (mysql_ping(conn) != 0) {
+        conn = create_connection();
+    } else if (mysql_ping(conn) != 0) {
         mysql_close(conn);
-        return create_connection();
+        conn = create_connection();
     }
 
     return conn;
@@ -355,6 +357,7 @@ bool RoadmapDbClient::update_item_status(int id, const std::string& status) {
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] update_item_status error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 
@@ -373,6 +376,7 @@ bool RoadmapDbClient::update_item_note(int id, const std::string& note) {
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] update_item_note error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 
@@ -660,6 +664,7 @@ bool RoadmapDbClient::save_broker_access_token(const std::string& provider, cons
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] save_broker_access_token error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 
@@ -789,6 +794,7 @@ bool RoadmapDbClient::update_hermes_cpp_item_status_and_note(const std::string& 
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] update_hermes_cpp_item error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 
@@ -812,6 +818,7 @@ bool RoadmapDbClient::add_hermes_cpp_clarification(const std::string& item_id, c
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] add_hermes_cpp_clarification error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 
@@ -831,6 +838,7 @@ bool RoadmapDbClient::answer_hermes_cpp_clarification(long long id, const std::s
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] answer_hermes_cpp_clarification error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 
@@ -860,6 +868,7 @@ bool RoadmapDbClient::log_decision_journal_record(const std::string& uuid, const
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] log_decision_journal_record error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 
@@ -1176,6 +1185,7 @@ bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] close_paper_trade error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
         return false;
     }
 

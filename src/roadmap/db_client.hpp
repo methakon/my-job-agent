@@ -9,6 +9,7 @@
 #include <memory>
 #include <map>
 #include <tuple>
+#include <unordered_set>
 #include <mysql/mysql.h>
 
 struct CanonicalOptionTick;
@@ -184,6 +185,7 @@ private:
     size_t pool_size_;
 
     std::queue<MYSQL*> pool_;
+    std::unordered_set<MYSQL*> all_created_connections_;
     std::mutex mutex_;
     std::condition_variable cv_;
 };
