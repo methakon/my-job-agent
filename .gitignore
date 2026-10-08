@@ -59,5 +59,6 @@ backups/
 
 # C++ Build & Vendored Dependencies
 build/
+build_asan/
 lib/
 include/

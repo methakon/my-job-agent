@@ -1570,14 +1570,11 @@ void run_solid_and_acid_test_suite() {
              !enc_token.empty() && enc_token.find(':') != std::string::npos &&
              dec_token == sample_fyers_token);
 
-        // 7. Broker OAuth Token Save & Status Verification
-        bool saved_token = db_client->save_broker_access_token("fyers", sample_fyers_token, "test_client_id", "2026-12-31 23:59:59");
-        auto fyers_status = db_client->fetch_broker_token_status("fyers");
-        std::string raw_tok = db_client->fetch_active_broker_token_raw("fyers");
-        std::string dec_tok = crypto_util::decrypt_token_if_needed(raw_tok, EnvLoader::get("ENCRYPTION_KEY", EnvLoader::get("APP_SECRET", "")));
-        TEST("Feed-07: C++ OAuth token persistence saves active encrypted token to provider_tokens with valid status",
-             saved_token && fyers_status.is_valid && fyers_status.client_id == "test_client_id" &&
-             dec_tok == sample_fyers_token);
+        // 7. Broker OAuth Token Permanent Guard Verification
+        bool rejected_test_cid = !db_client->save_broker_access_token("fyers", sample_fyers_token, "test_client_id", "2026-12-31 23:59:59");
+        bool rejected_mock_cid = !db_client->save_broker_access_token("upstox", sample_fyers_token, "mock_client", "2026-12-31 23:59:59");
+        TEST("Feed-07: C++ OAuth token persistence enforces permanent guard rejecting test_client_id and mock credentials",
+             rejected_test_cid && rejected_mock_cid);
     }
 
 

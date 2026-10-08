@@ -67,8 +67,20 @@ bool BrokerFeedSupervisor::is_token_usable(const std::string& provider, BrokerCr
         return false;
     }
 
+    // Permanent guard: reject test / mock client_ids
+    if (status_info.client_id.empty() ||
+        status_info.client_id.rfind("test_", 0) == 0 ||
+        status_info.client_id.rfind("mock_", 0) == 0 ||
+        status_info.client_id == "test_client_id") {
+        std::cerr << "⚠️ [BrokerFeedSupervisor] Guard: Rejected test/mock client_id for provider " << provider 
+                  << " (client_id: " << status_info.client_id << ")\n";
+        return false;
+    }
+
     std::string raw_token = db_client_->fetch_active_broker_token_raw(provider);
-    if (raw_token.empty()) {
+    if (raw_token.empty() ||
+        raw_token.rfind("test_", 0) == 0 ||
+        raw_token.rfind("mock_", 0) == 0) {
         return false;
     }
 

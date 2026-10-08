@@ -621,6 +621,17 @@ bool RoadmapDbClient::save_canonical_market_snapshot(const CanonicalOptionTick& 
 }
 
 bool RoadmapDbClient::save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at) {
+    if (client_id.empty() || 
+        client_id.rfind("test_", 0) == 0 || 
+        client_id.rfind("mock_", 0) == 0 || 
+        client_id == "test_client_id" ||
+        token.empty() || 
+        token.rfind("test_", 0) == 0 || 
+        token.rfind("mock_", 0) == 0) {
+        std::cerr << "🛡️ [RoadmapDbClient] Guard rejected test/mock token or client ID: " << client_id << "\n";
+        return false;
+    }
+
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
 
