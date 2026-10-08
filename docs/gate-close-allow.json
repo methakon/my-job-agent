@@ -941,6 +941,13 @@
       "workstream": "Trading Agent C++ Migration",
       "authority": "operator directive (Gate 15 Risk Limits & Circuit Breakers)",
       "recorded": "2026-09-27T20:15:37+05:30"
+    },
+    "a53f0feb5949df2c10e1d82c6c5c946ff944656a": {
+      "short": "a53f0fe",
+      "reason": "Trading Agent workstream \u2014 feat(calendar): implement MarketCalendar and PaperTradingState machine with session gating, pre-open discovery, and automatic activation.",
+      "workstream": "Trading Agent C++ Migration",
+      "authority": "operator directive 2026-10-09 (Automatic trading-day startup, MarketCalendar, and PaperTradingState machine)",
+      "recorded": "2026-10-09T03:03:14+05:30"
     }
   }
 }
