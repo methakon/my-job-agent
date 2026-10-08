@@ -105,6 +105,13 @@ public:
         double current_capital_in_hand = 0.0
     );
 
+    // G16-06: Feed Staleness Verification (STALE_FEED_VETO)
+    static IndependentRiskVeto verify_feed_freshness(
+        uint64_t tick_timestamp_ms,
+        uint64_t current_time_ms,
+        uint64_t max_allowed_staleness_ms = 10000
+    );
+
     // G16-03: Evaluate daily loss, consecutive loss, and data quality shutdowns
     IndependentRiskVeto evaluate_circuit_breakers(
         size_t consecutive_losing_trades,

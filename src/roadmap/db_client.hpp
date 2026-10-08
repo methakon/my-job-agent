@@ -108,6 +108,8 @@ struct UserTradeData {
     double entryPrice = 0.0;
     double currentLtp = 0.0;
     double exitPrice = 0.0;
+    double grossPnl = 0.0;
+    double cost = 0.0;
     double netPnl = 0.0;
     double unrealizedPnl = 0.0;
     std::string status;
@@ -228,7 +230,8 @@ public:
 
     UserProfile fetch_user_by_email_or_id(const std::string& identifier);
     UserPortfolioData fetch_user_portfolio(const std::string& user_id);
-    std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 10);
+    std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 20, int offset = 0);
+    int fetch_user_trade_count(const std::string& user_id);
     bool create_paper_trade(const UserTradeData& trade);
     bool close_paper_trade(const std::string& trade_id, double exit_price, double net_pnl, double cost = 40.0);
     size_t count_open_trades_for_symbol(const std::string& instrument);
@@ -243,6 +246,7 @@ public:
     bool save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at);
     bool save_canonical_market_snapshot(const CanonicalOptionTick& tick);
     std::vector<CanonicalOptionTick> fetch_live_quotes_since(const std::string& since_timestamp);
+    std::pair<long long, long long> fetch_stored_tick_counts();
 
     // FNF Market Data, Decay, Learning, and Internal Sandbox Methods
     std::vector<MarketSnapshotData> fetch_market_snapshots();

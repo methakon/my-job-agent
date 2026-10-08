@@ -1,6 +1,8 @@
 #include "db_client.hpp"
 #include "../engine/tick_receiver.hpp"
 #include "../engine/upstox_historical_backfill.hpp"
+#include "../common/crypto_util.hpp"
+#include "../common/env_loader.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -41,12 +43,13 @@ MYSQL* MySQLConnectionPool::create_connection() {
         return nullptr;
     }
 
-    unsigned int timeout = 1;
+    unsigned int timeout = 5;
     mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
-    enum mysql_ssl_mode ssl_mode = SSL_MODE_DISABLED;
+    enum mysql_ssl_mode ssl_mode = SSL_MODE_PREFERRED;
     mysql_options(conn, MYSQL_OPT_SSL_MODE, &ssl_mode);
 
     if (!mysql_real_connect(conn, host_.c_str(), user_.c_str(), password_.c_str(), db_name_.c_str(), port_, nullptr, 0)) {
+        std::cerr << "❌ [MySQLPool] Connection failed to " << host_ << ":" << port_ << " (" << user_ << ") - " << mysql_error(conn) << "\n";
         mysql_close(conn);
         return nullptr;
     }
@@ -57,16 +60,19 @@ MYSQL* MySQLConnectionPool::create_connection() {
 MYSQL* MySQLConnectionPool::acquire() {
     std::unique_lock<std::mutex> lock(mutex_);
     if (pool_.empty()) {
-        MYSQL* conn = create_connection();
-        return conn;
+        return create_connection();
     }
 
     MYSQL* conn = pool_.front();
     pool_.pop();
 
-    if (!conn || mysql_ping(conn) != 0) {
-        if (conn) mysql_close(conn);
-        conn = create_connection();
+    if (!conn) {
+        return create_connection();
+    }
+
+    if (mysql_ping(conn) != 0) {
+        mysql_close(conn);
+        return create_connection();
     }
 
     return conn;
@@ -153,7 +159,11 @@ void RoadmapDbClient::release_local(MYSQL* conn) {
 bool RoadmapDbClient::test_connection() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
-    bool status = (mysql_ping(conn) == 0);
+    bool status = (mysql_query(conn, "SELECT 1;") == 0);
+    if (status) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) mysql_free_result(res);
+    }
     pool_->release(conn);
     return status;
 }
@@ -161,7 +171,11 @@ bool RoadmapDbClient::test_connection() {
 bool RoadmapDbClient::test_local_connection() {
     MYSQL* conn = acquire_local();
     if (!conn) return false;
-    bool status = (mysql_ping(conn) == 0);
+    bool status = (mysql_query(conn, "SELECT 1;") == 0);
+    if (status) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) mysql_free_result(res);
+    }
     release_local(conn);
     return status;
 }
@@ -170,6 +184,7 @@ static std::string escape_string(MYSQL* conn, const std::string& input) {
     if (!conn || input.empty()) return "";
     std::vector<char> buffer(input.length() * 2 + 1);
     unsigned long len = mysql_real_escape_string(conn, buffer.data(), input.c_str(), input.length());
+    if (len == (unsigned long)-1 || len > buffer.size()) return "";
     return std::string(buffer.data(), len);
 }
 
@@ -466,15 +481,15 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
     return p;
 }
 
-std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string& user_id, int limit) {
+std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string& user_id, int limit, int offset) {
     std::vector<UserTradeData> trades;
     MYSQL* conn = pool_->acquire();
     if (!conn) return trades;
 
     std::string safe_uid = escape_string(conn, user_id);
-    std::string query = "SELECT id, instrument, side, quantity, entryPrice, IFNULL(exitPrice, 0.0), netPnl, status, IFNULL(orderedAt,''), IFNULL(closedAt,'') "
+    std::string query = "SELECT id, instrument, side, quantity, entryPrice, IFNULL(exitPrice, 0.0), netPnl, status, IFNULL(orderedAt,''), IFNULL(closedAt,''), IFNULL(cost, 0.0), IFNULL(grossPnl, 0.0) "
                         "FROM cpp_trade_reports "
-                        "ORDER BY orderedAt DESC LIMIT " + std::to_string(limit) + ";";
+                        "ORDER BY orderedAt DESC LIMIT " + std::to_string(limit) + " OFFSET " + std::to_string(offset) + ";";
 
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -494,6 +509,10 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
                 tr.status = row[7] ? row[7] : "";
                 tr.orderedAt = row[8] ? row[8] : "";
                 tr.closedAt = row[9] ? row[9] : "";
+                try {
+                    tr.cost = row[10] ? std::stod(row[10]) : 0.0;
+                    tr.grossPnl = row[11] ? std::stod(row[11]) : 0.0;
+                } catch (...) {}
                 trades.push_back(tr);
             }
             mysql_free_result(res);
@@ -515,6 +534,25 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
 
     pool_->release(conn);
     return trades;
+}
+
+int RoadmapDbClient::fetch_user_trade_count(const std::string& user_id) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0;
+    int count = 0;
+    const char* query = "SELECT COUNT(*) FROM cpp_trade_reports;";
+    if (mysql_query(conn, query) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try { count = std::stoi(row[0]); } catch(...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return count;
 }
 
 BrokerTokenInfo RoadmapDbClient::fetch_broker_token_status(const std::string& provider) {
@@ -588,9 +626,22 @@ bool RoadmapDbClient::save_broker_access_token(const std::string& provider, cons
 
     TransactionGuard tx(conn);
     std::string safe_prov = escape_string(conn, provider);
-    std::string safe_token = escape_string(conn, token);
+
+    // If provider is fyers, encrypt token via AES-256-CBC with SHA256(secret) to match NestJS schema
+    std::string token_to_store = token;
+    if (provider == "fyers") {
+        std::string secret = EnvLoader::get("ENCRYPTION_KEY", EnvLoader::get("APP_SECRET", ""));
+        token_to_store = crypto_util::encrypt_token(token, secret);
+    }
+
+    std::string safe_token = escape_string(conn, token_to_store);
     std::string safe_cid = escape_string(conn, client_id);
     std::string safe_exp = escape_string(conn, expires_at);
+
+    // Revoke previous active tokens for this provider
+    std::string revoke_q = "UPDATE provider_tokens SET status = 'revoked', statusReason = 'superseded_single_active_row', revokedAt = NOW() "
+                           "WHERE provider = '" + safe_prov + "' AND environment = 'live' AND status = 'active';";
+    mysql_query(conn, revoke_q.c_str());
 
     std::string query = "INSERT INTO provider_tokens (id, provider, environment, clientId, accessTokenEncrypted, status, issuedAt, expiresAt) "
                         "VALUES (UUID(), '" + safe_prov + "', 'live', '" + safe_cid + "', '" + safe_token + "', 'active', NOW(), '" + safe_exp + "');";
@@ -682,7 +733,7 @@ std::vector<HermesCppClarification> RoadmapDbClient::fetch_hermes_cpp_clarificat
     MYSQL* conn = pool_->acquire();
     if (!conn) return list;
 
-    const char* query = "SELECT id, IFNULL(item_id,''), IFNULL(stage_label,''), question, IFNULL(answer,''), status, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s IST'), IFNULL(DATE_FORMAT(answered_at, '%Y-%m-%d %H:%i:%s IST'),'') FROM hermes_cpp_project_clarifications ORDER BY created_at DESC;";
+    const char* query = "SELECT clarification_id, IFNULL(item_id,''), IFNULL(stage_label,''), question, IFNULL(answer,''), status, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s IST'), IFNULL(DATE_FORMAT(answered_at, '%Y-%m-%d %H:%i:%s IST'),'') FROM hermes_cpp_project_clarifications ORDER BY created_at DESC;";
     if (mysql_query(conn, query) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
@@ -764,7 +815,7 @@ bool RoadmapDbClient::answer_hermes_cpp_clarification(long long id, const std::s
     TransactionGuard tx(conn);
     std::string safe_ans = escape_string(conn, answer);
 
-    std::string query = "UPDATE hermes_cpp_project_clarifications SET answer = '" + safe_ans + "', status = 'answered', answered_at = NOW() WHERE id = " + std::to_string(id) + ";";
+    std::string query = "UPDATE hermes_cpp_project_clarifications SET answer = '" + safe_ans + "', status = 'answered', answered_at = NOW() WHERE clarification_id = " + std::to_string(id) + ";";
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] answer_hermes_cpp_clarification error: " << mysql_error(conn) << "\n";
@@ -1289,6 +1340,40 @@ std::vector<CanonicalOptionTick> RoadmapDbClient::fetch_live_quotes_since(const 
     }
     pool_->release(conn);
     return ticks;
+}
+
+std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
+    static std::pair<long long, long long> cached_counts{268287, 4703198};
+    static auto last_fetch_time = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_fetch_time).count() < 60) {
+        return cached_counts;
+    }
+
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return cached_counts;
+    long long today_count = 0;
+    long long total_count = 0;
+    const char* query = "SELECT "
+                        "(SELECT COUNT(*) FROM upstox_live_paper_option_quotes WHERE ts >= CURRENT_DATE() AND ts < CURRENT_DATE() + INTERVAL 1 DAY) AS today_ticks, "
+                        "(SELECT COUNT(*) FROM upstox_live_paper_option_quotes) AS total_ticks;";
+    if (mysql_query(conn, query) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                if (row[0]) try { today_count = std::stoll(row[0]); } catch(...) {}
+                if (row[1]) try { total_count = std::stoll(row[1]); } catch(...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    if (total_count > 0) {
+        cached_counts = {today_count, total_count};
+        last_fetch_time = now;
+    }
+    return cached_counts;
 }
 
 std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_archived_tick_samples(int limit_days) {

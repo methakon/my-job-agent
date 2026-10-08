@@ -8,48 +8,68 @@
 #include "engine/gate16_risk_limits.hpp"
 #include "engine/gate22_seasonality_patterns.hpp"
 #include "engine/hardware_config.hpp"
+#include "market_data/broker_feed_supervisor.hpp"
 #include <iostream>
 #include <memory>
 #include <thread>
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <csignal>
+
 int main(int argc, char* argv[]) {
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
+
     std::cout << "===================================================================\n";
     std::cout << "       ⚡ C++ AUTONOMOUS TRADING AGENT & ROADMAP SERVER ⚡\n";
     std::cout << "===================================================================\n";
 
+    // Single Instance Process Lock Guard (Strict Fatal Exit on Duplicate Instance)
+    int lock_fd = open("/tmp/cpp_trading_agent.lock", O_RDWR | O_CREAT, 0666);
+    if (lock_fd < 0) {
+        std::cerr << "❌ [Main] Fatal: Unable to open lock file /tmp/cpp_trading_agent.lock\n";
+        return 1;
+    }
+    if (lockf(lock_fd, F_TLOCK, 0) < 0) {
+        std::cerr << "❌ [Main] Fatal: Another instance of cpp-trading-agent is already running (lock file /tmp/cpp_trading_agent.lock active). Exiting to enforce single-instance safety.\n";
+        return 1;
+    }
+
     // Load environment configuration from .env file
     EnvLoader::load(".env");
 
-    std::string remote_host = EnvLoader::get("MYSQL_REMOTE_HOST", EnvLoader::get("MYSQL_HOST", "127.0.0.1"));
-    int remote_port = EnvLoader::get_int("MYSQL_REMOTE_PORT", EnvLoader::get_int("MYSQL_PORT", 3307));
+    std::string remote_host = EnvLoader::get("MYSQL_REMOTE_HOST", EnvLoader::get("MYSQL_HOST", "10.0.0.99"));
+    int remote_port = EnvLoader::get_int("MYSQL_REMOTE_PORT", EnvLoader::get_int("MYSQL_PORT", 3306));
     std::string remote_user = EnvLoader::get("MYSQL_REMOTE_USER", EnvLoader::get("MYSQL_USER", "mylife"));
     std::string remote_pass = EnvLoader::get("MYSQL_REMOTE_PASSWORD", EnvLoader::get("MYSQL_PASSWORD", ""));
     std::string remote_db = EnvLoader::get("MYSQL_REMOTE_NAME", EnvLoader::get("DATABASE_NAME", "myjob_agent"));
 
-    std::string local_host = EnvLoader::get("MYSQL_LOCAL_HOST", "127.0.0.1");
-    int local_port = EnvLoader::get_int("MYSQL_LOCAL_PORT", 3306);
-    std::string local_user = EnvLoader::get("MYSQL_LOCAL_USER", "mylife");
-    std::string local_pass = EnvLoader::get("MYSQL_LOCAL_PASSWORD", "");
+    std::string local_host = EnvLoader::get("MYSQL_LOCAL_HOST", EnvLoader::get("MYSQL_HOST", "10.0.0.99"));
+    int local_port = EnvLoader::get_int("MYSQL_LOCAL_PORT", EnvLoader::get_int("MYSQL_PORT", 3306));
+    std::string local_user = EnvLoader::get("MYSQL_LOCAL_USER", EnvLoader::get("MYSQL_USER", "mylife"));
+    std::string local_pass = EnvLoader::get("MYSQL_LOCAL_PASSWORD", EnvLoader::get("MYSQL_PASSWORD", ""));
     std::string local_db = EnvLoader::get("MYSQL_LOCAL_NAME", "myjob_agent");
 
     int server_port = EnvLoader::get_int("ROADMAP_PORT", 8080);
+
+    signal(SIGPIPE, SIG_IGN);
 
     std::cout << "🌐 [Init] Remote Server DB (Tokens & Accounts): " << remote_host << ":" << remote_port << "/" << remote_db << "\n";
     std::cout << "⚡ [Init] Local Fast DB (Ticks & Historical Candles): " << local_host << ":" << local_port << "/" << local_db << "\n";
     std::cout << "[Init] HTTP Roadmap Server Port: " << server_port << "\n";
 
-    // Launch HTTP Web Portal INSTANTLY at launch
-    auto server = std::make_shared<RoadmapServer>(server_port, nullptr);
-    std::thread http_thread([server]() {
-        server->start();
-    });
-    http_thread.detach();
-
     auto db_client = std::make_shared<RoadmapDbClient>(
         remote_host, remote_port, remote_user, remote_pass, remote_db,
         local_host, local_port, local_user, local_pass, local_db
     );
-    server->set_db_client(db_client);
+
+    // Launch HTTP Web Portal with fully initialized db_client
+    auto server = std::make_shared<RoadmapServer>(server_port, db_client);
+    std::thread http_thread([server]() {
+        server->start();
+    });
+    http_thread.detach();
 
     if (db_client->test_connection()) {
         std::cout << "✅ [Remote Database] Remote Server Connection Successful (Tokens & Common Data)!\n";
@@ -76,8 +96,17 @@ int main(int argc, char* argv[]) {
     SoakTestTelemetryMonitor soak_monitor;
     std::cout << "🧩 [Architecture] Initialized Modular Backend: " << cpu_backend.backend_name() << "\n";
 
+    // Launch Native C++ Broker Feed Supervisor (Upstox / FYERS direct WebSocket)
+    std::vector<std::string> feed_symbols = {
+        "NSE_INDEX|Nifty 50",
+        "NSE_INDEX|Nifty Bank",
+        "BSE_INDEX|SENSEX"
+    };
+    auto feed_supervisor = std::make_shared<BrokerFeedSupervisor>(db_client, receiver, feed_symbols);
+    feed_supervisor->start();
+
     // Launch Background Token Validation & Live Tick Ingestion Supervisor Thread IMMEDIATELY
-    std::thread supervisor_thread([db_client, &receiver, &soak_monitor]() {
+    std::thread supervisor_thread([db_client, &receiver, &soak_monitor, feed_supervisor]() {
         bool last_active_state = false;
         int check_counter = 0;
         size_t total_saved_ticks = 0;
@@ -136,12 +165,15 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // Poll read-only shared upstox_live_paper_option_quotes table for new live market ticks
-            auto new_ticks = db_client->fetch_live_quotes_since(last_seen_ts);
-            for (const auto& tick : new_ticks) {
-                receiver.ingest_tick(tick);
-                if (!tick.raw_timestamp.empty()) {
-                    last_seen_ts = tick.raw_timestamp;
+            // If native feed supervisor is not connected, fallback to shared DB polling
+            auto sup_status = feed_supervisor->get_status();
+            if (!sup_status.is_connected) {
+                auto new_ticks = db_client->fetch_live_quotes_since(last_seen_ts);
+                for (const auto& tick : new_ticks) {
+                    receiver.ingest_tick(tick);
+                    if (!tick.raw_timestamp.empty()) {
+                        last_seen_ts = tick.raw_timestamp;
+                    }
                 }
             }
 
@@ -247,6 +279,15 @@ int main(int argc, char* argv[]) {
                         final_confidence,
                         capital_in_hand
                     );
+
+                    uint64_t current_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()
+                    ).count();
+                    uint64_t tick_ts_ms = (tick.timestamp_ms > 0) ? tick.timestamp_ms : tick.received_timestamp_ms;
+                    auto feed_freshness = hermes::IndependentRiskEngine::verify_feed_freshness(tick_ts_ms, current_time_ms, 10000);
+                    if (!feed_freshness.risk_approved) {
+                        veto = feed_freshness;
+                    }
 
                     auto now_ns = std::chrono::high_resolution_clock::now().time_since_epoch().count();
                     std::string uuid = "dj-" + std::to_string(now_ns) + "-" + std::to_string(decision_seq.fetch_add(1));

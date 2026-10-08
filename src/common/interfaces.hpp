@@ -36,7 +36,8 @@ public:
     virtual bool update_item_status(int id, const std::string& status) = 0;
     virtual UserProfile fetch_user_by_email_or_id(const std::string& identifier) = 0;
     virtual UserPortfolioData fetch_user_portfolio(const std::string& user_id) = 0;
-    virtual std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 10) = 0;
+    virtual std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 20, int offset = 0) = 0;
+    virtual int fetch_user_trade_count(const std::string& user_id) = 0;
     virtual UpstoxTokenInfo fetch_upstox_token_status() = 0;
     virtual bool save_upstox_access_token(const std::string& token, const std::string& client_id, const std::string& expires_at) = 0;
 };
