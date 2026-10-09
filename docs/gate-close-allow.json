@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "74c7ccb5233925a932d70615bfd73050bdf5b3ad": {
+      "short": "74c7ccb",
+      "reason": "Trading Agent workstream — feat(db): enforce database trigger for immutable strategy config audit trail",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "2cfc3f40e8f7a4301b1d92e9cb0cd2cdb73645e8": {
       "short": "2cfc3f4",
       "reason": "Trading Agent workstream — feat(config): implement dynamic strategy config table with audit log and atomic hot-reload",
