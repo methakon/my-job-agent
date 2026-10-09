@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "f01fb0874ac0452a7d5b702b09ff91e448615379": {
+      "short": "f01fb08",
+      "reason": "Trading Agent workstream — fix(market_data): send Upstox v3 subscription as binary frame and wire dynamic tick counter to fnf_market_snapshots",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "10365495feb13896907efe45eb1a234bb5b578e1": {
       "short": "1036549",
       "reason": "Trading Agent workstream — fix(market_data): implement zero-copy Protobuf wire decoder for Upstox FeedResponse v3 with strict non-zero price validation",
