@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "2d8c742471aef34ab5e413c61eb9be14c041e0f1": {
+      "short": "2d8c742",
+      "reason": "Trading Agent workstream — feat(analytics): add Google Analytics GA4 tag to all public pages",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "efb99938f1ccce6d26b215f5f8cc097d047b3502": {
       "short": "efb9993",
       "reason": "Trading Agent workstream — feat(ui): embed github sponsor card on home page",
