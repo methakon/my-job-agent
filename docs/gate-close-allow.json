@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "40d4f28a100a50886af6ec1f711189d5993be01b": {
+      "short": "40d4f28",
+      "reason": "Trading Agent workstream — feat(supervisor): validate internal JWT exp claim and reset fail count on confirmed ticks",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "fb93ff34829ee21abd20855b07d310f520f3e23a": {
       "short": "fb93ff3",
       "reason": "Trading Agent workstream — fix(db): eliminate connection leak in error paths and track all created pool connections",
