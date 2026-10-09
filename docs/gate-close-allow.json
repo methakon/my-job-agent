@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "189c54108090c319fc6efb9b7a141845ba351921": {
+      "short": "189c541",
+      "reason": "Trading Agent workstream — feat(analytics): implement production cookie-less privacy-conscious visitor tracking engine (v8 master)",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "1915b98cb01ca5356d8c40dd4fd3ca3749af031c": {
       "short": "1915b98",
       "reason": "Trading Agent workstream — refactor(analytics): move Google Analytics GA4 tag from head to footer before closing body",
