@@ -1,4 +1,5 @@
 #include "market_data/broker_feed_supervisor.hpp"
+#include "engine/post_session_analyzer.hpp"
 #include "common/env_loader.hpp"
 #include "common/crypto_util.hpp"
 #include <iostream>
@@ -394,6 +395,12 @@ void BrokerFeedSupervisor::update_state_machine() {
                 std::cout << "SESSION_CLOSED (15:30 IST Market Close)\n";
                 break;
         }
+
+        // In-Process Autonomous Trigger: Run EOD Analysis & Archival automatically upon market close
+        if (paper_state_ == PaperTradingState::SESSION_CLOSED ||
+            (prev_str == "ACTIVE_PAPER_TRADING" && paper_state_ == PaperTradingState::IDLE_OFF_HOURS)) {
+            trigger_eod_analysis_and_archival("", true);
+        }
     }
 }
 
@@ -443,4 +450,50 @@ void BrokerFeedSupervisor::db_persistence_worker() {
             }
         }
     }
+}
+
+void BrokerFeedSupervisor::trigger_eod_analysis_and_archival(const std::string& forced_date, bool async) {
+    if (!db_client_) return;
+
+    std::string date_str = forced_date;
+    if (date_str.empty()) {
+        auto now = std::chrono::system_clock::now();
+        std::time_t t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_ist;
+        t += 19800; // IST offset (+5:30)
+        gmtime_r(&t, &tm_ist);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tm_ist);
+        date_str = buf;
+    }
+
+    auto run_eod = [this, date_str]() {
+        std::lock_guard<std::mutex> lock(eod_mutex_);
+        if (last_eod_completed_date_ == date_str) {
+            return; // Idempotent: already ran for this date
+        }
+        std::cout << "🚀 [BrokerFeedSupervisor] In-Process Autonomous EOD Trigger for " << date_str << "...\n";
+        try {
+            hermes::PostSessionAnalyzer analyzer(db_client_);
+            auto psa = analyzer.run_post_session_analysis(date_str);
+            auto arch = analyzer.run_daily_data_archival(date_str);
+            last_eod_completed_date_ = date_str;
+            std::cout << "✅ [BrokerFeedSupervisor] In-Process EOD Complete: "
+                      << psa.evaluated_decisions_count << " decisions analyzed, "
+                      << arch.candles_rolled_up << " candles rolled up.\n";
+        } catch (const std::exception& e) {
+            std::cerr << "❌ [BrokerFeedSupervisor] EOD Analysis error: " << e.what() << "\n";
+        }
+    };
+
+    if (async) {
+        std::thread(run_eod).detach();
+    } else {
+        run_eod();
+    }
+}
+
+std::string BrokerFeedSupervisor::get_last_eod_completed_date() const {
+    std::lock_guard<std::mutex> lock(eod_mutex_);
+    return last_eod_completed_date_;
 }

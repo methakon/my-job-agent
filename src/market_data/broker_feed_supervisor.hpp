@@ -54,6 +54,10 @@ public:
     bool is_paper_trading_active() const;
     std::string get_paper_trading_state_string() const;
 
+    // In-Process End-of-Day Analysis & Archival Trigger
+    void trigger_eod_analysis_and_archival(const std::string& forced_date = "", bool async = true);
+    std::string get_last_eod_completed_date() const;
+
 private:
     void supervisor_loop();
     void update_state_machine();
@@ -95,6 +99,10 @@ private:
     uint64_t total_ticks_{0};
     uint64_t last_tick_ts_{0};
     std::string last_error_;
+
+    // In-process EOD synchronization
+    mutable std::mutex eod_mutex_;
+    std::string last_eod_completed_date_;
 };
 
 #endif // MARKET_DATA_BROKER_FEED_SUPERVISOR_HPP

@@ -1700,6 +1700,13 @@ void run_solid_and_acid_test_suite() {
         auto arch_report = analyzer->run_daily_data_archival("2026-10-09");
         TEST("PSA-02: End-of-day data archival rollup executes safely without deleting unverified rows",
              !arch_report.retention_policy_note.empty());
+
+        // Test PSA-03: In-process autonomous EOD trigger inside BrokerFeedSupervisor
+        OptionTickReceiver dummy_rx;
+        BrokerFeedSupervisor sup(db_client, dummy_rx, {"NSE_INDEX|Nifty 50"});
+        sup.trigger_eod_analysis_and_archival("2026-10-09", false);
+        TEST("PSA-03: In-process autonomous EOD trigger inside BrokerFeedSupervisor executes cleanly",
+             sup.get_last_eod_completed_date() == "2026-10-09");
     }
 
     db_client->cleanup_test_schema();
