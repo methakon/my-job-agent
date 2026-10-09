@@ -40,7 +40,7 @@ static std::string html_escape(const std::string& str) {
     return out;
 }
 
-static const char* GOOGLE_ANALYTICS_HEAD_TAG =
+static const char* GOOGLE_ANALYTICS_FOOTER_TAG =
     "<!-- Google tag (gtag.js) -->\n"
     "<script async src=\"https://www.googletagmanager.com/gtag/js?id=G-28FDYX1K4Y\"></script>\n"
     "<script>\n"
@@ -169,7 +169,6 @@ static std::string read_system_stats_json(std::shared_ptr<RoadmapDbClient> db_cl
 std::string RoadmapServer::render_home_page(bool is_authenticated) {
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Home — C++ Autonomous Trading Agent Platform</title>"
@@ -254,7 +253,9 @@ std::string RoadmapServer::render_home_page(bool is_authenticated) {
        << "setInterval(fetchSystemStats,60000);"
        << "</script>"
        << "  <div class=\"footer\">C++ Autonomous Trading Engine · Multi-Tenant User Isolation · Oracle Cloud MySQL (3307)</div>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
     return ss.str();
 }
 
@@ -280,7 +281,6 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>User Dashboard — C++ Autonomous Trading Agent</title>"
@@ -394,7 +394,9 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "  </div>"
 
        << "<div class=\"footer\">C++ Autonomous Trading Engine · Dashboard Sub-Pages Hub · Oracle Cloud MySQL (3307)</div>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
 
     return ss.str();
 }
@@ -410,7 +412,6 @@ std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const st
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Portfolio Capital & Margins — C++ Autonomous Trading Agent</title>"
@@ -462,7 +463,9 @@ std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const st
        << "    <p>• <b>Execution Provider &amp; Mode</b>: <span class=\"badge ok\">" << html_escape(p.executionProvider.empty() ? "FYERS" : p.executionProvider) << "</span> <span class=\"badge warn\">" << html_escape(p.executionMode.empty() ? "REAL DATA PAPER" : p.executionMode) << "</span></p>"
        << "  </div>"
        << "  <div class=\"footer\">C++ Autonomous Trading Engine · Isolated Portfolio Sub-Page · Oracle Cloud MySQL (3307)</div>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
 
     return ss.str();
 }
@@ -503,7 +506,6 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>F&O Paper Trading & Skill Acquisition Desk — C++ Autonomous Engine</title>"
@@ -819,7 +821,9 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
     ss << "</tbody></table></div>"
 
        << "  <div class=\"footer\">C++ Autonomous Trading Engine · F&amp;O Paper Trading &amp; Skill Desk · Oracle Cloud MySQL (3307)</div>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
 
     return ss.str();
 }
@@ -836,7 +840,6 @@ std::string RoadmapServer::render_tokens_page(bool is_authenticated) {
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Broker API Tokens — C++ Autonomous Trading Agent</title>"
@@ -912,7 +915,9 @@ std::string RoadmapServer::render_tokens_page(bool is_authenticated) {
        << "  </div>"
 
        << "  <div class=\"footer\">C++ Autonomous Trading Engine · Multi-Broker Token Sub-Page · Oracle Cloud MySQL (3307)</div>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
 
     return ss.str();
 }
@@ -1013,7 +1018,6 @@ std::string RoadmapServer::render_openapi_json() {
 std::string RoadmapServer::render_swagger_ui_page(bool is_authenticated) {
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Swagger API Docs — C++ Autonomous Trading Agent</title>"
@@ -1045,14 +1049,15 @@ std::string RoadmapServer::render_swagger_ui_page(bool is_authenticated) {
        << "    presets: [SwaggerUIBundle.presets.apis]"
        << "  });"
        << "};"
-       << "</script></body></html>";
+       << "</script>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
     return ss.str();
 }
 
 std::string RoadmapServer::render_login_page(const std::string& error_msg) {
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Operator Login — C++ Trading Agent Platform</title>"
@@ -1093,7 +1098,9 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
        << "  <form method=\"post\" action=\"/auth/send-password\" style=\"margin-top:12px;\">"
        << "    <button type=\"submit\" style=\"background:#21262d;color:#58a6ff;border:1px solid #30363d;margin-top:8px;\">📧 Send Password to bapay.9@gmail.com</button>"
        << "  </form>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
     return ss.str();
 }
 
@@ -1153,7 +1160,6 @@ std::string RoadmapServer::render_html_page(bool is_authenticated) {
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Hermes-CPP Zero-Progress Roadmap Board — C++ Autonomous Trading Agent</title>"
@@ -1288,7 +1294,9 @@ std::string RoadmapServer::render_html_page(bool is_authenticated) {
     ss << "<div class=\"footer\">"
        << "Hermes-CPP Autonomous Options Trading Agent · Database-Driven Roadmap · Oracle Cloud MySQL (3307)"
        << "</div>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
 
     return ss.str();
 }
@@ -1511,7 +1519,6 @@ std::string RoadmapServer::render_health_page(bool is_authenticated) {
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
-       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>System Health — C++ Autonomous Trading Agent Platform</title>"
@@ -1604,7 +1611,9 @@ std::string RoadmapServer::render_health_page(bool is_authenticated) {
        << "setInterval(fetchSystemStats,15000);"
        << "</script>"
        << "  <div class=\"footer\">C++ Autonomous Trading Engine · Operational Health Monitor · Oracle Cloud MySQL (3307)</div>"
-       << "</div></body></html>";
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
     return ss.str();
 }
 
