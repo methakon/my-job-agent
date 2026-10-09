@@ -218,11 +218,11 @@ EmergencyKillSwitchResult IndependentRiskEngine::trigger_emergency_kill_switch(
     return res;
 }
 
-void IndependentRiskEngine::update_daily_risk_base(double current_capital_in_hand, const std::string& current_date_str) {
+void IndependentRiskEngine::update_daily_risk_base(double current_capital_in_hand, const std::string& current_date_str, double initial_daily_loss) {
     if (current_date_str.empty() || current_date_str != cached_risk_date_ || cached_daily_risk_base_ <= 0.0) {
         cached_risk_date_ = current_date_str;
         cached_daily_risk_base_ = (current_capital_in_hand > 0.0) ? (0.02 * current_capital_in_hand) : max_per_trade_risk_;
-        cumulative_daily_loss_ = 0.0;
+        cumulative_daily_loss_ = (initial_daily_loss > 0.0) ? initial_daily_loss : 0.0;
     }
 }
 

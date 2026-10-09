@@ -126,9 +126,10 @@ public:
     );
 
     // Daily-Rebased Depleting Risk Budget (Regime A: 0.02 * CAPITAL_IN_HAND shared daily budget, depleted by daily losses)
-    void update_daily_risk_base(double current_capital_in_hand, const std::string& current_date_str = "");
+    void update_daily_risk_base(double current_capital_in_hand, const std::string& current_date_str = "", double initial_daily_loss = 0.0);
     void record_trade_result(double net_pnl);
     double get_daily_risk_base() const { return cached_daily_risk_base_; }
+    double get_cumulative_daily_loss() const { return cumulative_daily_loss_; }
     double get_remaining_daily_budget() const;
 
     // G16-05: Verify LIVE mode unreachability

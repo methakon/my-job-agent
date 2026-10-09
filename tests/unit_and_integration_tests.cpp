@@ -979,6 +979,21 @@ void run_solid_and_acid_test_suite() {
 
         TEST("Gate G16-01: Independent risk engine blocks model override when proposed risk exceeds ₹2,000 ceiling", !veto_override.risk_approved && veto_override.model_override_attempt_blocked);
         TEST("Gate G16-02: Per-trade (₹2,000) and aggregate capital (₹10,000) limits enforced accurately", veto_ok.risk_approved);
+
+        // Case C: 5% Session Drawdown Limit enforcement (Dynamic 5% of ₹100,000 = ₹5,000)
+        // Drawdown below limit (₹4,500 < ₹5,000) -> APPROVED
+        IndependentRiskVeto veto_dd_ok = risk_engine.verify_order_proposal("NIFTY", 1000.0, 5000.0, 4500.0, 0, 0.85, 100000.0);
+        // Drawdown at or above limit (₹5,200 >= ₹5,000) -> VETOED with RISK_VETO_MAX_SESSION_DRAWDOWN_REACHED
+        IndependentRiskVeto veto_dd_breach = risk_engine.verify_order_proposal("NIFTY", 1000.0, 5000.0, 5200.0, 0, 0.85, 100000.0);
+
+        TEST("Gate G16-02b: Dynamic 5% session drawdown limit blocks order proposal when cumulative loss exceeds ₹5,000",
+             veto_dd_ok.risk_approved && !veto_dd_breach.risk_approved &&
+             veto_dd_breach.veto_reason.find("RISK_VETO_MAX_SESSION_DRAWDOWN_REACHED") != std::string::npos);
+
+        // Case D: Daily Risk Budget Depletion & Restart State Recovery
+        risk_engine.update_daily_risk_base(100000.0, "2026-10-09", 1200.0); // Recovered ₹1,200 prior loss on restart
+        TEST("Gate G16-02c: Daily risk budget initializes with prior realized session loss across restart",
+             risk_engine.get_cumulative_daily_loss() == 1200.0 && risk_engine.get_remaining_daily_budget() == 800.0);
     }
 
     // Item G16-03: Consecutive Loss & Feed Quality Shutdowns

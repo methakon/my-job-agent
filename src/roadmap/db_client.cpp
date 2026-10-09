@@ -1233,6 +1233,28 @@ size_t RoadmapDbClient::count_open_trades_for_symbol(const std::string& instrume
     return count;
 }
 
+double RoadmapDbClient::fetch_today_session_drawdown() {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0.0;
+
+    double today_loss = 0.0;
+    std::string query = "SELECT IFNULL(SUM(CASE WHEN netPnl < 0 THEN ABS(netPnl) ELSE 0.0 END), 0.0) "
+                        "FROM cpp_trade_reports WHERE status = 'CLOSED' AND DATE(closedAt) = CURRENT_DATE();";
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try { today_loss = std::stod(row[0]); } catch (...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return today_loss;
+}
+
 int RoadmapDbClient::settle_expired_positions() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;

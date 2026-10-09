@@ -136,11 +136,13 @@ int main(int argc, char* argv[]) {
         // In-memory hot-path cache for open trades and portfolio state to eliminate DB queries from tick loop
         std::vector<UserTradeData> cached_open_trades;
         UserPortfolioData cached_portfolio = db_client->fetch_user_portfolio("cpp-portfolio-v1");
+        double cached_today_drawdown = db_client->fetch_today_session_drawdown();
         uint64_t last_cache_update_ticks = 0;
 
         auto refresh_trade_cache = [&]() {
             cached_open_trades = db_client->fetch_user_trades("cpp-shadow", 1000);
             cached_portfolio = db_client->fetch_user_portfolio("cpp-portfolio-v1");
+            cached_today_drawdown = db_client->fetch_today_session_drawdown();
         };
 
         refresh_trade_cache();
@@ -259,7 +261,7 @@ int main(int argc, char* argv[]) {
 
                     double capital_in_hand = cached_portfolio.capital + cached_portfolio.netPnl;
                     std::string current_date_str = tick.raw_timestamp.length() >= 10 ? tick.raw_timestamp.substr(0, 10) : "";
-                    risk_engine.update_daily_risk_base(capital_in_hand, current_date_str);
+                    risk_engine.update_daily_risk_base(capital_in_hand, current_date_str, cached_today_drawdown);
 
                     auto kelly_result = hermes::IndependentRiskEngine::calculate_kelly_lot_size("OFI_Microstructure_Breakout", symbol, side, entry_px, spot_px, capital_in_hand);
 
@@ -270,11 +272,13 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
+                    double current_session_drawdown = std::max(cached_today_drawdown, risk_engine.get_cumulative_daily_loss());
+
                     auto veto = risk_engine.verify_order_proposal(
                         symbol,
                         proposed_margin,
                         cached_portfolio.deployed,
-                        0.0,
+                        current_session_drawdown,
                         open_positions_for_symbol,
                         final_confidence,
                         capital_in_hand

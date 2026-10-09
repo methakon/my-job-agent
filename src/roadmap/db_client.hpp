@@ -237,6 +237,7 @@ public:
     bool create_paper_trade(const UserTradeData& trade);
     bool close_paper_trade(const std::string& trade_id, double exit_price, double net_pnl, double cost = 40.0);
     size_t count_open_trades_for_symbol(const std::string& instrument);
+    double fetch_today_session_drawdown();
     int settle_expired_positions();
     void update_external_case_study_ltps();
 
