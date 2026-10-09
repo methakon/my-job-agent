@@ -1365,10 +1365,10 @@ std::vector<CanonicalOptionTick> RoadmapDbClient::fetch_live_quotes_since(const 
 }
 
 std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
-    static std::pair<long long, long long> cached_counts{268287, 4703198};
-    static auto last_fetch_time = std::chrono::steady_clock::now();
+    static std::pair<long long, long long> cached_counts{0, 0};
+    static auto last_fetch_time = std::chrono::steady_clock::time_point{};
     auto now = std::chrono::steady_clock::now();
-    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_fetch_time).count() < 60) {
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_fetch_time).count() < 10 && cached_counts.second > 0) {
         return cached_counts;
     }
 
@@ -1377,8 +1377,8 @@ std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     long long today_count = 0;
     long long total_count = 0;
     const char* query = "SELECT "
-                        "(SELECT COUNT(*) FROM upstox_live_paper_option_quotes WHERE ts >= CURRENT_DATE() AND ts < CURRENT_DATE() + INTERVAL 1 DAY) AS today_ticks, "
-                        "(SELECT COUNT(*) FROM upstox_live_paper_option_quotes) AS total_ticks;";
+                        "(SELECT COUNT(*) FROM fnf_market_snapshots WHERE createdAt >= CURRENT_DATE() AND createdAt < CURRENT_DATE() + INTERVAL 1 DAY) AS today_ticks, "
+                        "(SELECT COUNT(*) FROM fnf_market_snapshots) AS total_ticks;";
     if (mysql_query(conn, query) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {

@@ -147,7 +147,7 @@ bool UpstoxWebSocketClient::subscribe(const std::vector<std::string>& symbols) {
     ss << "]}}";
 
     std::string payload = ss.str();
-    bool ok = transport_->send_text(payload);
+    bool ok = transport_->send_binary(reinterpret_cast<const uint8_t*>(payload.data()), payload.size());
     if (ok) {
         std::cout << "📡 [UpstoxWS] Subscribed to " << symbols.size() << " instruments: " << payload << "\n";
     } else {
@@ -168,10 +168,17 @@ bool UpstoxWebSocketClient::is_connected() const {
 }
 
 void UpstoxWebSocketClient::handle_message(const uint8_t* data, size_t len, bool is_binary) {
+    std::cout << "📥 [UpstoxWS] Received frame len=" << len << " binary=" << is_binary << " hex: ";
+    for (size_t i = 0; i < std::min<size_t>(len, 48); ++i) {
+        std::cout << std::hex << (int)data[i] << " " << std::dec;
+    }
+    std::cout << "\n";
     std::vector<CanonicalOptionTick> ticks;
     bool decoded = UpstoxDecoder::decode_frame(data, len, is_binary, ticks);
+    std::cout << "📥 [UpstoxWS] Decoded result=" << decoded << " ticks_count=" << ticks.size() << "\n";
     if (decoded && !ticks.empty() && on_tick_) {
         for (const auto& tick : ticks) {
+            std::cout << "✅ [UpstoxWS] Ingested tick: " << tick.instrument_key << " ltp=" << tick.ltp << " vol=" << tick.volume << "\n";
             on_tick_(tick);
         }
     }
