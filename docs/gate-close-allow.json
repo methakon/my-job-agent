@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "2cba79f667e30bb9ea78995ca58b4a893619aa45": {
+      "short": "2cba79f",
+      "reason": "Trading Agent workstream — fix(analytics): harmonize query map keys and add safe_map_get fallback helper in server rendering",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "189c54108090c319fc6efb9b7a141845ba351921": {
       "short": "189c541",
       "reason": "Trading Agent workstream — feat(analytics): implement production cookie-less privacy-conscious visitor tracking engine (v8 master)",
