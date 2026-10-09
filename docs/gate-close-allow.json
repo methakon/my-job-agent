@@ -1,7 +1,7 @@
 {
   "exemptions": {
-    "de4d53a140e9c9d03137d67db4259082eea1ecb5": {
-      "short": "de4d53a",
+    "10365495feb13896907efe45eb1a234bb5b578e1": {
+      "short": "1036549",
       "reason": "Trading Agent workstream — fix(market_data): implement zero-copy Protobuf wire decoder for Upstox FeedResponse v3 with strict non-zero price validation",
       "workstream": "trading-agent-roadmap",
       "authority": "OPERATOR CONFIRMED ARCHITECTURE"
