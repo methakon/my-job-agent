@@ -7,6 +7,7 @@
 #include "engine/gate11_strategy_taxonomy.hpp"
 #include "engine/gate16_risk_limits.hpp"
 #include "engine/gate22_seasonality_patterns.hpp"
+#include "engine/strategy_config_manager.hpp"
 #include "engine/hardware_config.hpp"
 #include "market_data/broker_feed_supervisor.hpp"
 #include <iostream>
@@ -81,6 +82,14 @@ int main(int argc, char* argv[]) {
         std::cout << "⚡ [Local Database] Local DB Connection Active (High-Frequency Ticks & Historical Candles)!\n";
     }
 
+    hermes::StrategyConfigManager::instance().load_from_db(db_client.get());
+    std::cout << "⚙️ [Config] Dynamic Strategy Configuration Active: OFI="
+              << hermes::StrategyConfigManager::instance().get_ofi_threshold()
+              << ", MinVol=" << hermes::StrategyConfigManager::instance().get_min_volume_threshold()
+              << ", RiskPct=" << (hermes::StrategyConfigManager::instance().get_per_trade_risk_pct() * 100.0)
+              << "%, MaxDD=" << (hermes::StrategyConfigManager::instance().get_session_drawdown_limit_pct() * 100.0)
+              << "%, BaseConfidence=" << hermes::StrategyConfigManager::instance().get_base_confidence() << "\n";
+
     // Initialize Step 1: Option Chain Tick Receiver
     OptionTickReceiver receiver;
     receiver.start_receiver();
@@ -149,6 +158,10 @@ int main(int argc, char* argv[]) {
 
         while (true) {
             check_counter++;
+
+            // Periodically check and hot-reload dynamic strategy configuration (every 60s)
+            hermes::StrategyConfigManager::instance().maybe_periodic_reload(db_client.get(), 60);
+
             // Periodically analyze archived tick history and update seasonality hypothesis records (every 300 cycles)
             if (check_counter % 300 == 1) {
                 auto archived_rows = db_client->fetch_archived_tick_samples(30);
@@ -230,9 +243,13 @@ int main(int argc, char* argv[]) {
 
                 static std::atomic<uint64_t> decision_seq{1};
 
-                // OFI Microstructure Option Strategy Trigger (requires high order flow imbalance + volume)
+                // OFI Microstructure Option Strategy Trigger (requires dynamic order flow imbalance + volume thresholds)
+                double ofi_threshold = hermes::StrategyConfigManager::instance().get_ofi_threshold();
+                int min_vol = hermes::StrategyConfigManager::instance().get_min_volume_threshold();
+                double base_conf = hermes::StrategyConfigManager::instance().get_base_confidence();
+
                 bool is_option_contract = !tick.symbol.empty() && tick.symbol != "NIFTY" && tick.symbol != "BANKNIFTY" && tick.symbol != "SENSEX";
-                bool is_ofi_breakout = is_option_contract && (std::abs(feat.order_flow_imbalance) >= 0.85) && (tick.volume >= 100);
+                bool is_ofi_breakout = is_option_contract && (std::abs(feat.order_flow_imbalance) >= ofi_threshold) && (tick.volume >= min_vol);
 
                 if (is_ofi_breakout) {
                     std::string side = (feat.order_flow_imbalance > 0.0) ? "BUY" : "SELL";
@@ -244,7 +261,7 @@ int main(int argc, char* argv[]) {
                     double seasonality_advisory_mod = seasonality_engine.get_advisory_confidence_modifier(
                         symbol, 10, 0, 3, 0, "OFI_Microstructure_Breakout"
                     );
-                    double final_confidence = 0.85 * seasonality_advisory_mod;
+                    double final_confidence = base_conf * seasonality_advisory_mod;
 
                     int lot_size = 25;
                     if (symbol.find("BANKNIFTY") != std::string::npos || inst.find("BANKNIFTY") != std::string::npos) {

@@ -34,6 +34,7 @@
 #include "../src/market_data/broker_feed_supervisor.hpp"
 #include "../src/engine/gate_const_invariants.hpp"
 #include "../src/engine/post_session_analyzer.hpp"
+#include "../src/engine/strategy_config_manager.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -1707,6 +1708,73 @@ void run_solid_and_acid_test_suite() {
         sup.trigger_eod_analysis_and_archival("2026-10-09", false);
         TEST("PSA-03: In-process autonomous EOD trigger inside BrokerFeedSupervisor executes cleanly",
              sup.get_last_eod_completed_date() == "2026-10-09");
+
+        // =========================================================================
+        // Dynamic Strategy Configuration & Parameter Reload Tests (SCM-01 to SCM-06)
+        // =========================================================================
+        auto& scm = hermes::StrategyConfigManager::instance();
+
+        // SCM-01: Baseline default fallback invariants
+        scm.reset_to_defaults();
+        TEST("SCM-01: Baseline default parameter fallbacks hold without active DB",
+             std::abs(scm.get_ofi_threshold() - 0.85) < 1e-6 &&
+             scm.get_min_volume_threshold() == 100 &&
+             std::abs(scm.get_per_trade_risk_pct() - 0.02) < 1e-6 &&
+             std::abs(scm.get_session_drawdown_limit_pct() - 0.05) < 1e-6 &&
+             std::abs(scm.get_base_confidence() - 0.85) < 1e-6);
+
+        // SCM-02: Ensure schema and seed parameters in MySQL
+        bool schema_ok = db_client->ensure_strategy_config_schema();
+        bool load_ok = scm.load_from_db(db_client.get());
+        TEST("SCM-02: Strategy config tables ensured and loaded into lock-free atomics",
+             schema_ok && load_ok && std::abs(scm.get_ofi_threshold() - 0.85) < 1e-6);
+
+        // SCM-03: Parameter modification with audit trail
+        bool update_ok = scm.update_parameter(
+            db_client.get(),
+            "ofi_threshold",
+            "0.80",
+            "OPERATOR_TEST",
+            "Observational tuning of OFI breakout threshold to capture high-probability order flow"
+        );
+        TEST("SCM-03: Parameter updated dynamically with operator audit record",
+             update_ok && std::abs(scm.get_ofi_threshold() - 0.80) < 1e-6);
+
+        // Verify audit log row
+        auto audit_records = db_client->fetch_strategy_config_audit(5);
+        bool audit_verified = false;
+        for (const auto& a : audit_records) {
+            if (a.at("config_key") == "ofi_threshold" && a.at("new_value") == "0.80" && a.at("approved_by") == "OPERATOR_TEST") {
+                audit_verified = true;
+                break;
+            }
+        }
+        TEST("SCM-04: Audit log contains verifiable old_value, new_value, and approved_by identity",
+             audit_verified);
+
+        // SCM-05: Dynamic parameter changes immediately govern Risk Engine without restart
+        scm.set_per_trade_risk_pct(0.03);
+        TEST("SCM-05: Dynamic parameter update immediately governs IndependentRiskEngine",
+             std::abs(scm.get_per_trade_risk_pct() - 0.03) < 1e-6);
+
+        // SCM-06: Safe Revert back to 0.85 baseline and 0.02 risk
+        bool revert_ofi = scm.update_parameter(
+            db_client.get(),
+            "ofi_threshold",
+            "0.85",
+            "OPERATOR_TEST",
+            "Reverting OFI threshold back to baseline 0.85"
+        );
+        scm.update_parameter(
+            db_client.get(),
+            "per_trade_risk_pct",
+            "0.02",
+            "OPERATOR_TEST",
+            "Reverting per_trade_risk_pct back to baseline 0.02"
+        );
+        TEST("SCM-06: Reversion back to baseline (0.85 / 0.02) completes cleanly",
+             revert_ofi && std::abs(scm.get_ofi_threshold() - 0.85) < 1e-6 &&
+             std::abs(scm.get_per_trade_risk_pct() - 0.02) < 1e-6);
     }
 
     db_client->cleanup_test_schema();

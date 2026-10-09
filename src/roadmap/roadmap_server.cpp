@@ -2,6 +2,7 @@
 #include "../common/env_loader.hpp"
 #include "../common/crypto_util.hpp"
 #include "../engine/market_calendar.hpp"
+#include "../engine/strategy_config_manager.hpp"
 #include <iostream>
 #include <sstream>
 #include <csignal>
@@ -148,6 +149,8 @@ static std::string read_system_stats_json(std::shared_ptr<RoadmapDbClient> db_cl
         json << ",\"mysql_ssl_cipher\":\"" << cipher << "\""
              << ",\"mysql_ssl_encrypted\":" << (is_encrypted ? "true" : "false");
     }
+
+    json << ",\"strategy_config\":" << hermes::StrategyConfigManager::instance().to_json();
 
     json << "}";
     return json.str();
@@ -1858,6 +1861,27 @@ void RoadmapServer::start() {
                 body = render_health_page(is_auth);
             } else if (req.find("GET /api/system/stats") != std::string::npos) {
                 body = read_system_stats_json(db_client_);
+                content_type = "application/json";
+            } else if (req.find("GET /api/strategy/config") != std::string::npos) {
+                std::ostringstream ss;
+                ss << "{\"active_config\":" << hermes::StrategyConfigManager::instance().to_json();
+                if (db_client_) {
+                    auto audits = db_client_->fetch_strategy_config_audit(10);
+                    ss << ",\"recent_audits\":[";
+                    for (size_t i = 0; i < audits.size(); ++i) {
+                        if (i > 0) ss << ",";
+                        ss << "{\"id\":\"" << audits[i]["id"] << "\","
+                           << "\"key\":\"" << audits[i]["config_key"] << "\","
+                           << "\"old\":\"" << audits[i]["old_value"] << "\","
+                           << "\"new\":\"" << audits[i]["new_value"] << "\","
+                           << "\"by\":\"" << audits[i]["approved_by"] << "\","
+                           << "\"reason\":\"" << audits[i]["reason"] << "\","
+                           << "\"at\":\"" << audits[i]["created_at"] << "\"}";
+                    }
+                    ss << "]";
+                }
+                ss << "}";
+                body = ss.str();
                 content_type = "application/json";
             } else if (req.find("GET /project-status") != std::string::npos) {
                 body = render_html_page(is_auth);

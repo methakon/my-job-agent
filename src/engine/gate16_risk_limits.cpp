@@ -1,5 +1,6 @@
 #include "gate16_risk_limits.hpp"
 #include "gate0_bootstrap.hpp"
+#include "strategy_config_manager.hpp"
 #include "../common/env_loader.hpp"
 #include <sstream>
 #include <iomanip>
@@ -100,7 +101,8 @@ KellySizingResult IndependentRiskEngine::calculate_kelly_lot_size(
         res.quarter_kelly_fraction = 0.0;
         res.bucket_status = "RESEARCH_OBSERVABILITY_ONLY (Fallback Flat lot_size)";
         
-        double per_trade_ceiling = 0.02 * capital_in_hand;
+        double per_trade_pct = StrategyConfigManager::instance().get_per_trade_risk_pct();
+        double per_trade_ceiling = per_trade_pct * capital_in_hand;
         if (res.margin_per_lot <= per_trade_ceiling && per_trade_ceiling > 0.0) {
             res.suggested_lots = 1;
         } else {
@@ -124,17 +126,20 @@ IndependentRiskVeto IndependentRiskEngine::verify_order_proposal(
     veto.risk_approved = true;
     veto.model_override_attempt_blocked = false;
 
-    double effective_capital = (current_capital_in_hand > 0.0) ? current_capital_in_hand : max_aggregate_capital_;
-    double effective_per_trade_risk = (current_capital_in_hand > 0.0) ? (0.02 * effective_capital) : max_per_trade_risk_;
-    double effective_drawdown_limit = (current_capital_in_hand > 0.0) ? (0.05 * effective_capital) : max_session_drawdown_;
+    double per_trade_pct = StrategyConfigManager::instance().get_per_trade_risk_pct();
+    double drawdown_pct = StrategyConfigManager::instance().get_session_drawdown_limit_pct();
 
-    // Dynamic 2% Per-Trade Risk Limit derived from CAPITAL_IN_HAND
+    double effective_capital = (current_capital_in_hand > 0.0) ? current_capital_in_hand : max_aggregate_capital_;
+    double effective_per_trade_risk = (current_capital_in_hand > 0.0) ? (per_trade_pct * effective_capital) : max_per_trade_risk_;
+    double effective_drawdown_limit = (current_capital_in_hand > 0.0) ? (drawdown_pct * effective_capital) : max_session_drawdown_;
+
+    // Dynamic Per-Trade Risk Limit derived from CAPITAL_IN_HAND
     if (proposed_risk_inr > effective_per_trade_risk) {
         veto.risk_approved = false;
         veto.model_override_attempt_blocked = (ai_model_confidence >= 0.90);
         std::ostringstream ss;
         ss << "RISK_VETO_PER_TRADE_LIMIT_EXCEEDED: Proposed risk (₹" << std::fixed << std::setprecision(2)
-           << proposed_risk_inr << ") > Dynamic 2% Kelly Limit (₹" << effective_per_trade_risk << "). Model confidence ("
+           << proposed_risk_inr << ") > Dynamic " << (per_trade_pct * 100.0) << "% Kelly Limit (₹" << effective_per_trade_risk << "). Model confidence ("
            << ai_model_confidence << ") override blocked.";
         veto.veto_reason = ss.str();
         return veto;
@@ -221,7 +226,8 @@ EmergencyKillSwitchResult IndependentRiskEngine::trigger_emergency_kill_switch(
 void IndependentRiskEngine::update_daily_risk_base(double current_capital_in_hand, const std::string& current_date_str, double initial_daily_loss) {
     if (current_date_str.empty() || current_date_str != cached_risk_date_ || cached_daily_risk_base_ <= 0.0) {
         cached_risk_date_ = current_date_str;
-        cached_daily_risk_base_ = (current_capital_in_hand > 0.0) ? (0.02 * current_capital_in_hand) : max_per_trade_risk_;
+        double per_trade_pct = StrategyConfigManager::instance().get_per_trade_risk_pct();
+        cached_daily_risk_base_ = (current_capital_in_hand > 0.0) ? (per_trade_pct * current_capital_in_hand) : max_per_trade_risk_;
         cumulative_daily_loss_ = (initial_daily_loss > 0.0) ? initial_daily_loss : 0.0;
     }
 }

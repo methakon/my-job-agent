@@ -1949,5 +1949,155 @@ uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& bou
     return copied;
 }
 
+bool RoadmapDbClient::ensure_strategy_config_schema() {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
 
+    const char* schema_sql =
+        "CREATE TABLE IF NOT EXISTS cpp_strategy_config ("
+        "  config_key VARCHAR(64) PRIMARY KEY,"
+        "  config_value VARCHAR(64) NOT NULL,"
+        "  description VARCHAR(255),"
+        "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
+        "  updated_by VARCHAR(64) DEFAULT 'SYSTEM'"
+        ");";
+    if (mysql_query(conn, schema_sql) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] Failed to ensure cpp_strategy_config: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
+        return false;
+    }
 
+    const char* audit_sql =
+        "CREATE TABLE IF NOT EXISTS cpp_strategy_config_audit ("
+        "  id BIGINT AUTO_INCREMENT PRIMARY KEY,"
+        "  config_key VARCHAR(64) NOT NULL,"
+        "  old_value VARCHAR(64),"
+        "  new_value VARCHAR(64) NOT NULL,"
+        "  approved_by VARCHAR(64) NOT NULL,"
+        "  reason TEXT,"
+        "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ");";
+    if (mysql_query(conn, audit_sql) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] Failed to ensure cpp_strategy_config_audit: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
+        return false;
+    }
+
+    const char* seed_sql =
+        "INSERT IGNORE INTO cpp_strategy_config (config_key, config_value, description, updated_by) VALUES "
+        "('ofi_threshold', '0.85', 'Threshold for Order Flow Imbalance breakout trigger', 'SYSTEM_BASELINE'), "
+        "('min_volume_threshold', '100', 'Minimum option contract tick volume for trade trigger', 'SYSTEM_BASELINE'), "
+        "('per_trade_risk_pct', '0.02', 'Dynamic per-trade risk ceiling percentage (Regime A / Kelly)', 'SYSTEM_BASELINE'), "
+        "('session_drawdown_limit_pct', '0.05', 'Dynamic session drawdown limit percentage', 'SYSTEM_BASELINE'), "
+        "('base_confidence', '0.85', 'Base confidence score for confirmed signals', 'SYSTEM_BASELINE');";
+    mysql_query(conn, seed_sql);
+
+    pool_->release(conn);
+    return true;
+}
+
+std::map<std::string, std::string> RoadmapDbClient::fetch_strategy_config() {
+    std::map<std::string, std::string> configs;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return configs;
+
+    const char* q = "SELECT config_key, config_value FROM cpp_strategy_config;";
+    if (mysql_query(conn, q) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                if (row[0] && row[1]) {
+                    configs[row[0]] = row[1];
+                }
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_strategy_config error: " << mysql_error(conn) << "\n";
+    }
+    pool_->release(conn);
+    return configs;
+}
+
+bool RoadmapDbClient::update_strategy_config_param(
+    const std::string& key,
+    const std::string& new_value,
+    const std::string& approved_by,
+    const std::string& reason
+) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_key = escape_string(conn, key);
+    std::string safe_val = escape_string(conn, new_value);
+    std::string safe_by  = escape_string(conn, approved_by.empty() ? "OPERATOR" : approved_by);
+    std::string safe_rsn = escape_string(conn, reason.empty() ? "Operational tuning" : reason);
+
+    // 1. Fetch old value
+    std::string old_val = "";
+    std::string sel = "SELECT config_value FROM cpp_strategy_config WHERE config_key = '" + safe_key + "';";
+    if (mysql_query(conn, sel.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                old_val = row[0];
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    // 2. Upsert config
+    std::string upsert = "INSERT INTO cpp_strategy_config (config_key, config_value, updated_by) VALUES ('"
+                       + safe_key + "', '" + safe_val + "', '" + safe_by + "') "
+                       + "ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), updated_by = VALUES(updated_by);";
+    if (mysql_query(conn, upsert.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] update_strategy_config_param upsert error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
+        return false;
+    }
+
+    // 3. Insert audit entry
+    std::string audit = "INSERT INTO cpp_strategy_config_audit (config_key, old_value, new_value, approved_by, reason, created_at) VALUES ('"
+                      + safe_key + "', '" + escape_string(conn, old_val) + "', '" + safe_val + "', '" + safe_by + "', '" + safe_rsn + "', NOW());";
+    if (mysql_query(conn, audit.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] update_strategy_config_param audit insert error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
+        return false;
+    }
+
+    bool ok = tx.commit();
+    pool_->release(conn);
+    return ok;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_strategy_config_audit(int limit) {
+    std::vector<std::map<std::string, std::string>> records;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return records;
+
+    std::string q = "SELECT id, config_key, IFNULL(old_value, ''), new_value, approved_by, IFNULL(reason, ''), DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') "
+                    "FROM cpp_strategy_config_audit ORDER BY id DESC LIMIT " + std::to_string(limit) + ";";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> r;
+                r["id"] = row[0] ? row[0] : "";
+                r["config_key"] = row[1] ? row[1] : "";
+                r["old_value"] = row[2] ? row[2] : "";
+                r["new_value"] = row[3] ? row[3] : "";
+                r["approved_by"] = row[4] ? row[4] : "";
+                r["reason"] = row[5] ? row[5] : "";
+                r["created_at"] = row[6] ? row[6] : "";
+                records.push_back(r);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return records;
+}
