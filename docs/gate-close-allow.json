@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "1915b98cb01ca5356d8c40dd4fd3ca3749af031c": {
+      "short": "1915b98",
+      "reason": "Trading Agent workstream — refactor(analytics): move Google Analytics GA4 tag from head to footer before closing body",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "2d8c742471aef34ab5e413c61eb9be14c041e0f1": {
       "short": "2d8c742",
       "reason": "Trading Agent workstream — feat(analytics): add Google Analytics GA4 tag to all public pages",
