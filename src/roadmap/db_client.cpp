@@ -2112,3 +2112,750 @@ bool RoadmapDbClient::execute_raw_sql(const std::string& sql) {
     pool_->release(conn);
     return ok;
 }
+
+// ============================================================================
+// Cookie-Less Privacy-Conscious Visitor Analytics Engine Implementation (v8)
+// ============================================================================
+#include "../analytics/visitor_tracker.hpp"
+#include <openssl/hmac.h>
+#include <openssl/sha.h>
+#include <openssl/rand.h>
+
+static std::string hmac_sha256_hex(const std::string& secret, const std::string& data) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    unsigned int len = SHA256_DIGEST_LENGTH;
+    HMAC(EVP_sha256(), secret.data(), secret.size(),
+         reinterpret_cast<const unsigned char*>(data.data()), data.size(),
+         hash, &len);
+    std::ostringstream ss;
+    for (unsigned int i = 0; i < len; ++i) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(hash[i]);
+    }
+    return ss.str();
+}
+
+static std::string generate_random_cid() {
+    unsigned char buf[24];
+    RAND_bytes(buf, sizeof(buf));
+    std::ostringstream ss;
+    ss << "cid_";
+    for (size_t i = 0; i < sizeof(buf); ++i) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(buf[i]);
+    }
+    return ss.str();
+}
+
+static std::string escape_sql_string(MYSQL* conn, const std::string& str) {
+    std::vector<char> buf(str.length() * 2 + 1);
+    mysql_real_escape_string(conn, buf.data(), str.c_str(), str.length());
+    return std::string(buf.data());
+}
+
+bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& event, 
+                                             const analytics::GeoLocationResult& geo, 
+                                             const std::string& secret) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    // Begin database transaction for strict atomicity & persistence gating
+    mysql_query(conn, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED;");
+    if (mysql_query(conn, "START TRANSACTION;") != 0) {
+        pool_->release(conn);
+        return false;
+    }
+
+    try {
+        std::string active_lookup_hash = hmac_sha256_hex(secret, event.canonical_ip);
+        std::string visitor_id;
+        bool is_new_visitor = false;
+
+        // 1. Resolve Active Visitor Identity
+        std::string q_vis = "SELECT id FROM analytics_visitors WHERE active_lookup_hash = '" + 
+                            escape_sql_string(conn, active_lookup_hash) + "' AND is_redacted = 0 LIMIT 1;";
+        if (mysql_query(conn, q_vis.c_str()) == 0) {
+            MYSQL_RES* res = mysql_store_result(conn);
+            if (res) {
+                MYSQL_ROW row = mysql_fetch_row(res);
+                if (row && row[0]) {
+                    visitor_id = row[0];
+                }
+                mysql_free_result(res);
+            }
+        }
+
+        if (visitor_id.empty()) {
+            visitor_id = generate_random_cid();
+            is_new_visitor = true;
+            std::ostringstream ins_vis;
+            ins_vis << "INSERT INTO analytics_visitors (id, active_lookup_hash, ip_address, ip_version, identity_generation, is_redacted, "
+                    << "first_seen_at, last_seen_at, total_visits, total_page_views, first_user_agent, latest_user_agent, "
+                    << "browser_name, browser_version, operating_system, os_version, device_type, device_family, "
+                    << "referrer_first, referrer_latest, is_bot, bot_name, identity_confidence) VALUES ("
+                    << "'" << visitor_id << "', "
+                    << "'" << escape_sql_string(conn, active_lookup_hash) << "', "
+                    << "'" << escape_sql_string(conn, event.canonical_ip) << "', "
+                    << "'" << event.ip_version << "', 1, 0, NOW(), NOW(), 0, 0, "
+                    << "'" << escape_sql_string(conn, event.user_agent.substr(0, 512)) << "', "
+                    << "'" << escape_sql_string(conn, event.user_agent.substr(0, 512)) << "', "
+                    << "'" << escape_sql_string(conn, event.browser_name) << "', "
+                    << "'" << escape_sql_string(conn, event.browser_version) << "', "
+                    << "'" << escape_sql_string(conn, event.os_name) << "', "
+                    << "'" << escape_sql_string(conn, event.os_version) << "', "
+                    << "'" << escape_sql_string(conn, event.device_type) << "', "
+                    << "'" << escape_sql_string(conn, event.device_family) << "', "
+                    << "'" << escape_sql_string(conn, event.referer.substr(0, 512)) << "', "
+                    << "'" << escape_sql_string(conn, event.referer.substr(0, 512)) << "', "
+                    << (event.is_bot ? 1 : 0) << ", "
+                    << "'" << escape_sql_string(conn, event.bot_name) << "', 'MEDIUM');";
+
+            if (mysql_query(conn, ins_vis.str().c_str()) != 0) {
+                // Duplicate key race check on uq_active_lookup_hash
+                if (mysql_errno(conn) == 1062) {
+                    visitor_id.clear();
+                    std::string q_retry = "SELECT id FROM analytics_visitors WHERE active_lookup_hash = '" + 
+                                          escape_sql_string(conn, active_lookup_hash) + "' AND is_redacted = 0 LIMIT 1;";
+                    for (int attempt = 0; attempt < 15 && visitor_id.empty(); ++attempt) {
+                        if (mysql_query(conn, q_retry.c_str()) == 0) {
+                            MYSQL_RES* res = mysql_store_result(conn);
+                            if (res) {
+                                MYSQL_ROW row = mysql_fetch_row(res);
+                                if (row && row[0]) {
+                                    visitor_id = row[0];
+                                    is_new_visitor = false;
+                                }
+                                mysql_free_result(res);
+                            }
+                        }
+                        if (visitor_id.empty()) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                        }
+                    }
+                } else {
+                    std::cerr << "❌ [Analytics] Visitor Insert Failed: " << mysql_error(conn) << "\n";
+                    mysql_query(conn, "ROLLBACK;");
+                    pool_->release(conn);
+                    return false;
+                }
+            }
+        }
+
+        // 2. Resolve Device (Deduplicated by device_signature)
+        long long device_id = 0;
+        std::ostringstream ins_dev;
+        ins_dev << "INSERT INTO analytics_devices (visitor_id, device_signature, device_type, device_family, "
+                << "operating_system, operating_system_version, browser, browser_version, user_agent, "
+                << "language, accepted_languages, first_seen_at, last_seen_at, seen_count) VALUES ("
+                << "'" << visitor_id << "', "
+                << "'" << escape_sql_string(conn, event.device_signature) << "', "
+                << "'" << escape_sql_string(conn, event.device_type) << "', "
+                << "'" << escape_sql_string(conn, event.device_family) << "', "
+                << "'" << escape_sql_string(conn, event.os_name) << "', "
+                << "'" << escape_sql_string(conn, event.os_version) << "', "
+                << "'" << escape_sql_string(conn, event.browser_name) << "', "
+                << "'" << escape_sql_string(conn, event.browser_version) << "', "
+                << "'" << escape_sql_string(conn, event.user_agent.substr(0, 512)) << "', "
+                << "'" << escape_sql_string(conn, event.accept_language.substr(0, 32)) << "', "
+                << "'" << escape_sql_string(conn, event.accept_language.substr(0, 255)) << "', "
+                << "NOW(), NOW(), 1) "
+                << "ON DUPLICATE KEY UPDATE last_seen_at = NOW(), seen_count = seen_count + 1, "
+                << "user_agent = VALUES(user_agent), id = LAST_INSERT_ID(id);";
+        if (mysql_query(conn, ins_dev.str().c_str()) == 0) {
+            device_id = mysql_insert_id(conn);
+        }
+
+        // 3. Resolve Location (One approximate location record per visitor)
+        long long location_id = 0;
+        std::ostringstream ins_loc;
+        ins_loc << "INSERT INTO analytics_locations (visitor_id, country, country_code, region, city, "
+                << "postal_code, latitude, longitude, timezone, continent, isp, asn, source, disclaimer, looked_up_at) VALUES ("
+                << "'" << visitor_id << "', "
+                << "'" << escape_sql_string(conn, geo.country) << "', "
+                << "'" << escape_sql_string(conn, geo.country_code) << "', "
+                << "'" << escape_sql_string(conn, geo.region) << "', "
+                << "'" << escape_sql_string(conn, geo.city) << "', "
+                << "'" << escape_sql_string(conn, geo.postal_code) << "', "
+                << geo.latitude << ", " << geo.longitude << ", "
+                << "'" << escape_sql_string(conn, geo.timezone) << "', "
+                << "'" << escape_sql_string(conn, geo.continent) << "', "
+                << "'" << escape_sql_string(conn, geo.isp) << "', "
+                << "'" << escape_sql_string(conn, geo.asn) << "', "
+                << "'" << escape_sql_string(conn, geo.source) << "', "
+                << "'" << escape_sql_string(conn, geo.disclaimer) << "', NOW()) "
+                << "ON DUPLICATE KEY UPDATE looked_up_at = NOW(), id = LAST_INSERT_ID(id);";
+        if (mysql_query(conn, ins_loc.str().c_str()) == 0) {
+            location_id = mysql_insert_id(conn);
+        }
+
+        // 4. Resolve Session (Authoritative Multi-Process Concurrency & 30-min Inactivity Window)
+        long long session_id = 0;
+        int new_session_increment = 0;
+        std::string q_sess = "SELECT id, last_seen_at, TIMESTAMPDIFF(SECOND, last_seen_at, NOW()) "
+                             "FROM analytics_sessions WHERE visitor_id = '" + visitor_id + "' AND is_active = 1;";
+        bool has_active_session = false;
+        long long active_sess_id = 0;
+        long long inactivity_gap = 999999;
+
+        if (mysql_query(conn, q_sess.c_str()) == 0) {
+            MYSQL_RES* res = mysql_store_result(conn);
+            if (res) {
+                MYSQL_ROW row = mysql_fetch_row(res);
+                if (row && row[0]) {
+                    has_active_session = true;
+                    active_sess_id = std::stoll(row[0]);
+                    if (row[2]) inactivity_gap = std::stoll(row[2]);
+                }
+                mysql_free_result(res);
+            }
+        }
+
+        if (has_active_session && inactivity_gap < 1800) {
+            // Inactivity gap < 30 minutes: Continue active session
+            session_id = active_sess_id;
+            std::ostringstream upd_sess;
+            upd_sess << "UPDATE analytics_sessions SET "
+                     << "last_seen_at = NOW(), "
+                     << "duration_seconds = TIMESTAMPDIFF(SECOND, first_seen_at, NOW()), "
+                     << "page_count = page_count + 1, "
+                     << "exit_page = '" << escape_sql_string(conn, event.path) << "' "
+                     << "WHERE id = " << session_id << " AND is_active = 1;";
+            mysql_query(conn, upd_sess.str().c_str());
+        } else {
+            // Inactivity gap >= 30 minutes or no active session: Finalize previous if exists
+            if (has_active_session) {
+                std::string q_close = "UPDATE analytics_sessions SET is_active = NULL WHERE id = " + std::to_string(active_sess_id) + ";";
+                mysql_query(conn, q_close.c_str());
+            }
+
+            // Create brand new session
+            new_session_increment = 1;
+            auto epoch_sec = std::chrono::duration_cast<std::chrono::seconds>(event.captured_timestamp.time_since_epoch()).count();
+            std::string session_key = hmac_sha256_hex(secret, visitor_id + ":" + std::to_string(epoch_sec));
+
+            std::ostringstream ins_sess;
+            ins_sess << "INSERT INTO analytics_sessions (visitor_id, session_key, is_active, first_seen_at, last_seen_at, "
+                     << "page_count, duration_seconds, entry_page, exit_page, referrer, device_id, location_id, is_bot) VALUES ("
+                     << "'" << visitor_id << "', "
+                     << "'" << session_key << "', 1, NOW(), NOW(), 1, 0, "
+                     << "'" << escape_sql_string(conn, event.path) << "', "
+                     << "'" << escape_sql_string(conn, event.path) << "', "
+                     << "'" << escape_sql_string(conn, event.referer.substr(0, 512)) << "', "
+                     << (device_id > 0 ? std::to_string(device_id) : "NULL") << ", "
+                     << (location_id > 0 ? std::to_string(location_id) : "NULL") << ", "
+                     << (event.is_bot ? 1 : 0) << ");";
+
+            if (mysql_query(conn, ins_sess.str().c_str()) == 0) {
+                session_id = mysql_insert_id(conn);
+            } else if (mysql_errno(conn) == 1062) {
+                // Handled race condition: Another process just inserted active session
+                session_id = 0;
+                std::string q_retry_sess = "SELECT id FROM analytics_sessions WHERE visitor_id = '" + visitor_id + "' AND is_active = 1;";
+                for (int attempt = 0; attempt < 15 && session_id == 0; ++attempt) {
+                    if (mysql_query(conn, q_retry_sess.c_str()) == 0) {
+                        MYSQL_RES* res = mysql_store_result(conn);
+                        if (res) {
+                            MYSQL_ROW row = mysql_fetch_row(res);
+                            if (row && row[0]) {
+                                session_id = std::stoll(row[0]);
+                                new_session_increment = 0;
+                            }
+                            mysql_free_result(res);
+                        }
+                    }
+                    if (session_id == 0) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                    }
+                }
+                if (session_id > 0) {
+                    // Update it
+                    std::string upd = "UPDATE analytics_sessions SET page_count = page_count + 1, last_seen_at = NOW(), "
+                                      "exit_page = '" + escape_sql_string(conn, event.path) + "' WHERE id = " + std::to_string(session_id) + ";";
+                    mysql_query(conn, upd.c_str());
+                }
+            }
+        }
+
+        if (session_id <= 0) {
+            std::cerr << "❌ [Analytics] Missing session_id before page visit insert\n";
+            mysql_query(conn, "ROLLBACK;");
+            pool_->release(conn);
+            return false;
+        }
+
+        // 5. Insert Page Visit Record
+        std::ostringstream ins_pv;
+        ins_pv << "INSERT INTO analytics_page_visits (visitor_id, session_id, request_id, page_url, path, query_string, "
+               << "page_title, referrer_url, http_method, status_code, visited_at, response_time_ms, user_agent, "
+               << "browser_name, os_name, device_type, is_bot) VALUES ("
+               << "'" << visitor_id << "', "
+               << session_id << ", "
+               << "'" << escape_sql_string(conn, event.request_id) << "', "
+               << "'" << escape_sql_string(conn, event.full_url.substr(0, 1024)) << "', "
+               << "'" << escape_sql_string(conn, event.path.substr(0, 255)) << "', "
+               << "'" << escape_sql_string(conn, event.sanitized_query_string.substr(0, 512)) << "', "
+               << "'" << escape_sql_string(conn, event.page_title.substr(0, 255)) << "', "
+               << "'" << escape_sql_string(conn, event.referer.substr(0, 512)) << "', "
+               << "'" << escape_sql_string(conn, event.http_method) << "', "
+               << event.status_code << ", NOW(), "
+               << event.response_time_ms << ", "
+               << "'" << escape_sql_string(conn, event.user_agent.substr(0, 512)) << "', "
+               << "'" << escape_sql_string(conn, event.browser_name) << "', "
+               << "'" << escape_sql_string(conn, event.os_name) << "', "
+               << "'" << escape_sql_string(conn, event.device_type) << "', "
+               << (event.is_bot ? 1 : 0) << ");";
+
+        if (mysql_query(conn, ins_pv.str().c_str()) != 0) {
+            std::cerr << "❌ [Analytics] Page Visit Insert Failed: " << mysql_error(conn) << "\n";
+            mysql_query(conn, "ROLLBACK;");
+            pool_->release(conn);
+            return false;
+        }
+
+        // 6. Persistence-Gated Lifetime Counter Increment
+        std::ostringstream upd_vis;
+        upd_vis << "UPDATE analytics_visitors SET "
+                << "total_page_views = total_page_views + 1, "
+                << "total_visits = total_visits + " << new_session_increment << ", "
+                << "last_seen_at = NOW(), "
+                << "latest_user_agent = '" << escape_sql_string(conn, event.user_agent.substr(0, 512)) << "', "
+                << "referrer_latest = '" << escape_sql_string(conn, event.referer.substr(0, 512)) << "' "
+                << "WHERE id = '" << visitor_id << "';";
+        mysql_query(conn, upd_vis.str().c_str());
+
+        // Commit transaction
+        if (mysql_query(conn, "COMMIT;") != 0) {
+            std::cerr << "❌ [Analytics] Commit Failed: " << mysql_error(conn) << "\n";
+            mysql_query(conn, "ROLLBACK;");
+            pool_->release(conn);
+            return false;
+        }
+
+        pool_->release(conn);
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "❌ [Analytics] Exception: " << e.what() << "\n";
+        mysql_query(conn, "ROLLBACK;");
+        pool_->release(conn);
+        return false;
+    } catch (...) {
+        std::cerr << "❌ [Analytics] Unknown Exception\n";
+        mysql_query(conn, "ROLLBACK;");
+        pool_->release(conn);
+        return false;
+    }
+}
+
+void RoadmapDbClient::run_analytics_retention_purge(int raw_ip_days, int pv_days, int sess_days, int loc_days) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return;
+
+    // Invariant: sess_days >= pv_days
+    if (sess_days < pv_days) {
+        sess_days = pv_days;
+    }
+
+    std::cout << "🧹 [AnalyticsRetention] Running purge (raw_ip=" << raw_ip_days << "d, pv=" << pv_days 
+              << "d, sess=" << sess_days << "d, loc=" << loc_days << "d)...\n";
+
+    // 1. Redact Raw IP & sever active lookup key
+    std::string q_redact = "UPDATE analytics_visitors SET ip_address = NULL, active_lookup_hash = NULL, is_redacted = 1, updated_at = NOW() "
+                           "WHERE is_redacted = 0 AND last_seen_at < NOW() - INTERVAL " + std::to_string(raw_ip_days) + " DAY;";
+    mysql_query(conn, q_redact.c_str());
+
+    // 2. Prune detailed page visit event rows
+    std::string q_pv = "DELETE FROM analytics_page_visits WHERE visited_at < NOW() - INTERVAL " + std::to_string(pv_days) + " DAY;";
+    mysql_query(conn, q_pv.c_str());
+
+    // 3. Prune closed session rows
+    std::string q_sess = "DELETE FROM analytics_sessions WHERE is_active IS NULL AND last_seen_at < NOW() - INTERVAL " + std::to_string(sess_days) + " DAY;";
+    mysql_query(conn, q_sess.c_str());
+
+    // 4. Prune orphaned/stale location records
+    std::string q_loc = "DELETE FROM analytics_locations WHERE looked_up_at < NOW() - INTERVAL " + std::to_string(loc_days) + " DAY;";
+    mysql_query(conn, q_loc.c_str());
+
+    std::cout << "✅ [AnalyticsRetention] Purge cycle completed.\n";
+    pool_->release(conn);
+}
+
+std::map<std::string, std::string> RoadmapDbClient::fetch_analytics_summary_stats() {
+    std::map<std::string, std::string> stats;
+    stats["total_visitors"] = "0";
+    stats["total_page_views"] = "0";
+    stats["total_visits"] = "0";
+    stats["lifetime_page_views"] = "0";
+    stats["lifetime_visits"] = "0";
+    stats["unique_estimated_visitors"] = "0";
+    stats["retained_page_views"] = "0";
+    stats["retained_sessions"] = "0";
+    stats["bounce_rate_pct"] = "0.0";
+    stats["visitors_today"] = "0";
+    stats["visitors_week"] = "0";
+    stats["page_views_today"] = "0";
+    stats["page_views_week"] = "0";
+    stats["bot_page_views"] = "0";
+
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return stats;
+
+    std::string q = "SELECT "
+                    "(SELECT COUNT(*) FROM analytics_visitors) AS total_visitors, "
+                    "(SELECT IFNULL(SUM(total_page_views), 0) FROM analytics_visitors) AS lifetime_pvs, "
+                    "(SELECT IFNULL(SUM(total_visits), 0) FROM analytics_visitors) AS lifetime_visits, "
+                    "(SELECT COUNT(*) FROM analytics_page_visits) AS retained_pvs, "
+                    "(SELECT COUNT(*) FROM analytics_sessions) AS retained_sessions, "
+                    "(SELECT COUNT(DISTINCT visitor_id) FROM analytics_page_visits WHERE visited_at >= CURDATE()) AS visitors_today, "
+                    "(SELECT COUNT(*) FROM analytics_page_visits WHERE visited_at >= CURDATE()) AS pvs_today, "
+                    "(SELECT COUNT(*) FROM analytics_page_visits WHERE is_bot = 1) AS bot_pvs, "
+                    "(SELECT COUNT(*) FROM analytics_visitors WHERE is_redacted = 0) AS active_visitors;";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                stats["total_visitors"] = row[0] ? row[0] : "0";
+                stats["lifetime_page_views"] = row[1] ? row[1] : "0";
+                stats["total_page_views"] = stats["lifetime_page_views"];
+                stats["lifetime_visits"] = row[2] ? row[2] : "0";
+                stats["total_visits"] = stats["lifetime_visits"];
+                stats["retained_page_views"] = row[3] ? row[3] : "0";
+                stats["retained_sessions"] = row[4] ? row[4] : "0";
+                stats["visitors_today"] = row[5] ? row[5] : "0";
+                stats["page_views_today"] = row[6] ? row[6] : "0";
+                stats["bot_page_views"] = row[7] ? row[7] : "0";
+                stats["unique_estimated_visitors"] = row[8] ? row[8] : "0";
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    std::string q_bounce = "SELECT "
+                           "(SELECT COUNT(*) FROM analytics_sessions WHERE page_count = 1) * 100.0 / "
+                           "NULLIF((SELECT COUNT(*) FROM analytics_sessions), 0);";
+    if (mysql_query(conn, q_bounce.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try {
+                    double b = std::stod(row[0]);
+                    std::ostringstream bss;
+                    bss << std::fixed << std::setprecision(1) << b;
+                    stats["bounce_rate_pct"] = bss.str();
+                } catch (...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    pool_->release(conn);
+    return stats;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics_popular_pages(int limit) {
+    std::vector<std::map<std::string, std::string>> pages;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return pages;
+
+    std::string q = "SELECT path, COUNT(*) as cnt FROM analytics_page_visits WHERE is_bot = 0 GROUP BY path ORDER BY cnt DESC LIMIT " + std::to_string(limit) + ";";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> m;
+                m["path"] = row[0] ? row[0] : "/";
+                m["count"] = row[1] ? row[1] : "0";
+                pages.push_back(m);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return pages;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics_countries(int limit) {
+    std::vector<std::map<std::string, std::string>> countries;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return countries;
+
+    std::string q = "SELECT country, country_code, COUNT(*) as cnt FROM analytics_locations GROUP BY country, country_code ORDER BY cnt DESC LIMIT " + std::to_string(limit) + ";";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> m;
+                m["country"] = row[0] ? row[0] : "Unknown";
+                m["country_code"] = row[1] ? row[1] : "XX";
+                m["count"] = row[2] ? row[2] : "0";
+                countries.push_back(m);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return countries;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics_browsers() {
+    std::vector<std::map<std::string, std::string>> items;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return items;
+
+    std::string q = "SELECT browser, COUNT(*) as cnt FROM analytics_devices GROUP BY browser ORDER BY cnt DESC LIMIT 6;";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> m;
+                m["browser"] = row[0] ? row[0] : "Other";
+                m["count"] = row[1] ? row[1] : "0";
+                items.push_back(m);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return items;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics_os() {
+    std::vector<std::map<std::string, std::string>> items;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return items;
+
+    std::string q = "SELECT operating_system, COUNT(*) as cnt FROM analytics_devices GROUP BY operating_system ORDER BY cnt DESC LIMIT 6;";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> m;
+                m["os"] = row[0] ? row[0] : "Other";
+                m["count"] = row[1] ? row[1] : "0";
+                items.push_back(m);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return items;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics_devices() {
+    std::vector<std::map<std::string, std::string>> items;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return items;
+
+    std::string q = "SELECT device_type, COUNT(*) as cnt FROM analytics_devices GROUP BY device_type ORDER BY cnt DESC LIMIT 5;";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> m;
+                m["device_type"] = row[0] ? row[0] : "desktop";
+                m["count"] = row[1] ? row[1] : "0";
+                items.push_back(m);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return items;
+}
+
+std::pair<int, std::vector<std::map<std::string, std::string>>> RoadmapDbClient::fetch_admin_visitors(
+    int page, int limit, const std::string& search_ip, const std::string& country_filter, int bot_filter) {
+    std::vector<std::map<std::string, std::string>> records;
+    int total_count = 0;
+
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return {0, records};
+
+    if (page < 1) page = 1;
+    if (limit < 1 || limit > 100) limit = 25;
+    int offset = (page - 1) * limit;
+
+    std::string where = "WHERE 1=1 ";
+    if (!search_ip.empty()) {
+        where += "AND v.ip_address LIKE '%" + escape_sql_string(conn, search_ip) + "%' ";
+    }
+    if (!country_filter.empty()) {
+        where += "AND l.country = '" + escape_sql_string(conn, country_filter) + "' ";
+    }
+    if (bot_filter >= 0) {
+        where += "AND v.is_bot = " + std::to_string(bot_filter) + " ";
+    }
+
+    std::string count_q = "SELECT COUNT(*) FROM analytics_visitors v LEFT JOIN analytics_locations l ON v.id = l.visitor_id " + where + ";";
+    if (mysql_query(conn, count_q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) total_count = std::stoi(row[0]);
+            mysql_free_result(res);
+        }
+    }
+
+    std::string q = "SELECT v.id, IFNULL(v.ip_address, 'Redacted'), v.ip_version, v.total_visits, v.total_page_views, "
+                    "v.browser_name, v.operating_system, v.device_type, v.is_bot, v.identity_confidence, "
+                    "DATE_FORMAT(v.first_seen_at, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(v.last_seen_at, '%Y-%m-%d %H:%i:%s'), "
+                    "IFNULL(l.country, 'Unknown'), IFNULL(l.city, 'Unknown') "
+                    "FROM analytics_visitors v LEFT JOIN analytics_locations l ON v.id = l.visitor_id "
+                    + where + " ORDER BY v.last_seen_at DESC LIMIT " + std::to_string(limit) + " OFFSET " + std::to_string(offset) + ";";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> r;
+                r["id"] = row[0] ? row[0] : "";
+                r["ip_address"] = row[1] ? row[1] : "Redacted";
+                r["ip_version"] = row[2] ? row[2] : "IPv4";
+                r["total_visits"] = row[3] ? row[3] : "0";
+                r["total_page_views"] = row[4] ? row[4] : "0";
+                r["browser"] = row[5] ? row[5] : "Other";
+                r["os"] = row[6] ? row[6] : "Other";
+                r["device_type"] = row[7] ? row[7] : "desktop";
+                r["is_bot"] = row[8] ? row[8] : "0";
+                r["confidence"] = row[9] ? row[9] : "MEDIUM";
+                r["first_seen_at"] = row[10] ? row[10] : "";
+                r["last_seen_at"] = row[11] ? row[11] : "";
+                r["country"] = row[12] ? row[12] : "Unknown";
+                r["city"] = row[13] ? row[13] : "Unknown";
+                records.push_back(r);
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    pool_->release(conn);
+    return {total_count, records};
+}
+
+std::map<std::string, std::string> RoadmapDbClient::fetch_admin_visitor_detail(const std::string& visitor_id) {
+    std::map<std::string, std::string> d;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return d;
+
+    std::string q = "SELECT v.id, IFNULL(v.ip_address, 'Redacted'), v.ip_version, v.identity_generation, v.is_redacted, "
+                    "v.total_visits, v.total_page_views, v.browser_name, v.browser_version, v.operating_system, v.os_version, "
+                    "v.device_type, v.device_family, v.is_bot, IFNULL(v.bot_name, ''), v.identity_confidence, "
+                    "DATE_FORMAT(v.first_seen_at, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(v.last_seen_at, '%Y-%m-%d %H:%i:%s'), "
+                    "IFNULL(v.first_user_agent, ''), IFNULL(v.latest_user_agent, ''), "
+                    "IFNULL(l.country, 'Unknown'), IFNULL(l.region, 'Unknown'), IFNULL(l.city, 'Unknown'), "
+                    "IFNULL(l.timezone, 'UTC'), IFNULL(l.isp, 'Unknown'), IFNULL(l.asn, 'Unknown') "
+                    "FROM analytics_visitors v LEFT JOIN analytics_locations l ON v.id = l.visitor_id "
+                    "WHERE v.id = '" + escape_sql_string(conn, visitor_id) + "' LIMIT 1;";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                d["id"] = row[0] ? row[0] : "";
+                d["ip_address"] = row[1] ? row[1] : "Redacted";
+                d["ip_version"] = row[2] ? row[2] : "IPv4";
+                d["identity_generation"] = row[3] ? row[3] : "1";
+                d["is_redacted"] = row[4] ? row[4] : "0";
+                d["total_visits"] = row[5] ? row[5] : "0";
+                d["total_page_views"] = row[6] ? row[6] : "0";
+                d["browser_name"] = row[7] ? row[7] : "";
+                d["browser_version"] = row[8] ? row[8] : "";
+                d["os_name"] = row[9] ? row[9] : "";
+                d["os_version"] = row[10] ? row[10] : "";
+                d["device_type"] = row[11] ? row[11] : "desktop";
+                d["device_family"] = row[12] ? row[12] : "PC";
+                d["is_bot"] = row[13] ? row[13] : "0";
+                d["bot_name"] = row[14] ? row[14] : "";
+                d["confidence"] = row[15] ? row[15] : "MEDIUM";
+                d["first_seen_at"] = row[16] ? row[16] : "";
+                d["last_seen_at"] = row[17] ? row[17] : "";
+                d["first_user_agent"] = row[18] ? row[18] : "";
+                d["latest_user_agent"] = row[19] ? row[19] : "";
+                d["country"] = row[20] ? row[20] : "Unknown";
+                d["region"] = row[21] ? row[21] : "Unknown";
+                d["city"] = row[22] ? row[22] : "Unknown";
+                d["timezone"] = row[23] ? row[23] : "UTC";
+                d["isp"] = row[24] ? row[24] : "Unknown";
+                d["asn"] = row[25] ? row[25] : "Unknown";
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return d;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_admin_visitor_page_history(const std::string& visitor_id, int limit) {
+    std::vector<std::map<std::string, std::string>> records;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return records;
+
+    std::string q = "SELECT path, http_method, status_code, DATE_FORMAT(visited_at, '%Y-%m-%d %H:%i:%s'), "
+                    "response_time_ms, IFNULL(referrer_url, ''), session_id "
+                    "FROM analytics_page_visits WHERE visitor_id = '" + escape_sql_string(conn, visitor_id) + "' "
+                    "ORDER BY visited_at DESC LIMIT " + std::to_string(limit) + ";";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> r;
+                r["path"] = row[0] ? row[0] : "";
+                r["http_method"] = row[1] ? row[1] : "GET";
+                r["status_code"] = row[2] ? row[2] : "200";
+                r["visited_at"] = row[3] ? row[3] : "";
+                r["response_time_ms"] = row[4] ? row[4] : "0";
+                r["referrer"] = row[5] ? row[5] : "";
+                r["session_id"] = row[6] ? row[6] : "0";
+                records.push_back(r);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return records;
+}
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_admin_visitor_sessions(const std::string& visitor_id, int limit) {
+    std::vector<std::map<std::string, std::string>> records;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return records;
+
+    std::string q = "SELECT id, session_key, DATE_FORMAT(first_seen_at, '%Y-%m-%d %H:%i:%s'), "
+                    "DATE_FORMAT(last_seen_at, '%Y-%m-%d %H:%i:%s'), page_count, duration_seconds, "
+                    "IFNULL(entry_page, ''), IFNULL(exit_page, ''), IFNULL(is_active, 0) "
+                    "FROM analytics_sessions WHERE visitor_id = '" + escape_sql_string(conn, visitor_id) + "' "
+                    "ORDER BY first_seen_at DESC LIMIT " + std::to_string(limit) + ";";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> r;
+                r["id"] = row[0] ? row[0] : "";
+                r["session_key"] = row[1] ? row[1] : "";
+                r["first_seen_at"] = row[2] ? row[2] : "";
+                r["last_seen_at"] = row[3] ? row[3] : "";
+                r["page_count"] = row[4] ? row[4] : "1";
+                r["duration_seconds"] = row[5] ? row[5] : "0";
+                r["entry_page"] = row[6] ? row[6] : "";
+                r["exit_page"] = row[7] ? row[7] : "";
+                r["is_active"] = (row[8] && std::string(row[8]) == "1") ? "Active" : "Closed";
+                records.push_back(r);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return records;
+}
+

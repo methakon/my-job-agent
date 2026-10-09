@@ -26,6 +26,11 @@ public:
     std::string render_swagger_ui_page(bool is_authenticated = false);
     std::string render_openapi_json();
 
+    // Visitor Tracking & Analytics System (Cookie-less, Privacy-Conscious)
+    std::string render_visitor_info_page(bool is_authenticated = false);
+    std::string render_admin_visitors_page(bool is_authenticated, int page = 1, int limit = 20, const std::string& search = "", const std::string& country = "", int bot_filter = -1);
+    std::string render_admin_visitor_detail_page(bool is_authenticated, const std::string& visitor_id);
+
 private:
     int port_;
     std::shared_ptr<RoadmapDbClient> db_client_;

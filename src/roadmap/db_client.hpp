@@ -14,6 +14,11 @@
 
 struct CanonicalOptionTick;
 
+namespace analytics {
+    struct AnalyticsEvent;
+    struct GeoLocationResult;
+}
+
 struct ChecklistItem {
     int id;
     int item_order;
@@ -313,6 +318,20 @@ public:
     bool update_strategy_config_param(const std::string& key, const std::string& new_value, const std::string& approved_by, const std::string& reason);
     std::vector<std::map<std::string, std::string>> fetch_strategy_config_audit(int limit = 20);
     bool execute_raw_sql(const std::string& sql);
+
+    // Cookie-Less Privacy-Conscious Visitor Analytics Engine (v8 Master)
+    bool record_analytics_event(const analytics::AnalyticsEvent& event, const analytics::GeoLocationResult& geo, const std::string& secret);
+    void run_analytics_retention_purge(int raw_ip_days, int pv_days, int sess_days, int loc_days);
+    std::map<std::string, std::string> fetch_analytics_summary_stats();
+    std::vector<std::map<std::string, std::string>> fetch_analytics_popular_pages(int limit = 10);
+    std::vector<std::map<std::string, std::string>> fetch_analytics_countries(int limit = 10);
+    std::vector<std::map<std::string, std::string>> fetch_analytics_browsers();
+    std::vector<std::map<std::string, std::string>> fetch_analytics_os();
+    std::vector<std::map<std::string, std::string>> fetch_analytics_devices();
+    std::pair<int, std::vector<std::map<std::string, std::string>>> fetch_admin_visitors(int page, int limit, const std::string& search_ip, const std::string& country_filter, int bot_filter);
+    std::map<std::string, std::string> fetch_admin_visitor_detail(const std::string& visitor_id);
+    std::vector<std::map<std::string, std::string>> fetch_admin_visitor_page_history(const std::string& visitor_id, int limit = 50);
+    std::vector<std::map<std::string, std::string>> fetch_admin_visitor_sessions(const std::string& visitor_id, int limit = 20);
 
 private:
     std::shared_ptr<MySQLConnectionPool> pool_;        // Remote Server pool for common data & tokens

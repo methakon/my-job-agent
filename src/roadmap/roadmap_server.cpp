@@ -3,6 +3,7 @@
 #include "../common/crypto_util.hpp"
 #include "../engine/market_calendar.hpp"
 #include "../engine/strategy_config_manager.hpp"
+#include "../analytics/visitor_tracker.hpp"
 #include <iostream>
 #include <sstream>
 #include <csignal>
@@ -13,6 +14,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <thread>
 #include <iomanip>
 #include <fstream>
@@ -57,10 +59,12 @@ static std::string render_nav_header(bool is_authenticated) {
        << "  <div class=\"nav-links\">"
        << "    <a href=\"/\" class=\"nav-item\">🏠 Home</a>"
        << "    <a href=\"/project-status\" class=\"nav-item\">📋 Project Roadmap</a>"
-       << "    <a href=\"/docs\" class=\"nav-item\">📖 API Docs (Swagger)</a>";
+       << "    <a href=\"/docs\" class=\"nav-item\">📖 API Docs (Swagger)</a>"
+       << "    <a href=\"/visitor-info\" class=\"nav-item\">🌐 Visitor Analytics</a>";
 
     if (is_authenticated) {
-        ss << "    <a href=\"/dashboard\" class=\"nav-item\" style=\"color:#58a6ff;\">📊 User Dashboard</a>"
+        ss << "    <a href=\"/admin/visitors\" class=\"nav-item\" style=\"color:#e0a83c;\">👥 Visitors Admin</a>"
+           << "    <a href=\"/dashboard\" class=\"nav-item\" style=\"color:#58a6ff;\">📊 User Dashboard</a>"
            << "    <a href=\"/health\" class=\"nav-item\" target=\"_blank\">⚡ System Health</a>"
            << "    <span class=\"badge ok\">Operator Authenticated</span>"
            << "    <form style=\"display:inline\" method=\"post\" action=\"/auth/logout\"><button type=\"submit\" class=\"nav-btn\">Logout</button></form>";
@@ -1617,6 +1621,500 @@ std::string RoadmapServer::render_health_page(bool is_authenticated) {
     return ss.str();
 }
 
+static std::string extract_header_val(const std::string& req, const std::string& header_name) {
+    std::string needle = "\n" + header_name + ":";
+    size_t pos = req.find(needle);
+    if (pos == std::string::npos) {
+        if (req.rfind(header_name + ":", 0) == 0) {
+            pos = 0;
+            needle = header_name + ":";
+        } else {
+            size_t header_end = req.find("\r\n\r\n");
+            if (header_end == std::string::npos) header_end = req.size();
+            std::string lower_hdr = header_name;
+            std::transform(lower_hdr.begin(), lower_hdr.end(), lower_hdr.begin(), ::tolower);
+            std::string sub = req.substr(0, header_end);
+            std::string lower_sub = sub;
+            std::transform(lower_sub.begin(), lower_sub.end(), lower_sub.begin(), ::tolower);
+            pos = lower_sub.find("\n" + lower_hdr + ":");
+            if (pos != std::string::npos) {
+                needle = "\n" + lower_hdr + ":";
+            }
+        }
+    }
+    if (pos == std::string::npos) return "";
+    size_t start = pos + needle.length();
+    size_t end = req.find("\r\n", start);
+    if (end == std::string::npos) end = req.find("\n", start);
+    if (end == std::string::npos) return "";
+    std::string val = req.substr(start, end - start);
+    size_t first = val.find_first_not_of(" \t");
+    if (first == std::string::npos) return "";
+    val = val.substr(first);
+    while (!val.empty() && (val.back() == '\r' || val.back() == ' ' || val.back() == '\t')) val.pop_back();
+    return val;
+}
+
+std::string RoadmapServer::render_visitor_info_page(bool is_authenticated) {
+    std::map<std::string, std::string> summary;
+    std::vector<std::map<std::string, std::string>> top_pages;
+    std::vector<std::map<std::string, std::string>> countries;
+    std::vector<std::map<std::string, std::string>> browsers;
+    std::vector<std::map<std::string, std::string>> os_list;
+    std::vector<std::map<std::string, std::string>> devices;
+
+    if (db_client_) {
+        summary = db_client_->fetch_analytics_summary_stats();
+        top_pages = db_client_->fetch_analytics_popular_pages(10);
+        countries = db_client_->fetch_analytics_countries(10);
+        browsers = db_client_->fetch_analytics_browsers();
+        os_list = db_client_->fetch_analytics_os();
+        devices = db_client_->fetch_analytics_devices();
+    }
+    auto& tracker = analytics::VisitorTracker::instance();
+
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>Visitor Analytics &amp; Privacy Intelligence — C++ Autonomous Agent Platform</title>"
+       << "<style>"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
+       << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:0}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn-link,.nav-btn{background:#238636;color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".container{max-width:1150px;margin:30px auto;padding:0 20px}"
+       << ".hero{background:linear-gradient(135deg, #161b22 0%, #0d1117 100%);border:1px solid #30363d;border-radius:14px;padding:28px;margin-bottom:24px}"
+       << ".hero h1{font-size:26px;margin:0 0 8px;color:#58a6ff}"
+       << ".grid-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}"
+       << ".stat-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px;text-align:center}"
+       << ".stat-card .val{font-size:26px;font-weight:700;color:var(--text);margin-top:6px}"
+       << ".stat-card .lbl{color:var(--dim);font-size:12.5px;text-transform:uppercase;letter-spacing:0.5px}"
+       << ".stat-card .sub{color:var(--dim);font-size:11.5px;margin-top:4px}"
+       << ".grid-panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;margin-bottom:24px}"
+       << ".panel{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:22px}"
+       << ".panel h3{margin-top:0;color:#58a6ff;font-size:16.5px;margin-bottom:14px;display:flex;justify-space:space-between;align-items:center}"
+       << ".table-sm{width:100%;border-collapse:collapse;font-size:13px}"
+       << ".table-sm th{text-align:left;color:var(--dim);padding:8px 6px;border-bottom:1px solid #30363d;font-weight:600}"
+       << ".table-sm td{padding:8px 6px;border-bottom:1px solid #21262d}"
+       << ".privacy-banner{background:#161b22;border:1px solid rgba(63,185,111,.3);border-radius:12px;padding:22px;margin-bottom:24px}"
+       << ".privacy-banner h3{margin-top:0;color:var(--ok);font-size:17px;display:flex;align-items:center;gap:8px}"
+       << ".pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11.5px;font-weight:600}"
+       << ".pill.ok{background:rgba(63,185,111,.16);color:#3fb96f;border:1px solid rgba(63,185,111,.3)}"
+       << ".pill.info{background:rgba(88,166,255,.16);color:#58a6ff;border:1px solid rgba(88,166,255,.3)}"
+       << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\">"
+       << "  <div class=\"hero\">"
+       << "    <h1>🌐 Cookie-Less Visitor Tracking &amp; Analytics</h1>"
+       << "    <p style=\"color:#8b949e;font-size:14.5px;margin:0 0 12px;\">High-performance server-side traffic measurement engineered in C++20 with privacy-first cryptographic guarantees.</p>"
+       << "    <div style=\"display:flex;gap:10px;flex-wrap:wrap;\">"
+       << "      <span class=\"pill ok\">✅ 100% Server-Side</span>"
+       << "      <span class=\"pill ok\">🚫 Zero Cookies Used</span>"
+       << "      <span class=\"pill ok\">🔒 Zero Fingerprinting APIs</span>"
+       << "      <span class=\"pill info\">🛡️ 30-Day IP Redaction Boundary</span>"
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"grid-stats\">"
+       << "    <div class=\"stat-card\">"
+       << "      <div class=\"lbl\">Lifetime Page Views</div>"
+       << "      <div class=\"val\" style=\"color:var(--accent);\">" << (summary.count("lifetime_page_views") ? summary["lifetime_page_views"] : "0") << "</div>"
+       << "      <div class=\"sub\">Committed Page Views</div>"
+       << "    </div>"
+       << "    <div class=\"stat-card\">"
+       << "      <div class=\"lbl\">Lifetime Visits</div>"
+       << "      <div class=\"val\" style=\"color:var(--ok);\">" << (summary.count("lifetime_visits") ? summary["lifetime_visits"] : "0") << "</div>"
+       << "      <div class=\"sub\">Estimated Sessions</div>"
+       << "    </div>"
+       << "    <div class=\"stat-card\">"
+       << "      <div class=\"lbl\">Unique Visitors</div>"
+       << "      <div class=\"val\" style=\"color:var(--warn);\">" << (summary.count("unique_estimated_visitors") ? summary["unique_estimated_visitors"] : "0") << "</div>"
+       << "      <div class=\"sub\">Active Identities</div>"
+       << "    </div>"
+       << "    <div class=\"stat-card\">"
+       << "      <div class=\"lbl\">Retained Views</div>"
+       << "      <div class=\"val\">" << (summary.count("retained_page_views") ? summary["retained_page_views"] : "0") << "</div>"
+       << "      <div class=\"sub\">Within 90-Day Window</div>"
+       << "    </div>"
+       << "    <div class=\"stat-card\">"
+       << "      <div class=\"lbl\">Bounce Rate</div>"
+       << "      <div class=\"val\">" << (summary.count("bounce_rate_pct") ? summary["bounce_rate_pct"] : "0") << "%</div>"
+       << "      <div class=\"sub\">Single-Page Visits</div>"
+       << "    </div>"
+       << "    <div class=\"stat-card\">"
+       << "      <div class=\"lbl\">Analytics Queue</div>"
+       << "      <div class=\"val\" style=\"font-size:20px;margin-top:10px;\">" << tracker.total_events_persisted() << " / " << tracker.total_events_enqueued() << "</div>"
+       << "      <div class=\"sub\">Persisted / Enqueued (Drops: " << tracker.total_events_dropped() << ")</div>"
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"privacy-banner\">"
+       << "    <h3>🛡️ Privacy Architecture &amp; Methodology Disclosure</h3>"
+       << "    <p style=\"font-size:13.5px;color:#c9d1d9;margin:0 0 10px;\">"
+       << "      This tracking system is strictly server-side and distinguishes four foundational data classes:"
+       << "    </p>"
+       << "    <ul style=\"color:#8b949e;font-size:13px;line-height:1.7;margin:0 0 14px;padding-left:20px;\">"
+       << "      <li><strong>Directly Observed:</strong> HTTP Method, requested path, response code, and response time.</li>"
+       << "      <li><strong>Inferred from Headers:</strong> Browser family, operating system, and preferred language from the standard <code>User-Agent</code> header.</li>"
+       << "      <li><strong>Derived from IP Geolocation:</strong> Approximate city/region/country derived using local lookup. <em>Disclaimer: Approximate location derived from IP (ISP gateway level, never GPS).</em></li>"
+       << "      <li><strong>Probabilistic Visitor Identification:</strong> Active visitor identity is derived via HMAC-SHA256 with an isolated server-side secret. <em>Disclaimer: Estimated visitor/device identity — Probabilistic match (likely the same device/network, not a guaranteed unique person).</em></li>"
+       << "    </ul>"
+       << "    <div style=\"background:#0d1117;border-left:3px solid var(--ok);padding:10px 14px;border-radius:4px;font-size:12.5px;color:#8b949e;\">"
+       << "      🔒 <strong>Cryptographic Redaction Policy:</strong> At the 30-day retention boundary, raw IP addresses and lookup hashes are permanently set to <code>NULL</code> (<code>is_redacted = 1</code>). Future requests from that IP generate a completely new, unlinked identifier."
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"grid-panels\">"
+       << "    <div class=\"panel\">"
+       << "      <h3>📄 Top Visited Pages <span class=\"pill info\">Observed</span></h3>"
+       << "      <table class=\"table-sm\">"
+       << "        <thead><tr><th>Path</th><th style=\"text-align:right;\">Page Views</th><th style=\"text-align:right;\">Visitors</th></tr></thead>"
+       << "        <tbody>";
+    for (const auto& p : top_pages) {
+        ss << "<tr><td><code style=\"color:#58a6ff;\">" << html_escape(p.at("path")) << "</code></td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << p.at("views") << "</td>"
+           << "<td style=\"text-align:right;color:var(--dim);\">" << p.at("visitors") << "</td></tr>";
+    }
+    if (top_pages.empty()) ss << "<tr><td colspan=\"3\" style=\"color:var(--dim);text-align:center;\">No page visit records yet</td></tr>";
+    ss << "        </tbody></table></div>"
+
+       << "    <div class=\"panel\">"
+       << "      <h3>🌍 Geographic Distribution <span class=\"pill info\">Approximate IP</span></h3>"
+       << "      <div style=\"font-size:11.5px;color:var(--dim);margin-bottom:8px;\">Approximate location derived from IP (ISP gateway approximate, not exact GPS)</div>"
+       << "      <table class=\"table-sm\">"
+       << "        <thead><tr><th>Country</th><th>Code</th><th style=\"text-align:right;\">Page Views</th></tr></thead>"
+       << "        <tbody>";
+    for (const auto& c : countries) {
+        ss << "<tr><td>" << html_escape(c.at("country")) << "</td>"
+           << "<td><span class=\"pill ok\">" << html_escape(c.at("country_code")) << "</span></td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << c.at("views") << "</td></tr>";
+    }
+    if (countries.empty()) ss << "<tr><td colspan=\"3\" style=\"color:var(--dim);text-align:center;\">No geographic records yet</td></tr>";
+    ss << "        </tbody></table></div>"
+
+       << "    <div class=\"panel\">"
+       << "      <h3>🌐 Browsers &amp; Operating Systems <span class=\"pill info\">Inferred UA</span></h3>"
+       << "      <table class=\"table-sm\">"
+       << "        <thead><tr><th>Software / Platform</th><th style=\"text-align:right;\">Seen Count</th></tr></thead>"
+       << "        <tbody>";
+    for (const auto& b : browsers) {
+        ss << "<tr><td>" << html_escape(b.at("browser_name")) << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << b.at("views") << "</td></tr>";
+    }
+    for (const auto& o : os_list) {
+        ss << "<tr><td style=\"color:var(--dim);\">" << html_escape(o.at("os_name")) << " (OS)</td>"
+           << "<td style=\"text-align:right;color:var(--dim);\">" << o.at("views") << "</td></tr>";
+    }
+    if (browsers.empty() && os_list.empty()) ss << "<tr><td colspan=\"2\" style=\"color:var(--dim);text-align:center;\">No device records yet</td></tr>";
+    ss << "        </tbody></table></div>"
+
+       << "    <div class=\"panel\">"
+       << "      <h3>📱 Device Categories <span class=\"pill info\">Inferred UA</span></h3>"
+       << "      <table class=\"table-sm\">"
+       << "        <thead><tr><th>Category</th><th style=\"text-align:right;\">Seen Count</th></tr></thead>"
+       << "        <tbody>";
+    for (const auto& d : devices) {
+        ss << "<tr><td>" << html_escape(d.at("device_type")) << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << d.at("views") << "</td></tr>";
+    }
+    if (devices.empty()) ss << "<tr><td colspan=\"2\" style=\"color:var(--dim);text-align:center;\">No device categories yet</td></tr>";
+    ss << "        </tbody></table></div>"
+       << "  </div>"
+
+       << "  <div class=\"footer\">"
+       << "    C++ Autonomous Trading Engine · Cookie-Less Privacy-First Analytics Subsystem · MySQL MDS"
+       << "  </div>"
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
+
+    return ss.str();
+}
+
+std::string RoadmapServer::render_admin_visitors_page(bool is_authenticated, int page, int limit, const std::string& search, const std::string& country, int bot_filter) {
+    if (!is_authenticated) {
+        return "<!doctype html><html><body style='background:#0d1117;color:#fff;'><h3>401 Unauthorized. Please <a href='/login' style='color:#58a6ff;'>Login</a></h3></body></html>";
+    }
+
+    std::pair<int, std::vector<std::map<std::string, std::string>>> res;
+    if (db_client_) {
+        res = db_client_->fetch_admin_visitors(page, limit, search, country, bot_filter);
+    }
+    int total_count = res.first;
+    const auto& visitors = res.second;
+    int total_pages = (total_count + limit - 1) / limit;
+    if (total_pages < 1) total_pages = 1;
+
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>Operator Visitors Directory — C++ Autonomous Trading Agent</title>"
+       << "<style>"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
+       << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:0}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn-link,.nav-btn{background:#238636;color:#fff;padding:6px 14px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".container{max-width:1250px;margin:30px auto;padding:0 20px}"
+       << ".hero{background:linear-gradient(135deg, #161b22 0%, #0d1117 100%);border:1px solid #30363d;border-radius:14px;padding:24px;margin-bottom:20px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap;gap:16px}"
+       << ".hero h1{font-size:24px;margin:0 0 6px;color:#e0a83c}"
+       << ".filter-bar{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:16px;margin-bottom:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}"
+       << ".filter-bar input,.filter-bar select{background:#0d1117;border:1px solid #30363d;color:#e6edf3;padding:6px 10px;border-radius:6px;font-size:13px}"
+       << ".card-table{background:#161b22;border:1px solid #30363d;border-radius:12px;overflow:hidden;margin-bottom:20px}"
+       << ".table{width:100%;border-collapse:collapse;font-size:13px}"
+       << ".table th{background:#21262d;color:#8b949e;text-align:left;padding:10px 12px;border-bottom:1px solid #30363d;font-weight:600}"
+       << ".table td{padding:10px 12px;border-bottom:1px solid #21262d}"
+       << ".table tr:hover td{background:rgba(255,255,255,0.02)}"
+       << ".badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11.5px;font-weight:600}"
+       << ".badge.ok{background:rgba(63,185,111,.16);color:#3fb96f;border:1px solid rgba(63,185,111,.3)}"
+       << ".badge.warn{background:rgba(224,168,60,.16);color:#e0a83c;border:1px solid rgba(224,168,60,.3)}"
+       << ".badge.redacted{background:rgba(139,148,158,.16);color:#8b949e;border:1px solid rgba(139,148,158,.3)}"
+       << ".pagination{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#161b22;border-top:1px solid #30363d}"
+       << ".btn-sm{background:#21262d;border:1px solid #30363d;color:#58a6ff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:12px;font-weight:600}"
+       << ".btn-sm:hover{background:#30363d}"
+       << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\">"
+       << "  <div class=\"hero\">"
+       << "    <div>"
+       << "      <h1>👥 Operator Visitors CRM &amp; Traffic Directory</h1>"
+       << "      <p style=\"color:#8b949e;font-size:13.5px;margin:0;\">Authenticated access to estimated visitor records, raw IPs (within 30-day retention), and activity streams.</p>"
+       << "    </div>"
+       << "    <div>"
+       << "      <form method=\"post\" action=\"/admin/analytics/retention-purge\" style=\"margin:0;\">"
+       << "        <button type=\"submit\" class=\"nav-btn\" style=\"background:#d29922;\" onclick=\"return confirm('Run immediate retention purge for records older than configured limits?');\">🧹 Run Retention Purge Now</button>"
+       << "      </form>"
+       << "    </div>"
+       << "  </div>"
+
+       << "  <form class=\"filter-bar\" method=\"get\" action=\"/admin/visitors\">"
+       << "    <input type=\"text\" name=\"search\" placeholder=\"Search IP Address...\" value=\"" << html_escape(search) << "\" style=\"width:220px;\"/>"
+       << "    <input type=\"text\" name=\"country\" placeholder=\"Filter Country...\" value=\"" << html_escape(country) << "\" style=\"width:160px;\"/>"
+       << "    <select name=\"bot\">"
+       << "      <option value=\"-1\"" << (bot_filter == -1 ? " selected" : "") << ">All Traffic (Humans + Bots)</option>"
+       << "      <option value=\"0\"" << (bot_filter == 0 ? " selected" : "") << ">Humans Only</option>"
+       << "      <option value=\"1\"" << (bot_filter == 1 ? " selected" : "") << ">Known Bots Only</option>"
+       << "    </select>"
+       << "    <select name=\"limit\">"
+       << "      <option value=\"20\"" << (limit == 20 ? " selected" : "") << ">20 per page</option>"
+       << "      <option value=\"50\"" << (limit == 50 ? " selected" : "") << ">50 per page</option>"
+       << "      <option value=\"100\"" << (limit == 100 ? " selected" : "") << ">100 per page</option>"
+       << "    </select>"
+       << "    <button type=\"submit\" class=\"nav-btn\">Apply Filters</button>"
+       << "    <a href=\"/admin/visitors\" style=\"color:var(--dim);text-decoration:none;font-size:12.5px;margin-left:8px;\">Reset</a>"
+       << "  </form>"
+
+       << "  <div class=\"card-table\">"
+       << "    <table class=\"table\">"
+       << "      <thead><tr>"
+       << "        <th>Estimated Visitor ID</th>"
+       << "        <th>Raw IP Address</th>"
+       << "        <th>Location (Approx IP)</th>"
+       << "        <th>Primary Device</th>"
+       << "        <th style=\"text-align:right;\">Visits</th>"
+       << "        <th style=\"text-align:right;\">Page Views</th>"
+       << "        <th>First Seen</th>"
+       << "        <th>Last Seen</th>"
+       << "        <th>Status</th>"
+       << "        <th>Action</th>"
+       << "      </tr></thead>"
+       << "      <tbody>";
+
+    for (const auto& v : visitors) {
+        bool is_redacted = (v.at("is_redacted") == "1" || v.at("ip_address").empty());
+        std::string v_id = v.at("visitor_id");
+        ss << "<tr>"
+           << "<td><a href=\"/admin/visitors/" << v_id << "\" style=\"color:var(--accent);font-family:monospace;font-weight:600;text-decoration:none;\">"
+           << v_id.substr(0, std::min(v_id.length(), (size_t)16)) << "...</a></td>"
+           << "<td>";
+        if (is_redacted) {
+            ss << "<span class=\"badge redacted\">Redacted</span>";
+        } else {
+            ss << "<code style=\"color:var(--accent);\">" << html_escape(v.at("ip_address")) << "</code>";
+        }
+        ss << "</td>"
+           << "<td>" << html_escape(v.at("city")) << ", " << html_escape(v.at("country")) << "</td>"
+           << "<td style=\"color:var(--dim);\">" << html_escape(v.at("browser_name")) << " / " << html_escape(v.at("os_name")) << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << v.at("total_visits") << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << v.at("total_page_views") << "</td>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << v.at("first_seen_at") << "</td>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << v.at("last_seen_at") << "</td>"
+           << "<td>" << (is_redacted ? "<span class=\"badge warn\">REDACTED</span>" : "<span class=\"badge ok\">ACTIVE</span>") << "</td>"
+           << "<td><a href=\"/admin/visitors/" << v_id << "\" class=\"btn-sm\">Details &rarr;</a></td>"
+           << "</tr>";
+    }
+
+    if (visitors.empty()) {
+        ss << "<tr><td colspan=\"10\" style=\"text-align:center;color:var(--dim);padding:30px;\">No matching visitors found</td></tr>";
+    }
+
+    ss << "      </tbody>"
+       << "    </table>"
+       << "    <div class=\"pagination\">"
+       << "      <span style=\"color:var(--dim);font-size:13px;\">Showing " << visitors.size() << " of " << total_count << " visitors (Page " << page << " of " << total_pages << ")</span>"
+       << "      <div style=\"display:flex;gap:8px;\">";
+    if (page > 1) {
+        ss << "<a href=\"/admin/visitors?page=" << (page - 1) << "&limit=" << limit << "&search=" << url_encode(search) << "&country=" << url_encode(country) << "&bot=" << bot_filter << "\" class=\"btn-sm\">&larr; Previous</a>";
+    }
+    if (page < total_pages) {
+        ss << "<a href=\"/admin/visitors?page=" << (page + 1) << "&limit=" << limit << "&search=" << url_encode(search) << "&country=" << url_encode(country) << "&bot=" << bot_filter << "\" class=\"btn-sm\">Next &rarr;</a>";
+    }
+    ss << "      </div>"
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"footer\">C++ Autonomous Trading Engine · Operator Visitors Directory · MySQL MDS</div>"
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
+
+    return ss.str();
+}
+
+std::string RoadmapServer::render_admin_visitor_detail_page(bool is_authenticated, const std::string& visitor_id) {
+    if (!is_authenticated) {
+        return "<!doctype html><html><body style='background:#0d1117;color:#fff;'><h3>401 Unauthorized. Please <a href='/login' style='color:#58a6ff;'>Login</a></h3></body></html>";
+    }
+
+    std::map<std::string, std::string> v;
+    std::vector<std::map<std::string, std::string>> sessions;
+    std::vector<std::map<std::string, std::string>> history;
+
+    if (db_client_) {
+        v = db_client_->fetch_admin_visitor_detail(visitor_id);
+        sessions = db_client_->fetch_admin_visitor_sessions(visitor_id, 20);
+        history = db_client_->fetch_admin_visitor_page_history(visitor_id, 50);
+    }
+
+    if (v.empty()) {
+        return "<!doctype html><html><body style='background:#0d1117;color:#fff;padding:40px;font-family:sans-serif;'><h3>Visitor Not Found: " + html_escape(visitor_id) + "</h3><p><a href='/admin/visitors' style='color:#58a6ff;'>&larr; Back to Visitors Directory</a></p></body></html>";
+    }
+
+    bool is_redacted = (v["is_redacted"] == "1" || v["ip_address"].empty());
+
+    std::stringstream ss;
+    ss << "<!doctype html><html lang=\"en\"><head>"
+       << "<meta charset=\"utf-8\"/>"
+       << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+       << "<title>Visitor Detail — " << html_escape(visitor_id) << "</title>"
+       << "<style>"
+       << ":root{--bg:#0d1117;--card:#161b22;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--ok:#3fb96f;--bad:#f85149;--warn:#e0a83c;--accent:#58a6ff}"
+       << "*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,'Segoe UI',Roboto,sans-serif;padding:0}"
+       << ".nav-bar{background:#161b22;border-bottom:1px solid #30363d;padding:12px 24px;display:flex;justify-space:space-between;align-items:center;flex-wrap:wrap}"
+       << ".nav-brand{font-weight:700;font-size:16px;color:#e0a83c}"
+       << ".nav-links{display:flex;gap:16px;align-items:center}"
+       << ".nav-item{color:#e6edf3;text-decoration:none;font-weight:500;font-size:13.5px}.nav-item:hover{color:#3fb96f}"
+       << ".nav-btn-link,.nav-btn{background:#238636;color:#fff;padding:5px 12px;border-radius:6px;text-decoration:none;font-size:12.5px;font-weight:600;border:none;cursor:pointer}"
+       << ".container{max-width:1200px;margin:30px auto;padding:0 20px}"
+       << ".breadcrumb{margin-bottom:16px;font-size:13px;color:var(--dim)}"
+       << ".breadcrumb a{color:var(--accent);text-decoration:none}"
+       << ".hero{background:linear-gradient(135deg, #161b22 0%, #0d1117 100%);border:1px solid #30363d;border-radius:14px;padding:24px;margin-bottom:20px}"
+       << ".hero h1{font-size:22px;margin:0 0 6px;color:#58a6ff;font-family:monospace;word-break:break-all;}"
+       << ".disclaimer-box{background:rgba(224,168,60,0.1);border:1px solid rgba(224,168,60,0.3);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#e0a83c}"
+       << ".grid-info{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:20px}"
+       << ".card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px}"
+       << ".card h3{margin-top:0;color:#58a6ff;font-size:15px;margin-bottom:12px}"
+       << ".stat-row{display:flex;justify-space:space-between;padding:6px 0;border-bottom:1px solid #21262d;font-size:13px}"
+       << ".stat-row:last-child{border-bottom:none}"
+       << ".stat-lbl{color:var(--dim)}"
+       << ".stat-val{color:var(--text);font-weight:600}"
+       << ".card-table{background:#161b22;border:1px solid #30363d;border-radius:12px;overflow:hidden;margin-bottom:20px}"
+       << ".table{width:100%;border-collapse:collapse;font-size:13px}"
+       << ".table th{background:#21262d;color:#8b949e;text-align:left;padding:10px 12px;border-bottom:1px solid #30363d;font-weight:600}"
+       << ".table td{padding:10px 12px;border-bottom:1px solid #21262d}"
+       << ".badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11.5px;font-weight:600}"
+       << ".badge.ok{background:rgba(63,185,111,.16);color:#3fb96f;border:1px solid rgba(63,185,111,.3)}"
+       << ".badge.warn{background:rgba(224,168,60,.16);color:#e0a83c;border:1px solid rgba(224,168,60,.3)}"
+       << ".badge.redacted{background:rgba(139,148,158,.16);color:#8b949e;border:1px solid rgba(139,148,158,.3)}"
+       << ".footer{margin-top:40px;padding:20px;border-top:1px solid #30363d;color:#8b949e;font-size:12.5px;text-align:center}"
+       << "</style></head><body>"
+       << render_nav_header(is_authenticated)
+       << "<div class=\"container\">"
+       << "  <div class=\"breadcrumb\"><a href=\"/admin/visitors\">&larr; Back to Visitors Directory</a> / Visitor Detail</div>"
+       << "  <div class=\"hero\">"
+       << "    <h1>Estimated Visitor: " << html_escape(visitor_id) << "</h1>"
+       << "    <div style=\"display:flex;gap:10px;margin-top:10px;align-items:center;\">"
+       << (is_redacted ? "<span class=\"badge redacted\">REDACTED IDENTITY</span>" : "<span class=\"badge ok\">ACTIVE IDENTITY</span>")
+       << "      <span style=\"color:var(--dim);font-size:13px;\">First Seen: " << v["first_seen_at"] << " · Last Seen: " << v["last_seen_at"] << "</span>"
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"disclaimer-box\">"
+       << "    ⚠️ <strong>Estimated visitor/device identity:</strong> Probabilistic match — likely the same device/network, not a guaranteed unique person."
+       << "  </div>"
+
+       << "  <div class=\"grid-info\">"
+       << "    <div class=\"card\">"
+       << "      <h3>👤 Network &amp; Identity</h3>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">Raw IP Address</span><span class=\"stat-val\">"
+       << (is_redacted ? "<span class=\"badge redacted\">Redacted</span>" : "<code style=\"color:var(--accent);\">" + html_escape(v["ip_address"]) + "</code>")
+       << "</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">IP Version</span><span class=\"stat-val\">" << html_escape(v["ip_version"]) << "</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">Lifetime Visits</span><span class=\"stat-val\" style=\"color:var(--ok);\">" << v["total_visits"] << "</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">Lifetime Page Views</span><span class=\"stat-val\" style=\"color:var(--accent);\">" << v["total_page_views"] << "</span></div>"
+       << "    </div>"
+       << "    <div class=\"card\">"
+       << "      <h3>🌍 Approximate Location</h3>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">Country</span><span class=\"stat-val\">" << html_escape(v["country"]) << " (" << html_escape(v["country_code"]) << ")</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">Region / City</span><span class=\"stat-val\">" << html_escape(v["region"]) << " / " << html_escape(v["city"]) << "</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">Timezone</span><span class=\"stat-val\">" << html_escape(v["timezone"]) << "</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-lbl\">ISP / ASN</span><span class=\"stat-val\">" << html_escape(v["isp"]) << "</span></div>"
+       << "    </div>"
+       << "  </div>"
+
+       << "  <div class=\"card-table\">"
+       << "    <div style=\"padding:14px 18px;background:#21262d;border-bottom:1px solid #30363d;font-weight:600;color:var(--accent);\">🕒 Recent Sessions (" << sessions.size() << ")</div>"
+       << "    <table class=\"table\">"
+       << "      <thead><tr><th>Session ID</th><th>Started At</th><th>Ended At</th><th>Page Views</th><th>Duration</th><th>Status</th></tr></thead>"
+       << "      <tbody>";
+    for (const auto& s : sessions) {
+        ss << "<tr>"
+           << "<td><code style=\"color:var(--dim);font-size:12px;\">" << html_escape(s.at("session_id")) << "</code></td>"
+           << "<td>" << s.at("started_at") << "</td>"
+           << "<td>" << s.at("ended_at") << "</td>"
+           << "<td style=\"font-weight:600;\">" << s.at("page_views") << "</td>"
+           << "<td>" << s.at("duration_sec") << "s</td>"
+           << "<td>" << (s.at("is_active") == "1" ? "<span class=\"badge ok\">ACTIVE</span>" : "<span class=\"badge warn\">CLOSED</span>") << "</td>"
+           << "</tr>";
+    }
+    if (sessions.empty()) ss << "<tr><td colspan=\"6\" style=\"text-align:center;color:var(--dim);padding:20px;\">No sessions recorded within retention period</td></tr>";
+    ss << "      </tbody></table></div>"
+
+       << "  <div class=\"card-table\">"
+       << "    <div style=\"padding:14px 18px;background:#21262d;border-bottom:1px solid #30363d;font-weight:600;color:var(--accent);\">📄 Chronological Page Visit History (" << history.size() << ")</div>"
+       << "    <table class=\"table\">"
+       << "      <thead><tr><th>Timestamp</th><th>Method</th><th>Path</th><th>Referer</th><th>HTTP Status</th><th>Response Time</th></tr></thead>"
+       << "      <tbody>";
+    for (const auto& h : history) {
+        ss << "<tr>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << h.at("visited_at") << "</td>"
+           << "<td><span class=\"badge ok\">" << html_escape(h.at("http_method")) << "</span></td>"
+           << "<td><code style=\"color:var(--accent);\">" << html_escape(h.at("path")) << "</code></td>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << (h.at("referer").empty() ? "-" : html_escape(h.at("referer"))) << "</td>"
+           << "<td><span class=\"badge " << (h.at("status_code") == "200" ? "ok" : "warn") << "\">" << h.at("status_code") << "</span></td>"
+           << "<td>" << h.at("response_time_ms") << " ms</td>"
+           << "</tr>";
+    }
+    if (history.empty()) ss << "<tr><td colspan=\"6\" style=\"text-align:center;color:var(--dim);padding:20px;\">No detailed page visit history within retention period</td></tr>";
+    ss << "      </tbody></table></div>"
+
+       << "  <div class=\"footer\">C++ Autonomous Trading Engine · Operator Visitors Directory · MySQL MDS</div>"
+       << "</div>"
+       << GOOGLE_ANALYTICS_FOOTER_TAG
+       << "</body></html>";
+
+    return ss.str();
+}
+
 void RoadmapServer::start() {
     mysql_thread_init();
     signal(SIGPIPE, SIG_IGN);
@@ -1649,6 +2147,36 @@ void RoadmapServer::start() {
         return;
     }
 
+    // Initialize Cookie-Less Privacy-Conscious Visitor Analytics System
+    analytics::AnalyticsConfig a_cfg;
+    a_cfg.secret = EnvLoader::get("ANALYTICS_SECRET", "");
+    if (a_cfg.secret.empty() || a_cfg.secret == "<GENERATE-AT-DEPLOYMENT-TIME>") {
+        a_cfg.secret = "hermes_secret_analytics_salt_c920fba6840713b1";
+    }
+    std::string proxies_str = EnvLoader::get("ANALYTICS_TRUSTED_PROXIES", "");
+    if (!proxies_str.empty()) {
+        std::stringstream pss(proxies_str);
+        std::string ptoken;
+        while (std::getline(pss, ptoken, ',')) {
+            size_t s = ptoken.find_first_not_of(" \t");
+            size_t e = ptoken.find_last_not_of(" \t");
+            if (s != std::string::npos && e != std::string::npos) {
+                a_cfg.trusted_proxies.push_back(ptoken.substr(s, e - s + 1));
+            }
+        }
+    }
+    a_cfg.retention_raw_ip_days = EnvLoader::get_int("ANALYTICS_RETENTION_RAW_IP_DAYS", 30);
+    a_cfg.retention_page_visits_days = EnvLoader::get_int("ANALYTICS_RETENTION_PAGE_VISITS_DAYS", 90);
+    a_cfg.retention_sessions_days = EnvLoader::get_int("ANALYTICS_RETENTION_SESSIONS_DAYS", 180);
+    a_cfg.retention_locations_days = EnvLoader::get_int("ANALYTICS_RETENTION_LOCATIONS_DAYS", 365);
+    a_cfg.queue_capacity = 10000;
+
+    try {
+        analytics::VisitorTracker::instance().init(a_cfg, db_client_);
+    } catch (const std::exception& e) {
+        std::cerr << "⚠️ [RoadmapServer] Failed to initialize VisitorTracker: " << e.what() << "\n";
+    }
+
     running_ = true;
     std::cout << "🚀 [RoadmapServer] Multi-Page C++ Web Portal started on http://0.0.0.0:" << port_ << "/\n";
 
@@ -1657,6 +2185,13 @@ void RoadmapServer::start() {
         socklen_t addrlen = sizeof(client_addr);
         int new_socket = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
         if (new_socket < 0) continue;
+
+        auto req_start_time = std::chrono::steady_clock::now();
+        auto req_captured_time = std::chrono::system_clock::now();
+
+        char peer_ip_buf[INET_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET, &(client_addr.sin_addr), peer_ip_buf, sizeof(peer_ip_buf));
+        std::string peer_ip = (peer_ip_buf[0] != '\0') ? peer_ip_buf : "127.0.0.1";
 
         std::string req = read_http_request(new_socket);
         if (req.empty()) {
@@ -1672,24 +2207,111 @@ void RoadmapServer::start() {
                 std::string extra_headers = "";
                 int status_code = 200;
 
+                std::string method = "GET";
+                {
+                    size_t s1 = req.find(' ');
+                    if (s1 != std::string::npos) method = req.substr(0, s1);
+                }
+
                 std::string clean_path = "/";
+                std::string raw_query = "";
                 {
                     size_t s1 = req.find(' ');
                     if (s1 != std::string::npos) {
                         size_t s2 = req.find(' ', s1 + 1);
                         if (s2 != std::string::npos) {
-                            clean_path = req.substr(s1 + 1, s2 - (s1 + 1));
+                            std::string full_target = req.substr(s1 + 1, s2 - (s1 + 1));
+                            size_t qmark = full_target.find('?');
+                            if (qmark != std::string::npos) {
+                                clean_path = full_target.substr(0, qmark);
+                                raw_query = full_target.substr(qmark + 1);
+                            } else {
+                                clean_path = full_target;
+                            }
                         }
                     }
                 }
-                size_t qmark = clean_path.find('?');
-                if (qmark != std::string::npos) clean_path = clean_path.substr(0, qmark);
 
                 std::cout << "🌐 [RoadmapServer] Incoming Request: " << clean_path << "\n";
+
+                std::string user_agent = extract_header_val(req, "User-Agent");
+                std::string referer = extract_header_val(req, "Referer");
+                std::string accept_lang = extract_header_val(req, "Accept-Language");
+                std::string cf_ip = extract_header_val(req, "CF-Connecting-IP");
+                std::string xff = extract_header_val(req, "X-Forwarded-For");
+
+                std::string client_ip = analytics::IpNormalizer::extract_client_ip(
+                    peer_ip, cf_ip, xff, analytics::VisitorTracker::instance().config().trusted_proxies);
+                std::string canonical_ip, ip_version;
+                analytics::IpNormalizer::normalize(client_ip, canonical_ip, ip_version);
+                std::string sanitized_query = analytics::QuerySanitizer::sanitize(raw_query);
+                analytics::UserAgentInfo ua_info = analytics::UserAgentParser::parse(user_agent);
+                std::string dev_sig = analytics::UserAgentParser::compute_device_signature(ua_info, accept_lang);
 
             // Route matching
             if (clean_path == "/" || clean_path == "/home") {
                 body = render_home_page(is_auth);
+            } else if (clean_path == "/visitor-info") {
+                body = render_visitor_info_page(is_auth);
+            } else if (clean_path == "/api/visitor-info/stats") {
+                status_code = 200;
+                content_type = "application/json";
+                if (db_client_) {
+                    auto stats = db_client_->fetch_analytics_summary_stats();
+                    std::ostringstream ss;
+                    ss << "{\"status\":\"OK\",\"summary\":{";
+                    size_t idx = 0;
+                    for (const auto& kv : stats) {
+                        if (idx++ > 0) ss << ",";
+                        ss << "\"" << kv.first << "\":\"" << kv.second << "\"";
+                    }
+                    ss << "}}";
+                    body = ss.str();
+                } else {
+                    body = "{\"status\":\"ERROR\",\"message\":\"Database client unavailable\"}";
+                }
+            } else if (clean_path == "/admin/visitors") {
+                if (is_auth) {
+                    std::string page_str = extract_query_param(req, "page");
+                    std::string limit_str = extract_query_param(req, "limit");
+                    std::string search_ip = extract_query_param(req, "search");
+                    std::string country_filter = extract_query_param(req, "country");
+                    std::string bot_str = extract_query_param(req, "bot");
+                    int page = 1; int limit = 20; int bot_filter = -1;
+                    try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
+                    try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
+                    try { if (!bot_str.empty()) bot_filter = std::stoi(bot_str); } catch(...) {}
+                    body = render_admin_visitors_page(is_auth, page, limit, search_ip, country_filter, bot_filter);
+                } else {
+                    status_code = 303;
+                    extra_headers = "Location: /login\r\n";
+                    body = "Redirecting to login...";
+                }
+            } else if (clean_path.rfind("/admin/visitors/", 0) == 0 || clean_path == "/admin/visitor") {
+                if (is_auth) {
+                    std::string v_id;
+                    if (clean_path.length() > 16 && clean_path.rfind("/admin/visitors/", 0) == 0) {
+                        v_id = clean_path.substr(16);
+                    } else {
+                        v_id = extract_query_param(req, "id");
+                    }
+                    body = render_admin_visitor_detail_page(is_auth, v_id);
+                } else {
+                    status_code = 303;
+                    extra_headers = "Location: /login\r\n";
+                    body = "Redirecting to login...";
+                }
+            } else if (req.find("POST /admin/analytics/retention-purge") != std::string::npos) {
+                if (is_auth) {
+                    analytics::VisitorTracker::instance().run_retention_purge();
+                    status_code = 303;
+                    extra_headers = "Location: /admin/visitors?purge=success\r\n";
+                    body = "Retention purge initiated successfully";
+                } else {
+                    status_code = 401;
+                    content_type = "application/json";
+                    body = "{\"error\":\"Unauthorized\"}";
+                }
             } else if (req.find("GET /dashboard") != std::string::npos) {
                 if (is_auth) {
                     body = render_dashboard_page(true);
@@ -1941,6 +2563,37 @@ void RoadmapServer::start() {
 
             std::string res_str = response.str();
             send(new_socket, res_str.c_str(), res_str.length(), MSG_NOSIGNAL);
+
+            // Construct complete immutable AnalyticsEvent snapshot and enqueue (non-blocking)
+            auto req_end_time = std::chrono::steady_clock::now();
+            double elapsed_ms = std::chrono::duration<double, std::milli>(req_end_time - req_start_time).count();
+
+            analytics::AnalyticsEvent a_event;
+            static std::atomic<uint64_t> s_seq{1};
+            a_event.request_id = "req_" + std::to_string(std::chrono::duration_cast<std::chrono::microseconds>(req_start_time.time_since_epoch()).count()) + "_" + std::to_string(s_seq.fetch_add(1));
+            a_event.captured_timestamp = req_captured_time;
+            a_event.canonical_ip = canonical_ip;
+            a_event.ip_version = ip_version;
+            a_event.http_method = method;
+            a_event.path = clean_path;
+            a_event.sanitized_query_string = sanitized_query;
+            a_event.full_url = clean_path + (sanitized_query.empty() ? "" : "?" + sanitized_query);
+            a_event.user_agent = user_agent;
+            a_event.referer = referer;
+            a_event.accept_language = accept_lang;
+            a_event.status_code = status_code;
+            a_event.response_time_ms = elapsed_ms;
+            a_event.is_bot = ua_info.is_bot;
+            a_event.bot_name = ua_info.bot_name;
+            a_event.browser_name = ua_info.browser_name;
+            a_event.browser_version = ua_info.browser_version;
+            a_event.os_name = ua_info.os_name;
+            a_event.os_version = ua_info.os_version;
+            a_event.device_type = ua_info.device_type;
+            a_event.device_family = ua_info.device_family;
+            a_event.device_signature = dev_sig;
+
+            analytics::VisitorTracker::instance().enqueue_event(std::move(a_event));
             } catch (const std::exception& e) {
                 std::cerr << "❌ [RoadmapServer] Internal Exception: " << e.what() << "\n";
                 std::string err_resp = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nContent-Length: 43\r\nConnection: close\r\n\r\n{\"error\":\"Internal Server Error in Roadmap Server\"}";
