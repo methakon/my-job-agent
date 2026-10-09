@@ -866,12 +866,41 @@ bool RoadmapDbClient::answer_hermes_cpp_clarification(long long id, const std::s
     return ok;
 }
 
+bool RoadmapDbClient::ensure_test_schema() {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+    std::string q = "CREATE TABLE IF NOT EXISTS hermes_cpp_decision_journal_test LIKE hermes_cpp_decision_journal;";
+    int r = mysql_query(conn, q.c_str());
+    pool_->release(conn);
+    return (r == 0);
+}
+
+void RoadmapDbClient::cleanup_test_schema() {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return;
+    mysql_query(conn, "TRUNCATE TABLE hermes_cpp_decision_journal_test;");
+    pool_->release(conn);
+}
+
 bool RoadmapDbClient::log_decision_journal_record(const std::string& uuid, const std::string& session_id, const std::string& git_sha, const std::string& version, const std::string& symbol, const std::string& action, double confidence, double margin, const std::string& reason, const std::string& snapshot_json) {
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
 
-    TransactionGuard tx(conn);
     std::string safe_uuid = (uuid.empty() || uuid == "dj-0") ? ("dj-" + std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count())) : uuid;
+
+    // Defense-in-depth Invariant Guard: Prevent test record leakage into production table
+    if (!is_test_isolation_) {
+        if (safe_uuid.rfind("TEST-", 0) == 0 || safe_uuid.rfind("DEC-TEST", 0) == 0 ||
+            safe_uuid.rfind("DEC-TRANSACT", 0) == 0 || safe_uuid.rfind("dj-test", 0) == 0 ||
+            session_id.find("TEST") != std::string::npos || session_id.find("test") != std::string::npos) {
+            std::cerr << "🛡️ [RoadmapDbClient] Invariant Violation Blocked: Test record rejected from production table: " << safe_uuid << "\n";
+            pool_->release(conn);
+            return false;
+        }
+    }
+
+    TransactionGuard tx(conn);
+    std::string table = is_test_isolation_ ? "hermes_cpp_decision_journal_test" : "hermes_cpp_decision_journal";
     std::string s_uuid = escape_string(conn, safe_uuid);
     std::string s_sess = escape_string(conn, session_id);
     std::string s_git  = escape_string(conn, git_sha);
@@ -881,7 +910,7 @@ bool RoadmapDbClient::log_decision_journal_record(const std::string& uuid, const
     std::string s_rsn  = escape_string(conn, reason);
     std::string s_json = escape_string(conn, snapshot_json);
 
-    std::string query = "INSERT INTO hermes_cpp_decision_journal (decision_uuid, session_id, git_commit_sha, engine_version, symbol, action, confidence, allocated_margin, reason, feature_snapshot_json, created_at) "
+    std::string query = "INSERT INTO " + table + " (decision_uuid, session_id, git_commit_sha, engine_version, symbol, action, confidence, allocated_margin, reason, feature_snapshot_json, created_at) "
                         "VALUES ('" + s_uuid + "', '" + s_sess + "', '" + s_git + "', '" + s_ver + "', '" + s_sym + "', '" + s_act + "', "
                         + std::to_string(confidence) + ", " + std::to_string(margin) + ", '" + s_rsn + "', '" + s_json + "', NOW());";
 
@@ -900,8 +929,9 @@ bool RoadmapDbClient::fetch_decision_journal_record(const std::string& uuid, std
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
 
+    std::string table = is_test_isolation_ ? "hermes_cpp_decision_journal_test" : "hermes_cpp_decision_journal";
     std::string s_uuid = escape_string(conn, uuid);
-    std::string query = "SELECT session_id, git_commit_sha, engine_version, symbol, action, confidence, allocated_margin, reason, feature_snapshot_json FROM hermes_cpp_decision_journal WHERE decision_uuid = '" + s_uuid + "';";
+    std::string query = "SELECT session_id, git_commit_sha, engine_version, symbol, action, confidence, allocated_margin, reason, feature_snapshot_json FROM " + table + " WHERE decision_uuid = '" + s_uuid + "';";
 
     bool found = false;
     if (mysql_query(conn, query.c_str()) == 0) {
@@ -1759,9 +1789,165 @@ std::vector<UpstoxCandleRecord> RoadmapDbClient::fetch_intraday_candles_db(const
     } else {
         std::cerr << "❌ [RoadmapDbClient] fetch_intraday_candles_db query error: " << mysql_error(conn) << "\n";
     }
-
     release_local(conn);
     return records;
 }
+RoadmapDbClient::SessionDecisionStats RoadmapDbClient::fetch_session_decision_stats(const std::string& session_date) {
+    SessionDecisionStats stats;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return stats;
+
+    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
+    std::string q = "SELECT "
+                    "  COUNT(*) as total_eval, "
+                    "  SUM(CASE WHEN reason LIKE '%OFI_BELOW_BREAKOUT_THRESHOLD%' THEN 1 ELSE 0 END) as no_action, "
+                    "  SUM(CASE WHEN action != 'NO_TRADE' AND decision_uuid NOT LIKE 'DEC-TEST%' THEN 1 ELSE 0 END) as actionable, "
+                    "  SUM(CASE WHEN reason LIKE '%RISK_VETO%' THEN 1 ELSE 0 END) as risk_vetoes, "
+                    "  IFNULL(AVG(confidence), 0.0) as avg_conf, "
+                    "  IFNULL(MAX(confidence), 0.0) as max_conf, "
+                    "  SUM(CASE WHEN confidence >= 0.70 AND confidence < 0.85 THEN 1 ELSE 0 END) as near_miss "
+                    "FROM hermes_cpp_decision_journal "
+                    "WHERE DATE(created_at) = " + safe_date + ";";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                if (row[0]) stats.total_eval = std::stoull(row[0]);
+                if (row[1]) stats.no_action = std::stoull(row[1]);
+                if (row[2]) stats.actionable = std::stoull(row[2]);
+                if (row[3]) stats.risk_vetoes = std::stoull(row[3]);
+                if (row[4]) stats.avg_confidence = std::stod(row[4]);
+                if (row[5]) stats.max_confidence = std::stod(row[5]);
+                if (row[6]) stats.near_miss_count = std::stoi(row[6]);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return stats;
+}
+
+bool RoadmapDbClient::save_post_session_analysis_record(
+    const std::string& id, const std::string& session_date, const std::string& session_phase,
+    uint64_t total_ticks, uint64_t evaluated_decisions, uint64_t no_action_cnt,
+    uint64_t actionable_cnt, uint64_t risk_veto_cnt, int trades_executed,
+    double realized_drawdown, double avg_ofi, double max_ofi, int near_miss_cnt,
+    const std::string& recommendations_json
+) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    TransactionGuard tx(conn);
+    std::string safe_id = escape_string(conn, id);
+    std::string safe_date = escape_string(conn, session_date);
+    std::string safe_phase = escape_string(conn, session_phase);
+    std::string safe_rec = escape_string(conn, recommendations_json);
+
+    std::string query = "INSERT INTO cpp_post_session_analysis "
+                        "(id, session_date, session_phase, total_ticks_ingested, evaluated_decisions_count, "
+                        "no_action_count, actionable_signals_count, risk_vetoes_count, trades_executed_count, "
+                        "realized_drawdown_inr, avg_ofi, max_ofi, near_miss_count, recommendations_json, created_at) VALUES ('"
+                        + safe_id + "', '" + safe_date + "', '" + safe_phase + "', "
+                        + std::to_string(total_ticks) + ", " + std::to_string(evaluated_decisions) + ", "
+                        + std::to_string(no_action_cnt) + ", " + std::to_string(actionable_cnt) + ", "
+                        + std::to_string(risk_veto_cnt) + ", " + std::to_string(trades_executed) + ", "
+                        + std::to_string(realized_drawdown) + ", " + std::to_string(avg_ofi) + ", "
+                        + std::to_string(max_ofi) + ", " + std::to_string(near_miss_cnt) + ", '"
+                        + safe_rec + "', NOW()) "
+                        "ON DUPLICATE KEY UPDATE total_ticks_ingested=VALUES(total_ticks_ingested), "
+                        "evaluated_decisions_count=VALUES(evaluated_decisions_count), "
+                        "no_action_count=VALUES(no_action_count), actionable_signals_count=VALUES(actionable_signals_count), "
+                        "risk_vetoes_count=VALUES(risk_vetoes_count), trades_executed_count=VALUES(trades_executed_count), "
+                        "realized_drawdown_inr=VALUES(realized_drawdown_inr), avg_ofi=VALUES(avg_ofi), max_ofi=VALUES(max_ofi), "
+                        "near_miss_count=VALUES(near_miss_count), recommendations_json=VALUES(recommendations_json);";
+
+    bool ok = (mysql_query(conn, query.c_str()) == 0);
+    if (!ok) {
+        std::cerr << "❌ [RoadmapDbClient] save_post_session_analysis_record error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
+        return false;
+    }
+    tx.commit();
+    pool_->release(conn);
+    return true;
+}
+
+uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& session_date) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0;
+
+    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
+
+    std::string rollup_sql = 
+        "INSERT INTO cpp_historical_daily_candles "
+        "(instrument_key, symbol, interval_name, timestamp, open, high, low, close, volume, open_interest, ingested_at) "
+        "SELECT "
+        "  t.instrument AS instrument_key, "
+        "  SUBSTRING_INDEX(t.instrument, '|', -1) AS symbol, "
+        "  'day' AS interval_name, "
+        "  DATE_FORMAT(MIN(t.ts), '%Y-%m-%d 00:00:00') AS timestamp, "
+        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts) = " + safe_date + " AND price > 0 ORDER BY ts ASC LIMIT 1) AS open, "
+        "  MAX(t.price) AS high, "
+        "  MIN(t.price) AS low, "
+        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts) = " + safe_date + " AND price > 0 ORDER BY ts DESC LIMIT 1) AS close, "
+        "  0 AS volume, "
+        "  0 AS open_interest, "
+        "  NOW(6) AS ingested_at "
+        "FROM fnf_market_snapshots t "
+        "WHERE DATE(t.ts) = " + safe_date + " AND t.price > 0 "
+        "GROUP BY t.instrument "
+        "ON DUPLICATE KEY UPDATE "
+        "  open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), ingested_at=NOW(6);";
+
+    uint64_t affected = 0;
+    if (mysql_query(conn, rollup_sql.c_str()) == 0) {
+        affected = mysql_affected_rows(conn);
+        std::cout << "✅ [RoadmapDbClient] Daily candle rollup succeeded. Affected/Upserted candles: " << affected << "\n";
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] rollup_ticks_to_daily_candles error: " << mysql_error(conn) << "\n";
+    }
+
+    pool_->release(conn);
+    return affected;
+}
+
+uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& boundary_date, uint64_t& out_deleted) {
+    out_deleted = 0;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0;
+
+    std::string safe_date = boundary_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, boundary_date) + "'");
+
+    std::string copy_sql = 
+        "INSERT IGNORE INTO fnf_market_snapshots_history "
+        "(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt) "
+        "SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, NOW() "
+        "FROM fnf_market_snapshots "
+        "WHERE DATE(ts) < " + safe_date + ";";
+
+    uint64_t copied = 0;
+    if (mysql_query(conn, copy_sql.c_str()) == 0) {
+        copied = mysql_affected_rows(conn);
+        std::cout << "✅ [RoadmapDbClient] Market snapshots archived: " << copied << " row(s) moved to history.\n";
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] archive copy error: " << mysql_error(conn) << "\n";
+        pool_->release(conn);
+        return 0;
+    }
+
+    std::string delete_sql = "DELETE FROM fnf_market_snapshots WHERE DATE(ts) < " + safe_date + ";";
+    if (mysql_query(conn, delete_sql.c_str()) == 0) {
+        out_deleted = mysql_affected_rows(conn);
+        std::cout << "✅ [RoadmapDbClient] Cleaned live snapshots: " << out_deleted << " row(s) purged from live table.\n";
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] archive purge error: " << mysql_error(conn) << "\n";
+    }
+
+    pool_->release(conn);
+    return copied;
+}
+
 
 

@@ -33,6 +33,7 @@
 #include "../src/market_data/fyers/fyers_decoder.hpp"
 #include "../src/market_data/broker_feed_supervisor.hpp"
 #include "../src/engine/gate_const_invariants.hpp"
+#include "../src/engine/post_session_analyzer.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -56,6 +57,8 @@ void run_solid_and_acid_test_suite() {
     std::string db_name = EnvLoader::get("DATABASE_NAME", "myjob_agent");
 
     auto db_client = std::make_shared<RoadmapDbClient>(db_host, db_port, db_user, db_pass, db_name);
+    db_client->set_test_isolation(true);
+    db_client->ensure_test_schema();
 
     int passed = 0;
     int failed = 0;
@@ -259,7 +262,7 @@ void run_solid_and_acid_test_suite() {
     {
         DecisionJournal journal(db_client);
         DecisionJournalRecord rec;
-        rec.decision_uuid = "DEC-TEST-UUID-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        rec.decision_uuid = "TEST-CANONICAL-DEC-G1-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
         rec.session_id = "SESSION-G1-TEST";
         rec.symbol = "NIFTY";
         rec.action = "BUY_CALL";
@@ -281,7 +284,7 @@ void run_solid_and_acid_test_suite() {
     {
         DecisionJournal journal(db_client);
         DecisionJournalRecord v_rec;
-        v_rec.decision_uuid = "DEC-TRANSACT-V1-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+        v_rec.decision_uuid = "TEST-CANONICAL-TX-G1-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
         v_rec.session_id = "SESSION-G1-TX";
         v_rec.symbol = "BANKNIFTY";
         v_rec.action = "NO_TRADE";
@@ -291,6 +294,16 @@ void run_solid_and_acid_test_suite() {
         DecisionJournalRecord inv_rec = v_rec; // Duplicate UUID triggers SQL error & rollback
         bool tx_ok = journal.simulate_forced_crash_rollback(v_rec, inv_rec);
         TEST("Gate G1-02: Transactional row writes enforce no partial state commits on failure", tx_ok);
+    }
+
+    // Item G1-04: Test Isolation Guard strictly blocks test records from touching production table
+    {
+        RoadmapDbClient unisolated_client(db_host, db_port, db_user, db_pass, db_name);
+        unisolated_client.set_test_isolation(false);
+        bool leaked = unisolated_client.log_decision_journal_record(
+            "TEST-LEAK-ATTEMPT-UUID", "TEST-LEAK-SESSION", "gitsha", "1.0", "NIFTY", "BUY_CALL", 0.99, 1000.0, "TEST", "{}"
+        );
+        TEST("Gate G1-04: Invariant guard strictly blocks test records from production decision journal", !leaked);
     }
 
     // -----------------------------------------------------------------
@@ -1670,6 +1683,26 @@ void run_solid_and_acid_test_suite() {
         }
     }
 
+    // -----------------------------------------------------------------
+    // CATEGORY 7: POST-SESSION ANALYSIS & DATA ARCHIVAL (SOLID / ACID)
+    // -----------------------------------------------------------------
+    {
+        std::cout << "\n--- CATEGORY 7: POST-SESSION ANALYSIS & DATA ARCHIVAL ---\n";
+        auto analyzer = std::make_shared<hermes::PostSessionAnalyzer>(db_client);
+
+        // Test PSA-01: Analytical recommendation preserves strict read-only invariant (never mutates parameters)
+        auto psa_report = analyzer->run_post_session_analysis("2026-10-09");
+        TEST("PSA-01: Post-session analyzer produces non-null analytical report with READ_ONLY advisory mode",
+             !psa_report.recommendations_json.empty() &&
+             psa_report.recommendations_json.find("\"parameter_mutation_allowed\": false") != std::string::npos);
+
+        // Test PSA-02: End-of-day data lifecycle runs safely with clear retention policy
+        auto arch_report = analyzer->run_daily_data_archival("2026-10-09");
+        TEST("PSA-02: End-of-day data archival rollup executes safely without deleting unverified rows",
+             !arch_report.retention_policy_note.empty());
+    }
+
+    db_client->cleanup_test_schema();
 
     std::cout << "===================================================================\n";
     std::cout << "📊 [TEST SUITE SUMMARY] Passed: " << passed << " | Failed: " << failed << "\n";

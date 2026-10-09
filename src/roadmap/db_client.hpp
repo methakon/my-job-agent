@@ -282,9 +282,35 @@ public:
     std::vector<struct UpstoxCandleRecord> fetch_daily_candles_db(const std::string& symbol);
     std::vector<struct UpstoxCandleRecord> fetch_intraday_candles_db(const std::string& symbol);
 
+    // Post-session analysis & End-of-day data lifecycle methods (Additive)
+    struct SessionDecisionStats {
+        uint64_t total_eval{0};
+        uint64_t no_action{0};
+        uint64_t actionable{0};
+        uint64_t risk_vetoes{0};
+        double avg_confidence{0.0};
+        double max_confidence{0.0};
+        int near_miss_count{0};
+    };
+    SessionDecisionStats fetch_session_decision_stats(const std::string& session_date);
+    bool save_post_session_analysis_record(const std::string& id, const std::string& session_date, const std::string& session_phase,
+                                          uint64_t total_ticks, uint64_t evaluated_decisions, uint64_t no_action_cnt,
+                                          uint64_t actionable_cnt, uint64_t risk_veto_cnt, int trades_executed,
+                                          double realized_drawdown, double avg_ofi, double max_ofi, int near_miss_cnt,
+                                          const std::string& recommendations_json);
+    uint64_t rollup_ticks_to_daily_candles(const std::string& session_date);
+    uint64_t archive_market_snapshots_before(const std::string& boundary_date, uint64_t& out_deleted);
+
+    // Test Isolation & Production Defense-in-Depth Guard
+    void set_test_isolation(bool enable) { is_test_isolation_ = enable; }
+    bool is_test_isolation() const { return is_test_isolation_; }
+    bool ensure_test_schema();
+    void cleanup_test_schema();
+
 private:
     std::shared_ptr<MySQLConnectionPool> pool_;        // Remote Server pool for common data & tokens
     std::shared_ptr<MySQLConnectionPool> pool_local_;  // Local DB pool for high-frequency ticks & historical candles
+    bool is_test_isolation_{false};
 
     MYSQL* acquire_local();
     void release_local(MYSQL* conn);
