@@ -298,6 +298,40 @@ inline std::string encrypt_token(const std::string& plaintext, const std::string
     return bytes_to_hex(iv, 16) + ":" + bytes_to_hex(ciphertext.data(), ciphertext.size());
 }
 
+// -------------------------------------------------------------------------
+// Extract exp claim from JWT token string (returns unix seconds or 0)
+// -------------------------------------------------------------------------
+inline int64_t extract_jwt_exp(const std::string& jwt) {
+    auto dot1 = jwt.find('.');
+    if (dot1 == std::string::npos) return 0;
+    auto dot2 = jwt.find('.', dot1 + 1);
+    if (dot2 == std::string::npos) return 0;
+    std::string b64 = jwt.substr(dot1 + 1, dot2 - dot1 - 1);
+    for (char& c : b64) {
+        if (c == '-') c = '+';
+        else if (c == '_') c = '/';
+    }
+    while (b64.size() % 4 != 0) b64.push_back('=');
+    std::string payload;
+    payload.resize(b64.size());
+    int len = EVP_DecodeBlock(reinterpret_cast<unsigned char*>(&payload[0]),
+                              reinterpret_cast<const unsigned char*>(b64.data()),
+                              static_cast<int>(b64.size()));
+    if (len <= 0) return 0;
+    payload.resize(len);
+    auto exp_pos = payload.find("\"exp\"");
+    if (exp_pos == std::string::npos) return 0;
+    auto colon = payload.find(':', exp_pos);
+    if (colon == std::string::npos) return 0;
+    size_t start = colon + 1;
+    while (start < payload.size() && (payload[start] == ' ' || payload[start] == '\t')) start++;
+    try {
+        return std::stoll(payload.substr(start));
+    } catch (...) {
+        return 0;
+    }
+}
+
 } // namespace crypto_util
 
 #endif // COMMON_CRYPTO_UTIL_HPP

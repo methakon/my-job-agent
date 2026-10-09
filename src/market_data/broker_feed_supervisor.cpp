@@ -125,6 +125,19 @@ bool BrokerFeedSupervisor::is_token_usable(const std::string& provider, BrokerCr
         return false;
     }
 
+    // Verify internal JWT exp claim if present
+    int64_t jwt_exp = crypto_util::extract_jwt_exp(decrypted);
+    if (jwt_exp > 0) {
+        int64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+        if (jwt_exp <= now_sec) {
+            std::cerr << "⚠️ [BrokerFeedSupervisor] Token for " << provider 
+                      << " has EXPIRED internal JWT exp (" << jwt_exp << " <= now: " << now_sec << "). Rejecting.\n";
+            return false;
+        }
+    }
+
     out_creds.provider = provider;
     out_creds.access_token = decrypted;
 
@@ -245,7 +258,6 @@ void BrokerFeedSupervisor::evaluate_and_connect() {
 
     bool connected = new_client->connect(creds);
     if (connected) {
-        fail_counts_[chosen_provider] = 0;
         new_client->subscribe(default_symbols_);
         active_client_ = std::move(new_client);
         active_provider_name_ = chosen_provider;
@@ -264,6 +276,9 @@ void BrokerFeedSupervisor::evaluate_and_connect() {
 }
 
 void BrokerFeedSupervisor::handle_tick(const CanonicalOptionTick& tick) {
+    // Confirmed fresh tick resets fail count for the active provider
+    fail_counts_[active_provider_name_] = 0;
+
     // 1. Instant RAM ingestion (0ms) into trading pipeline
     receiver_.ingest_tick(tick);
 
