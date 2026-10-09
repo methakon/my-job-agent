@@ -40,6 +40,16 @@ static std::string html_escape(const std::string& str) {
     return out;
 }
 
+static const char* GOOGLE_ANALYTICS_HEAD_TAG =
+    "<!-- Google tag (gtag.js) -->\n"
+    "<script async src=\"https://www.googletagmanager.com/gtag/js?id=G-28FDYX1K4Y\"></script>\n"
+    "<script>\n"
+    "  window.dataLayer = window.dataLayer || [];\n"
+    "  function gtag(){dataLayer.push(arguments);}\n"
+    "  gtag('js', new Date());\n\n"
+    "  gtag('config', 'G-28FDYX1K4Y');\n"
+    "</script>\n";
+
 static std::string render_nav_header(bool is_authenticated) {
     std::stringstream ss;
     ss << "<div class=\"nav-bar\">"
@@ -159,6 +169,7 @@ static std::string read_system_stats_json(std::shared_ptr<RoadmapDbClient> db_cl
 std::string RoadmapServer::render_home_page(bool is_authenticated) {
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Home — C++ Autonomous Trading Agent Platform</title>"
@@ -269,6 +280,7 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>User Dashboard — C++ Autonomous Trading Agent</title>"
@@ -398,6 +410,7 @@ std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const st
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Portfolio Capital & Margins — C++ Autonomous Trading Agent</title>"
@@ -490,6 +503,7 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>F&O Paper Trading & Skill Acquisition Desk — C++ Autonomous Engine</title>"
@@ -822,6 +836,7 @@ std::string RoadmapServer::render_tokens_page(bool is_authenticated) {
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Broker API Tokens — C++ Autonomous Trading Agent</title>"
@@ -998,6 +1013,7 @@ std::string RoadmapServer::render_openapi_json() {
 std::string RoadmapServer::render_swagger_ui_page(bool is_authenticated) {
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Swagger API Docs — C++ Autonomous Trading Agent</title>"
@@ -1036,6 +1052,7 @@ std::string RoadmapServer::render_swagger_ui_page(bool is_authenticated) {
 std::string RoadmapServer::render_login_page(const std::string& error_msg) {
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Operator Login — C++ Trading Agent Platform</title>"
@@ -1136,6 +1153,7 @@ std::string RoadmapServer::render_html_page(bool is_authenticated) {
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>Hermes-CPP Zero-Progress Roadmap Board — C++ Autonomous Trading Agent</title>"
@@ -1493,6 +1511,7 @@ std::string RoadmapServer::render_health_page(bool is_authenticated) {
 
     std::stringstream ss;
     ss << "<!doctype html><html lang=\"en\"><head>"
+       << GOOGLE_ANALYTICS_HEAD_TAG
        << "<meta charset=\"utf-8\"/>"
        << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
        << "<title>System Health — C++ Autonomous Trading Agent Platform</title>"
