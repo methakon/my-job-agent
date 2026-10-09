@@ -1655,6 +1655,11 @@ static std::string extract_header_val(const std::string& req, const std::string&
     return val;
 }
 
+static std::string safe_map_get(const std::map<std::string, std::string>& m, const std::string& key, const std::string& def = "") {
+    auto it = m.find(key);
+    return (it != m.end()) ? it->second : def;
+}
+
 std::string RoadmapServer::render_visitor_info_page(bool is_authenticated) {
     std::map<std::string, std::string> summary;
     std::vector<std::map<std::string, std::string>> top_pages;
@@ -1719,7 +1724,7 @@ std::string RoadmapServer::render_visitor_info_page(bool is_authenticated) {
        << "      <span class=\"pill info\">🛡️ 30-Day IP Redaction Boundary</span>"
        << "    </div>"
        << "  </div>"
-
+ 
        << "  <div class=\"grid-stats\">"
        << "    <div class=\"stat-card\">"
        << "      <div class=\"lbl\">Lifetime Page Views</div>"
@@ -1752,7 +1757,7 @@ std::string RoadmapServer::render_visitor_info_page(bool is_authenticated) {
        << "      <div class=\"sub\">Persisted / Enqueued (Drops: " << tracker.total_events_dropped() << ")</div>"
        << "    </div>"
        << "  </div>"
-
+ 
        << "  <div class=\"privacy-banner\">"
        << "    <h3>🛡️ Privacy Architecture &amp; Methodology Disclosure</h3>"
        << "    <p style=\"font-size:13.5px;color:#c9d1d9;margin:0 0 10px;\">"
@@ -1768,7 +1773,7 @@ std::string RoadmapServer::render_visitor_info_page(bool is_authenticated) {
        << "      🔒 <strong>Cryptographic Redaction Policy:</strong> At the 30-day retention boundary, raw IP addresses and lookup hashes are permanently set to <code>NULL</code> (<code>is_redacted = 1</code>). Future requests from that IP generate a completely new, unlinked identifier."
        << "    </div>"
        << "  </div>"
-
+ 
        << "  <div class=\"grid-panels\">"
        << "    <div class=\"panel\">"
        << "      <h3>📄 Top Visited Pages <span class=\"pill info\">Observed</span></h3>"
@@ -1776,13 +1781,13 @@ std::string RoadmapServer::render_visitor_info_page(bool is_authenticated) {
        << "        <thead><tr><th>Path</th><th style=\"text-align:right;\">Page Views</th><th style=\"text-align:right;\">Visitors</th></tr></thead>"
        << "        <tbody>";
     for (const auto& p : top_pages) {
-        ss << "<tr><td><code style=\"color:#58a6ff;\">" << html_escape(p.at("path")) << "</code></td>"
-           << "<td style=\"text-align:right;font-weight:600;\">" << p.at("views") << "</td>"
-           << "<td style=\"text-align:right;color:var(--dim);\">" << p.at("visitors") << "</td></tr>";
+        ss << "<tr><td><code style=\"color:#58a6ff;\">" << html_escape(safe_map_get(p, "path", "/")) << "</code></td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << safe_map_get(p, "views", safe_map_get(p, "count", "0")) << "</td>"
+           << "<td style=\"text-align:right;color:var(--dim);\">" << safe_map_get(p, "visitors", safe_map_get(p, "count", "0")) << "</td></tr>";
     }
     if (top_pages.empty()) ss << "<tr><td colspan=\"3\" style=\"color:var(--dim);text-align:center;\">No page visit records yet</td></tr>";
     ss << "        </tbody></table></div>"
-
+ 
        << "    <div class=\"panel\">"
        << "      <h3>🌍 Geographic Distribution <span class=\"pill info\">Approximate IP</span></h3>"
        << "      <div style=\"font-size:11.5px;color:var(--dim);margin-bottom:8px;\">Approximate location derived from IP (ISP gateway approximate, not exact GPS)</div>"
@@ -1790,37 +1795,37 @@ std::string RoadmapServer::render_visitor_info_page(bool is_authenticated) {
        << "        <thead><tr><th>Country</th><th>Code</th><th style=\"text-align:right;\">Page Views</th></tr></thead>"
        << "        <tbody>";
     for (const auto& c : countries) {
-        ss << "<tr><td>" << html_escape(c.at("country")) << "</td>"
-           << "<td><span class=\"pill ok\">" << html_escape(c.at("country_code")) << "</span></td>"
-           << "<td style=\"text-align:right;font-weight:600;\">" << c.at("views") << "</td></tr>";
+        ss << "<tr><td>" << html_escape(safe_map_get(c, "country", "Unknown")) << "</td>"
+           << "<td><span class=\"pill ok\">" << html_escape(safe_map_get(c, "country_code", "XX")) << "</span></td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << safe_map_get(c, "views", safe_map_get(c, "count", "0")) << "</td></tr>";
     }
     if (countries.empty()) ss << "<tr><td colspan=\"3\" style=\"color:var(--dim);text-align:center;\">No geographic records yet</td></tr>";
     ss << "        </tbody></table></div>"
-
+ 
        << "    <div class=\"panel\">"
        << "      <h3>🌐 Browsers &amp; Operating Systems <span class=\"pill info\">Inferred UA</span></h3>"
        << "      <table class=\"table-sm\">"
        << "        <thead><tr><th>Software / Platform</th><th style=\"text-align:right;\">Seen Count</th></tr></thead>"
        << "        <tbody>";
     for (const auto& b : browsers) {
-        ss << "<tr><td>" << html_escape(b.at("browser_name")) << "</td>"
-           << "<td style=\"text-align:right;font-weight:600;\">" << b.at("views") << "</td></tr>";
+        ss << "<tr><td>" << html_escape(safe_map_get(b, "browser_name", safe_map_get(b, "browser", "Other"))) << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << safe_map_get(b, "views", safe_map_get(b, "count", "0")) << "</td></tr>";
     }
     for (const auto& o : os_list) {
-        ss << "<tr><td style=\"color:var(--dim);\">" << html_escape(o.at("os_name")) << " (OS)</td>"
-           << "<td style=\"text-align:right;color:var(--dim);\">" << o.at("views") << "</td></tr>";
+        ss << "<tr><td style=\"color:var(--dim);\">" << html_escape(safe_map_get(o, "os_name", safe_map_get(o, "os", "Other"))) << " (OS)</td>"
+           << "<td style=\"text-align:right;color:var(--dim);\">" << safe_map_get(o, "views", safe_map_get(o, "count", "0")) << "</td></tr>";
     }
     if (browsers.empty() && os_list.empty()) ss << "<tr><td colspan=\"2\" style=\"color:var(--dim);text-align:center;\">No device records yet</td></tr>";
     ss << "        </tbody></table></div>"
-
+ 
        << "    <div class=\"panel\">"
        << "      <h3>📱 Device Categories <span class=\"pill info\">Inferred UA</span></h3>"
        << "      <table class=\"table-sm\">"
        << "        <thead><tr><th>Category</th><th style=\"text-align:right;\">Seen Count</th></tr></thead>"
        << "        <tbody>";
     for (const auto& d : devices) {
-        ss << "<tr><td>" << html_escape(d.at("device_type")) << "</td>"
-           << "<td style=\"text-align:right;font-weight:600;\">" << d.at("views") << "</td></tr>";
+        ss << "<tr><td>" << html_escape(safe_map_get(d, "device_type", "desktop")) << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << safe_map_get(d, "views", safe_map_get(d, "count", "0")) << "</td></tr>";
     }
     if (devices.empty()) ss << "<tr><td colspan=\"2\" style=\"color:var(--dim);text-align:center;\">No device categories yet</td></tr>";
     ss << "        </tbody></table></div>"
@@ -1930,8 +1935,9 @@ std::string RoadmapServer::render_admin_visitors_page(bool is_authenticated, int
        << "      <tbody>";
 
     for (const auto& v : visitors) {
-        bool is_redacted = (v.at("is_redacted") == "1" || v.at("ip_address").empty());
-        std::string v_id = v.at("visitor_id");
+        std::string ip = safe_map_get(v, "ip_address");
+        bool is_redacted = (safe_map_get(v, "is_redacted") == "1" || ip.empty() || ip == "Redacted");
+        std::string v_id = safe_map_get(v, "visitor_id", safe_map_get(v, "id"));
         ss << "<tr>"
            << "<td><a href=\"/admin/visitors/" << v_id << "\" style=\"color:var(--accent);font-family:monospace;font-weight:600;text-decoration:none;\">"
            << v_id.substr(0, std::min(v_id.length(), (size_t)16)) << "...</a></td>"
@@ -1939,15 +1945,15 @@ std::string RoadmapServer::render_admin_visitors_page(bool is_authenticated, int
         if (is_redacted) {
             ss << "<span class=\"badge redacted\">Redacted</span>";
         } else {
-            ss << "<code style=\"color:var(--accent);\">" << html_escape(v.at("ip_address")) << "</code>";
+            ss << "<code style=\"color:var(--accent);\">" << html_escape(ip) << "</code>";
         }
         ss << "</td>"
-           << "<td>" << html_escape(v.at("city")) << ", " << html_escape(v.at("country")) << "</td>"
-           << "<td style=\"color:var(--dim);\">" << html_escape(v.at("browser_name")) << " / " << html_escape(v.at("os_name")) << "</td>"
-           << "<td style=\"text-align:right;font-weight:600;\">" << v.at("total_visits") << "</td>"
-           << "<td style=\"text-align:right;font-weight:600;\">" << v.at("total_page_views") << "</td>"
-           << "<td style=\"color:var(--dim);font-size:12px;\">" << v.at("first_seen_at") << "</td>"
-           << "<td style=\"color:var(--dim);font-size:12px;\">" << v.at("last_seen_at") << "</td>"
+           << "<td>" << html_escape(safe_map_get(v, "city", "Unknown")) << ", " << html_escape(safe_map_get(v, "country", "Unknown")) << "</td>"
+           << "<td style=\"color:var(--dim);\">" << html_escape(safe_map_get(v, "browser_name", safe_map_get(v, "browser", "Other"))) << " / " << html_escape(safe_map_get(v, "os_name", safe_map_get(v, "os", "Other"))) << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << safe_map_get(v, "total_visits", "0") << "</td>"
+           << "<td style=\"text-align:right;font-weight:600;\">" << safe_map_get(v, "total_page_views", "0") << "</td>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << safe_map_get(v, "first_seen_at") << "</td>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << safe_map_get(v, "last_seen_at") << "</td>"
            << "<td>" << (is_redacted ? "<span class=\"badge warn\">REDACTED</span>" : "<span class=\"badge ok\">ACTIVE</span>") << "</td>"
            << "<td><a href=\"/admin/visitors/" << v_id << "\" class=\"btn-sm\">Details &rarr;</a></td>"
            << "</tr>";
@@ -2077,13 +2083,14 @@ std::string RoadmapServer::render_admin_visitor_detail_page(bool is_authenticate
        << "      <thead><tr><th>Session ID</th><th>Started At</th><th>Ended At</th><th>Page Views</th><th>Duration</th><th>Status</th></tr></thead>"
        << "      <tbody>";
     for (const auto& s : sessions) {
+        std::string sess_id = safe_map_get(s, "session_id", safe_map_get(s, "id"));
         ss << "<tr>"
-           << "<td><code style=\"color:var(--dim);font-size:12px;\">" << html_escape(s.at("session_id")) << "</code></td>"
-           << "<td>" << s.at("started_at") << "</td>"
-           << "<td>" << s.at("ended_at") << "</td>"
-           << "<td style=\"font-weight:600;\">" << s.at("page_views") << "</td>"
-           << "<td>" << s.at("duration_sec") << "s</td>"
-           << "<td>" << (s.at("is_active") == "1" ? "<span class=\"badge ok\">ACTIVE</span>" : "<span class=\"badge warn\">CLOSED</span>") << "</td>"
+           << "<td><code style=\"color:var(--dim);font-size:12px;\">" << html_escape(sess_id) << "</code></td>"
+           << "<td>" << safe_map_get(s, "started_at", safe_map_get(s, "first_seen_at")) << "</td>"
+           << "<td>" << safe_map_get(s, "ended_at", safe_map_get(s, "last_seen_at")) << "</td>"
+           << "<td style=\"font-weight:600;\">" << safe_map_get(s, "page_views", safe_map_get(s, "page_count", "1")) << "</td>"
+           << "<td>" << safe_map_get(s, "duration_sec", safe_map_get(s, "duration_seconds", "0")) << "s</td>"
+           << "<td>" << (safe_map_get(s, "is_active") == "1" ? "<span class=\"badge ok\">ACTIVE</span>" : "<span class=\"badge warn\">CLOSED</span>") << "</td>"
            << "</tr>";
     }
     if (sessions.empty()) ss << "<tr><td colspan=\"6\" style=\"text-align:center;color:var(--dim);padding:20px;\">No sessions recorded within retention period</td></tr>";
@@ -2095,13 +2102,15 @@ std::string RoadmapServer::render_admin_visitor_detail_page(bool is_authenticate
        << "      <thead><tr><th>Timestamp</th><th>Method</th><th>Path</th><th>Referer</th><th>HTTP Status</th><th>Response Time</th></tr></thead>"
        << "      <tbody>";
     for (const auto& h : history) {
+        std::string ref = safe_map_get(h, "referer", safe_map_get(h, "referrer"));
+        std::string st = safe_map_get(h, "status_code", "200");
         ss << "<tr>"
-           << "<td style=\"color:var(--dim);font-size:12px;\">" << h.at("visited_at") << "</td>"
-           << "<td><span class=\"badge ok\">" << html_escape(h.at("http_method")) << "</span></td>"
-           << "<td><code style=\"color:var(--accent);\">" << html_escape(h.at("path")) << "</code></td>"
-           << "<td style=\"color:var(--dim);font-size:12px;\">" << (h.at("referer").empty() ? "-" : html_escape(h.at("referer"))) << "</td>"
-           << "<td><span class=\"badge " << (h.at("status_code") == "200" ? "ok" : "warn") << "\">" << h.at("status_code") << "</span></td>"
-           << "<td>" << h.at("response_time_ms") << " ms</td>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << safe_map_get(h, "visited_at") << "</td>"
+           << "<td><span class=\"badge ok\">" << html_escape(safe_map_get(h, "http_method", "GET")) << "</span></td>"
+           << "<td><code style=\"color:var(--accent);\">" << html_escape(safe_map_get(h, "path", "/")) << "</code></td>"
+           << "<td style=\"color:var(--dim);font-size:12px;\">" << (ref.empty() ? "-" : html_escape(ref)) << "</td>"
+           << "<td><span class=\"badge " << (st == "200" ? "ok" : "warn") << "\">" << st << "</span></td>"
+           << "<td>" << safe_map_get(h, "response_time_ms", "0") << " ms</td>"
            << "</tr>";
     }
     if (history.empty()) ss << "<tr><td colspan=\"6\" style=\"text-align:center;color:var(--dim);padding:20px;\">No detailed page visit history within retention period</td></tr>";

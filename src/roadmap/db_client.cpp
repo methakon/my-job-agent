@@ -2566,6 +2566,8 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics
                 std::map<std::string, std::string> m;
                 m["path"] = row[0] ? row[0] : "/";
                 m["count"] = row[1] ? row[1] : "0";
+                m["views"] = m["count"];
+                m["visitors"] = m["count"];
                 pages.push_back(m);
             }
             mysql_free_result(res);
@@ -2590,6 +2592,7 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics
                 m["country"] = row[0] ? row[0] : "Unknown";
                 m["country_code"] = row[1] ? row[1] : "XX";
                 m["count"] = row[2] ? row[2] : "0";
+                m["views"] = m["count"];
                 countries.push_back(m);
             }
             mysql_free_result(res);
@@ -2612,7 +2615,9 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics
             while ((row = mysql_fetch_row(res))) {
                 std::map<std::string, std::string> m;
                 m["browser"] = row[0] ? row[0] : "Other";
+                m["browser_name"] = m["browser"];
                 m["count"] = row[1] ? row[1] : "0";
+                m["views"] = m["count"];
                 items.push_back(m);
             }
             mysql_free_result(res);
@@ -2635,7 +2640,9 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics
             while ((row = mysql_fetch_row(res))) {
                 std::map<std::string, std::string> m;
                 m["os"] = row[0] ? row[0] : "Other";
+                m["os_name"] = m["os"];
                 m["count"] = row[1] ? row[1] : "0";
+                m["views"] = m["count"];
                 items.push_back(m);
             }
             mysql_free_result(res);
@@ -2659,6 +2666,7 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_analytics
                 std::map<std::string, std::string> m;
                 m["device_type"] = row[0] ? row[0] : "desktop";
                 m["count"] = row[1] ? row[1] : "0";
+                m["views"] = m["count"];
                 items.push_back(m);
             }
             mysql_free_result(res);
@@ -2704,7 +2712,7 @@ std::pair<int, std::vector<std::map<std::string, std::string>>> RoadmapDbClient:
     std::string q = "SELECT v.id, IFNULL(v.ip_address, 'Redacted'), v.ip_version, v.total_visits, v.total_page_views, "
                     "v.browser_name, v.operating_system, v.device_type, v.is_bot, v.identity_confidence, "
                     "DATE_FORMAT(v.first_seen_at, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(v.last_seen_at, '%Y-%m-%d %H:%i:%s'), "
-                    "IFNULL(l.country, 'Unknown'), IFNULL(l.city, 'Unknown') "
+                    "IFNULL(l.country, 'Unknown'), IFNULL(l.city, 'Unknown'), v.is_redacted "
                     "FROM analytics_visitors v LEFT JOIN analytics_locations l ON v.id = l.visitor_id "
                     + where + " ORDER BY v.last_seen_at DESC LIMIT " + std::to_string(limit) + " OFFSET " + std::to_string(offset) + ";";
 
@@ -2715,12 +2723,15 @@ std::pair<int, std::vector<std::map<std::string, std::string>>> RoadmapDbClient:
             while ((row = mysql_fetch_row(res))) {
                 std::map<std::string, std::string> r;
                 r["id"] = row[0] ? row[0] : "";
+                r["visitor_id"] = r["id"];
                 r["ip_address"] = row[1] ? row[1] : "Redacted";
                 r["ip_version"] = row[2] ? row[2] : "IPv4";
                 r["total_visits"] = row[3] ? row[3] : "0";
                 r["total_page_views"] = row[4] ? row[4] : "0";
                 r["browser"] = row[5] ? row[5] : "Other";
+                r["browser_name"] = r["browser"];
                 r["os"] = row[6] ? row[6] : "Other";
+                r["os_name"] = r["os"];
                 r["device_type"] = row[7] ? row[7] : "desktop";
                 r["is_bot"] = row[8] ? row[8] : "0";
                 r["confidence"] = row[9] ? row[9] : "MEDIUM";
@@ -2728,6 +2739,7 @@ std::pair<int, std::vector<std::map<std::string, std::string>>> RoadmapDbClient:
                 r["last_seen_at"] = row[11] ? row[11] : "";
                 r["country"] = row[12] ? row[12] : "Unknown";
                 r["city"] = row[13] ? row[13] : "Unknown";
+                r["is_redacted"] = row[14] ? row[14] : "0";
                 records.push_back(r);
             }
             mysql_free_result(res);
@@ -2759,6 +2771,7 @@ std::map<std::string, std::string> RoadmapDbClient::fetch_admin_visitor_detail(c
             MYSQL_ROW row = mysql_fetch_row(res);
             if (row) {
                 d["id"] = row[0] ? row[0] : "";
+                d["visitor_id"] = d["id"];
                 d["ip_address"] = row[1] ? row[1] : "Redacted";
                 d["ip_version"] = row[2] ? row[2] : "IPv4";
                 d["identity_generation"] = row[3] ? row[3] : "1";
@@ -2814,6 +2827,7 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_admin_vis
                 r["visited_at"] = row[3] ? row[3] : "";
                 r["response_time_ms"] = row[4] ? row[4] : "0";
                 r["referrer"] = row[5] ? row[5] : "";
+                r["referer"] = r["referrer"];
                 r["session_id"] = row[6] ? row[6] : "0";
                 records.push_back(r);
             }
@@ -2842,14 +2856,19 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_admin_vis
             while ((row = mysql_fetch_row(res))) {
                 std::map<std::string, std::string> r;
                 r["id"] = row[0] ? row[0] : "";
+                r["session_id"] = r["id"];
                 r["session_key"] = row[1] ? row[1] : "";
                 r["first_seen_at"] = row[2] ? row[2] : "";
+                r["started_at"] = r["first_seen_at"];
                 r["last_seen_at"] = row[3] ? row[3] : "";
+                r["ended_at"] = r["last_seen_at"];
                 r["page_count"] = row[4] ? row[4] : "1";
+                r["page_views"] = r["page_count"];
                 r["duration_seconds"] = row[5] ? row[5] : "0";
+                r["duration_sec"] = r["duration_seconds"];
                 r["entry_page"] = row[6] ? row[6] : "";
                 r["exit_page"] = row[7] ? row[7] : "";
-                r["is_active"] = (row[8] && std::string(row[8]) == "1") ? "Active" : "Closed";
+                r["is_active"] = (row[8] && std::string(row[8]) == "1") ? "1" : "0";
                 records.push_back(r);
             }
             mysql_free_result(res);
