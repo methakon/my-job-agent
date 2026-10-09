@@ -1,5 +1,35 @@
 {
   "exemptions": {
+    "2cfc3f40e8f7a4301b1d92e9cb0cd2cdb73645e8": {
+      "short": "2cfc3f4",
+      "reason": "Trading Agent workstream — feat(config): implement dynamic strategy config table with audit log and atomic hot-reload",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "1c8c6a4c200a6bb7a233ed4e684de085c90363a8": {
+      "short": "1c8c6a4",
+      "reason": "Trading Agent workstream — feat(eod): hook in-process EOD analysis and archival into BrokerFeedSupervisor session close",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "7eff25f7cf802c32a8cead00c9ae0cbb27f755a8": {
+      "short": "7eff25f",
+      "reason": "Trading Agent workstream — fix(db): enforce test database isolation and purge test records from prod journal",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "02b2fbac14ed2e28b94566a34c53af5ded290e36": {
+      "short": "02b2fba",
+      "reason": "Trading Agent workstream — feat(observability): expose and audit MySQL SSL cipher status in telemetry and automated cron",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "aacbcb58611a0f7d8992eb40e6105185aba6020c": {
+      "short": "aacbcb5",
+      "reason": "Trading Agent workstream — fix(risk): wire real today session drawdown query and persistence to gate16 circuit breaker",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "f01fb0874ac0452a7d5b702b09ff91e448615379": {
       "short": "f01fb08",
       "reason": "Trading Agent workstream — fix(market_data): send Upstox v3 subscription as binary frame and wire dynamic tick counter to fnf_market_snapshots",
