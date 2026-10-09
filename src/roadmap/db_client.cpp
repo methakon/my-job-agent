@@ -183,6 +183,25 @@ bool RoadmapDbClient::test_local_connection() {
     return status;
 }
 
+std::string RoadmapDbClient::get_ssl_cipher_status() {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return "NO_CONNECTION";
+
+    std::string cipher = "NONE";
+    if (mysql_query(conn, "SHOW STATUS LIKE 'Ssl_cipher';") == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[1]) {
+                cipher = row[1];
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return cipher;
+}
+
 static std::string escape_string(MYSQL* conn, const std::string& input) {
     if (!conn || input.empty()) return "";
     std::vector<char> buffer(input.length() * 2 + 1);

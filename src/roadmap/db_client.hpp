@@ -223,6 +223,7 @@ public:
 
     bool test_connection();
     bool test_local_connection();
+    std::string get_ssl_cipher_status();
     std::vector<ChecklistItem> fetch_all_items();
     RoadmapOverview compute_overview(const std::vector<ChecklistItem>& items);
     std::vector<CppRoadmapItem> fetch_cpp_roadmap_items();

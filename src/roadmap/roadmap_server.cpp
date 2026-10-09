@@ -140,8 +140,16 @@ static std::string read_system_stats_json(std::shared_ptr<RoadmapDbClient> db_cl
          << ",\"total_ticks\":" << total_ticks
          << ",\"session_phase\":\"" << hermes::MarketCalendar::session_phase_to_string(session_phase) << "\""
          << ",\"is_trading_day\":" << (is_trading_day ? "true" : "false")
-         << ",\"is_market_open\":" << (session_phase == hermes::SessionPhase::MARKET_OPEN ? "true" : "false")
-         << "}";
+         << ",\"is_market_open\":" << (session_phase == hermes::SessionPhase::MARKET_OPEN ? "true" : "false");
+
+    if (db_client) {
+        std::string cipher = db_client->get_ssl_cipher_status();
+        bool is_encrypted = (!cipher.empty() && cipher != "NONE" && cipher != "NO_CONNECTION");
+        json << ",\"mysql_ssl_cipher\":\"" << cipher << "\""
+             << ",\"mysql_ssl_encrypted\":" << (is_encrypted ? "true" : "false");
+    }
+
+    json << "}";
     return json.str();
 }
 
