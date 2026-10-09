@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "de4d53a140e9c9d03137d67db4259082eea1ecb5": {
+      "short": "de4d53a",
+      "reason": "Trading Agent workstream — fix(market_data): implement zero-copy Protobuf wire decoder for Upstox FeedResponse v3 with strict non-zero price validation",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "40d4f28a100a50886af6ec1f711189d5993be01b": {
       "short": "40d4f28",
       "reason": "Trading Agent workstream — feat(supervisor): validate internal JWT exp claim and reset fail count on confirmed ticks",

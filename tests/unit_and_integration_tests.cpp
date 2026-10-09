@@ -1575,6 +1575,84 @@ void run_solid_and_acid_test_suite() {
         bool rejected_mock_cid = !db_client->save_broker_access_token("upstox", sample_fyers_token, "mock_client", "2026-12-31 23:59:59");
         TEST("Feed-07: C++ OAuth token persistence enforces permanent guard rejecting test_client_id and mock credentials",
              rejected_test_cid && rejected_mock_cid);
+
+        // 8. Upstox Protobuf Binary Decoder Test
+        {
+            auto append_varint_fn = [](std::vector<uint8_t>& buf, uint64_t val) {
+                while (val >= 0x80) {
+                    buf.push_back(static_cast<uint8_t>((val & 0x7F) | 0x80));
+                    val >>= 7;
+                }
+                buf.push_back(static_cast<uint8_t>(val & 0x7F));
+            };
+            auto append_tag_fn = [&](std::vector<uint8_t>& buf, uint32_t fn, uint32_t wt) {
+                append_varint_fn(buf, (fn << 3) | wt);
+            };
+            auto append_ld_fn = [&](std::vector<uint8_t>& buf, uint32_t fn, const std::vector<uint8_t>& sub) {
+                append_tag_fn(buf, fn, 2);
+                append_varint_fn(buf, sub.size());
+                buf.insert(buf.end(), sub.begin(), sub.end());
+            };
+            auto append_str_fn = [&](std::vector<uint8_t>& buf, uint32_t fn, const std::string& str) {
+                append_tag_fn(buf, fn, 2);
+                append_varint_fn(buf, str.size());
+                buf.insert(buf.end(), str.begin(), str.end());
+            };
+            auto append_dbl_fn = [&](std::vector<uint8_t>& buf, uint32_t fn, double val) {
+                append_tag_fn(buf, fn, 1);
+                uint8_t b[8];
+                std::memcpy(b, &val, 8);
+                buf.insert(buf.end(), b, b + 8);
+            };
+
+            // Build LTPC: ltp = 25150.75, cp = 25000.0
+            std::vector<uint8_t> ltpc_buf;
+            append_dbl_fn(ltpc_buf, 1, 25150.75);
+            append_dbl_fn(ltpc_buf, 4, 25000.00);
+
+            // Build IndexFullFeed: ltpc = 1
+            std::vector<uint8_t> index_ff_buf;
+            append_ld_fn(index_ff_buf, 1, ltpc_buf);
+
+            // Build FullFeed: indexFF = 2
+            std::vector<uint8_t> full_feed_buf;
+            append_ld_fn(full_feed_buf, 2, index_ff_buf);
+
+            // Build Feed: ff = 2
+            std::vector<uint8_t> feed_buf;
+            append_ld_fn(feed_buf, 2, full_feed_buf);
+
+            // Build MapEntry: key = 1 ("NSE_INDEX|Nifty 50"), value = 2 (Feed)
+            std::vector<uint8_t> map_entry_buf;
+            append_str_fn(map_entry_buf, 1, "NSE_INDEX|Nifty 50");
+            append_ld_fn(map_entry_buf, 2, feed_buf);
+
+            // Build FeedResponse: type = 1, feeds = 2
+            std::vector<uint8_t> feed_resp_buf;
+            append_tag_fn(feed_resp_buf, 1, 0);
+            append_varint_fn(feed_resp_buf, 1);
+            append_ld_fn(feed_resp_buf, 2, map_entry_buf);
+
+            std::vector<CanonicalOptionTick> pb_ticks;
+            bool pb_ok = UpstoxDecoder::decode_frame(feed_resp_buf.data(), feed_resp_buf.size(), true, pb_ticks);
+            TEST("Feed-08: Upstox Protobuf binary feed decoded with exact LTP, instrument key and UPSTOX_WS provenance",
+                 pb_ok && !pb_ticks.empty() &&
+                 pb_ticks[0].instrument_key == "NSE_INDEX|Nifty 50" &&
+                 pb_ticks[0].ltp == 25150.75 &&
+                 pb_ticks[0].provenance == "UPSTOX_WS");
+
+            // 9. Negative Corrupt / Zero Price Invariant Guard
+            std::string corrupt_payload = "NSE_COM  \n\n\n NCD_FO  \n NSE_FO";
+            std::vector<CanonicalOptionTick> corrupt_ticks;
+            bool rej_corrupt = !UpstoxDecoder::decode_frame(
+                reinterpret_cast<const uint8_t*>(corrupt_payload.data()),
+                corrupt_payload.size(),
+                true,
+                corrupt_ticks
+            );
+            TEST("Feed-09: Upstox decoder strictly rejects corrupt enum tokens (NSE_COM, NCD_FO) and zero prices (ltp = 0.0)",
+                 rej_corrupt && corrupt_ticks.empty());
+        }
     }
 
 
