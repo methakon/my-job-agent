@@ -1992,6 +1992,29 @@ bool RoadmapDbClient::ensure_strategy_config_schema() {
         "('base_confidence', '0.85', 'Base confidence score for confirmed signals', 'SYSTEM_BASELINE');";
     mysql_query(conn, seed_sql);
 
+    // Ensure database trigger exists for immutable, autonomous auditing of all parameter updates
+    const char* drop_trg_sql = "DROP TRIGGER IF EXISTS trg_cpp_strategy_config_audit;";
+    mysql_query(conn, drop_trg_sql);
+
+    const char* trigger_sql =
+        "CREATE TRIGGER trg_cpp_strategy_config_audit "
+        "AFTER UPDATE ON cpp_strategy_config "
+        "FOR EACH ROW "
+        "BEGIN "
+        "  IF OLD.config_value <> NEW.config_value THEN "
+        "    INSERT INTO cpp_strategy_config_audit ("
+        "      config_key, old_value, new_value, approved_by, reason, created_at"
+        "    ) VALUES ("
+        "      NEW.config_key, OLD.config_value, NEW.config_value, NEW.updated_by,"
+        "      CONCAT('Trigger-enforced audit: value updated from ', OLD.config_value, ' to ', NEW.config_value),"
+        "      NOW()"
+        "    ); "
+        "  END IF; "
+        "END;";
+    if (mysql_query(conn, trigger_sql) != 0) {
+        std::cerr << "⚠️ [RoadmapDbClient] Failed to install trg_cpp_strategy_config_audit trigger: " << mysql_error(conn) << "\n";
+    }
+
     pool_->release(conn);
     return true;
 }
@@ -2033,37 +2056,14 @@ bool RoadmapDbClient::update_strategy_config_param(
     std::string safe_key = escape_string(conn, key);
     std::string safe_val = escape_string(conn, new_value);
     std::string safe_by  = escape_string(conn, approved_by.empty() ? "OPERATOR" : approved_by);
-    std::string safe_rsn = escape_string(conn, reason.empty() ? "Operational tuning" : reason);
 
-    // 1. Fetch old value
-    std::string old_val = "";
-    std::string sel = "SELECT config_value FROM cpp_strategy_config WHERE config_key = '" + safe_key + "';";
-    if (mysql_query(conn, sel.c_str()) == 0) {
-        MYSQL_RES* res = mysql_store_result(conn);
-        if (res) {
-            MYSQL_ROW row = mysql_fetch_row(res);
-            if (row && row[0]) {
-                old_val = row[0];
-            }
-            mysql_free_result(res);
-        }
-    }
-
-    // 2. Upsert config
+    // Upsert config. The MySQL AFTER UPDATE trigger (trg_cpp_strategy_config_audit) guarantees
+    // an audit row is autonomously inserted into cpp_strategy_config_audit whenever config_value changes.
     std::string upsert = "INSERT INTO cpp_strategy_config (config_key, config_value, updated_by) VALUES ('"
                        + safe_key + "', '" + safe_val + "', '" + safe_by + "') "
                        + "ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), updated_by = VALUES(updated_by);";
     if (mysql_query(conn, upsert.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] update_strategy_config_param upsert error: " << mysql_error(conn) << "\n";
-        pool_->release(conn);
-        return false;
-    }
-
-    // 3. Insert audit entry
-    std::string audit = "INSERT INTO cpp_strategy_config_audit (config_key, old_value, new_value, approved_by, reason, created_at) VALUES ('"
-                      + safe_key + "', '" + escape_string(conn, old_val) + "', '" + safe_val + "', '" + safe_by + "', '" + safe_rsn + "', NOW());";
-    if (mysql_query(conn, audit.c_str()) != 0) {
-        std::cerr << "❌ [RoadmapDbClient] update_strategy_config_param audit insert error: " << mysql_error(conn) << "\n";
         pool_->release(conn);
         return false;
     }
@@ -2100,4 +2100,15 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_strategy_
     }
     pool_->release(conn);
     return records;
+}
+
+bool RoadmapDbClient::execute_raw_sql(const std::string& sql) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+    bool ok = (mysql_query(conn, sql.c_str()) == 0);
+    if (!ok) {
+        std::cerr << "❌ [RoadmapDbClient] execute_raw_sql error: " << mysql_error(conn) << "\n";
+    }
+    pool_->release(conn);
+    return ok;
 }

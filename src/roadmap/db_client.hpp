@@ -312,6 +312,7 @@ public:
     std::map<std::string, std::string> fetch_strategy_config();
     bool update_strategy_config_param(const std::string& key, const std::string& new_value, const std::string& approved_by, const std::string& reason);
     std::vector<std::map<std::string, std::string>> fetch_strategy_config_audit(int limit = 20);
+    bool execute_raw_sql(const std::string& sql);
 
 private:
     std::shared_ptr<MySQLConnectionPool> pool_;        // Remote Server pool for common data & tokens

@@ -1775,6 +1775,34 @@ void run_solid_and_acid_test_suite() {
         TEST("SCM-06: Reversion back to baseline (0.85 / 0.02) completes cleanly",
              revert_ofi && std::abs(scm.get_ofi_threshold() - 0.85) < 1e-6 &&
              std::abs(scm.get_per_trade_risk_pct() - 0.02) < 1e-6);
+
+        // SCM-07: Trigger guarantees audit row on standalone UPDATE without manual INSERT
+        std::string standalone_update =
+            "UPDATE cpp_strategy_config SET config_value = '0.82', updated_by = 'STANDALONE_TRIGGER_TEST' "
+            "WHERE config_key = 'ofi_threshold';";
+        bool update_executed = db_client->execute_raw_sql(standalone_update);
+
+        // Fetch audit rows immediately without any manual insert
+        auto trigger_audit_records = db_client->fetch_strategy_config_audit(5);
+        bool trigger_audit_verified = false;
+        for (const auto& a : trigger_audit_records) {
+            if (a.at("config_key") == "ofi_threshold" &&
+                a.at("new_value") == "0.82" &&
+                a.at("old_value") == "0.85" &&
+                a.at("approved_by") == "STANDALONE_TRIGGER_TEST") {
+                trigger_audit_verified = true;
+                break;
+            }
+        }
+        TEST("SCM-07: Trigger guarantees audit row on standalone UPDATE without manual INSERT",
+             update_executed && trigger_audit_verified);
+
+        // Revert back to 0.85 via standalone UPDATE to verify trigger on revert
+        std::string revert_update =
+            "UPDATE cpp_strategy_config SET config_value = '0.85', updated_by = 'OPERATOR' "
+            "WHERE config_key = 'ofi_threshold';";
+        db_client->execute_raw_sql(revert_update);
+        scm.load_from_db(db_client.get());
     }
 
     db_client->cleanup_test_schema();
