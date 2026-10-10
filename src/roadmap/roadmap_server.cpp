@@ -272,6 +272,7 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
     BrokerTokenInfo sandbox_info;
     std::vector<CppRoadmapItem> cpp_items;
     RoadmapOverview cpp_ov;
+    long long total_ticks = 0;
 
     if (db_client_ && db_client_->test_connection()) {
         user = db_client_->fetch_user_by_email_or_id(target_id);
@@ -281,6 +282,8 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
         sandbox_info = db_client_->fetch_broker_token_status("upstox_sandbox");
         cpp_items = db_client_->fetch_cpp_roadmap_items();
         cpp_ov = db_client_->compute_cpp_overview(cpp_items);
+        auto counts = db_client_->fetch_stored_tick_counts();
+        total_ticks = counts.second;
     }
 
     std::stringstream ss;
@@ -345,7 +348,7 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "      <div class=\"tile-icon\">📈</div>"
        << "      <div class=\"tile-title\">Paper Trading &amp; Engine Training</div>"
        << "      <div class=\"tile-stat green\">&lt; 0.05 µs Latency</div>"
-       << "      <div class=\"tile-meta\">Engine Skill Benchmark: <b>86.74% Win Rate</b> | Trades Log</div>"
+       << "      <div class=\"tile-meta\">Historical Ticks Ingested: <b>" << total_ticks << "</b> | Baseline Win Rate: <b>50.58%</b> (Post-Oct 5: 37.60%)</div>"
        << "      <div style=\"margin-top:auto;\">"
        << "        <a href=\"/paper-trading\" class=\"nav-btn-link\" style=\"font-size:12.5px;padding:7px 14px;\">📈 Open Paper Trading Sub-Page</a>"
        << "      </div>"

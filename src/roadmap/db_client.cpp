@@ -1480,7 +1480,7 @@ std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     long long total_count = 0;
     const char* query = "SELECT "
                         "(SELECT COUNT(*) FROM fnf_market_snapshots WHERE createdAt >= CURRENT_DATE() AND createdAt < CURRENT_DATE() + INTERVAL 1 DAY) AS today_ticks, "
-                        "(SELECT COUNT(*) FROM fnf_market_snapshots) AS total_ticks;";
+                        "(SELECT (SELECT COUNT(*) FROM fnf_market_snapshots) + (SELECT COUNT(*) FROM fnf_market_snapshots_history)) AS total_ticks;";
     if (mysql_query(conn, query) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
