@@ -105,6 +105,18 @@ public:
         double current_capital_in_hand = 0.0
     );
 
+    // Separated Independent Margin Sufficiency & Per-Trade Risk Verification
+    IndependentRiskVeto verify_order_proposal_with_margin(
+        const std::string& symbol,
+        double proposed_risk_inr,
+        double required_margin_inr,
+        double current_open_exposure_inr,
+        double current_session_drawdown_inr,
+        size_t current_open_positions_for_symbol,
+        double ai_model_confidence,
+        double current_capital_in_hand = 0.0
+    );
+
     // G16-06: Feed Staleness Verification (STALE_FEED_VETO)
     static IndependentRiskVeto verify_feed_freshness(
         uint64_t tick_timestamp_ms,

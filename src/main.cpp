@@ -60,6 +60,7 @@ int main(int argc, char* argv[]) {
         test_report.max_ofi = 0.7420;
         test_report.near_miss_count = 10;
         test_report.risk_vetoes_count = 0;
+        test_report.margin_vetoes_count = 0;
 
         char buf[32];
         auto now = std::chrono::system_clock::now();
@@ -331,7 +332,8 @@ int main(int argc, char* argv[]) {
                                                        : (tick.bid_price > 0 ? tick.bid_price : tick.ltp);
                     double spot_px = (tick.strike > 0.0) ? tick.strike : (symbol.find("SENSEX") != std::string::npos ? 75000.0 : (symbol.find("BANKNIFTY") != std::string::npos ? 54000.0 : 25000.0));
                     
-                    double proposed_margin = hermes::IndependentRiskEngine::calculate_short_option_margin(side, lot_size, entry_px, spot_px);
+                    double required_margin = hermes::IndependentRiskEngine::calculate_short_option_margin(side, lot_size, entry_px, spot_px);
+                    double proposed_risk = (side == "BUY") ? (lot_size * entry_px) : (lot_size * entry_px * 0.50);
 
                     double capital_in_hand = cached_portfolio.capital + cached_portfolio.netPnl;
                     std::string current_date_str = tick.raw_timestamp.length() >= 10 ? tick.raw_timestamp.substr(0, 10) : "";
@@ -348,9 +350,10 @@ int main(int argc, char* argv[]) {
 
                     double current_session_drawdown = std::max(cached_today_drawdown, risk_engine.get_cumulative_daily_loss());
 
-                    auto veto = risk_engine.verify_order_proposal(
+                    auto veto = risk_engine.verify_order_proposal_with_margin(
                         symbol,
-                        proposed_margin,
+                        proposed_risk,
+                        required_margin,
                         cached_portfolio.deployed,
                         current_session_drawdown,
                         open_positions_for_symbol,
@@ -402,7 +405,8 @@ int main(int argc, char* argv[]) {
                         db_client->create_paper_trade(trade);
                         refresh_trade_cache();
                     } else {
-                        db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, "NO_TRADE", final_confidence, 0.0, "RISK_VETO: " + veto.veto_reason, "{}");
+                        std::string prefix = (veto.veto_reason.find("MARGIN_INSUFFICIENT") != std::string::npos) ? "MARGIN_VETO: " : "RISK_VETO: ";
+                        db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, "NO_TRADE", final_confidence, 0.0, prefix + veto.veto_reason, "{}");
                     }
                 } else if (total_saved_ticks % 100 == 0) {
                     // Periodically sample evaluated candidate ticks every 100 ticks

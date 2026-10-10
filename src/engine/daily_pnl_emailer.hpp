@@ -39,6 +39,7 @@ struct DailyPnLSummaryData {
     uint64_t evaluated_decisions{0};
     uint64_t ofi_below_threshold_count{0};
     uint64_t risk_vetoes_count{0};
+    uint64_t margin_vetoes_count{0};
     uint64_t actionable_signals_count{0};
     double avg_ofi{0.0};
     double max_ofi{0.0};

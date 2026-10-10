@@ -53,6 +53,7 @@ int main(int argc, char** argv) {
         std::cout << "No-Action Decisions:        " << report.no_action_count << "\n";
         std::cout << "Actionable Signals:         " << report.actionable_signals_count << "\n";
         std::cout << "Risk Vetoes:                " << report.risk_vetoes_count << "\n";
+        std::cout << "Margin Vetoes:              " << report.margin_vetoes_count << "\n";
         std::cout << "Trades Executed:            " << report.trades_executed_count << "\n";
         std::cout << "Realized Drawdown (INR):    ₹" << report.realized_drawdown_inr << "\n";
         std::cout << "Average OFI Confidence:     " << report.avg_ofi << "\n";

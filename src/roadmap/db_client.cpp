@@ -1806,7 +1806,8 @@ RoadmapDbClient::SessionDecisionStats RoadmapDbClient::fetch_session_decision_st
                     "  COUNT(*) as total_eval, "
                     "  SUM(CASE WHEN reason LIKE '%OFI_BELOW_BREAKOUT_THRESHOLD%' THEN 1 ELSE 0 END) as no_action, "
                     "  SUM(CASE WHEN action != 'NO_TRADE' AND decision_uuid NOT LIKE 'DEC-TEST%' THEN 1 ELSE 0 END) as actionable, "
-                    "  SUM(CASE WHEN reason LIKE '%RISK_VETO%' THEN 1 ELSE 0 END) as risk_vetoes, "
+                    "  SUM(CASE WHEN (reason LIKE '%RISK_VETO%' OR reason LIKE '%MARGIN_INSUFFICIENT%' OR reason LIKE '%MARGIN_VETO%') AND reason NOT LIKE '%MARGIN%' THEN 1 ELSE 0 END) as risk_vetoes, "
+                    "  SUM(CASE WHEN reason LIKE '%MARGIN_INSUFFICIENT%' OR reason LIKE '%MARGIN_VETO%' THEN 1 ELSE 0 END) as margin_vetoes, "
                     "  IFNULL(AVG(confidence), 0.0) as avg_conf, "
                     "  IFNULL(MAX(confidence), 0.0) as max_conf, "
                     "  SUM(CASE WHEN confidence >= 0.70 AND confidence < 0.85 THEN 1 ELSE 0 END) as near_miss "
@@ -1822,9 +1823,10 @@ RoadmapDbClient::SessionDecisionStats RoadmapDbClient::fetch_session_decision_st
                 if (row[1]) stats.no_action = std::stoull(row[1]);
                 if (row[2]) stats.actionable = std::stoull(row[2]);
                 if (row[3]) stats.risk_vetoes = std::stoull(row[3]);
-                if (row[4]) stats.avg_confidence = std::stod(row[4]);
-                if (row[5]) stats.max_confidence = std::stod(row[5]);
-                if (row[6]) stats.near_miss_count = std::stoi(row[6]);
+                if (row[4]) stats.margin_vetoes = std::stoull(row[4]);
+                if (row[5]) stats.avg_confidence = std::stod(row[5]);
+                if (row[6]) stats.max_confidence = std::stod(row[6]);
+                if (row[7]) stats.near_miss_count = std::stoi(row[7]);
             }
             mysql_free_result(res);
         }

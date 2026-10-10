@@ -297,6 +297,7 @@ public:
         uint64_t no_action{0};
         uint64_t actionable{0};
         uint64_t risk_vetoes{0};
+        uint64_t margin_vetoes{0};
         double avg_confidence{0.0};
         double max_confidence{0.0};
         int near_miss_count{0};

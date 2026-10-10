@@ -105,7 +105,8 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
                << "• Max OFI Observed         : " << std::fixed << std::setprecision(4) << data.max_ofi 
                << " (Average OFI: " << std::fixed << std::setprecision(4) << data.avg_ofi << ")\n"
                << "• Near-Miss Setups (0.70-0.85): " << data.near_miss_count << "\n"
-               << "• Risk Engine Vetoes       : " << data.risk_vetoes_count << "\n\n"
+               << "• Risk Engine Vetoes       : " << data.risk_vetoes_count << "\n"
+               << "• Margin Insufficient Vetoes: " << data.margin_vetoes_count << "\n\n"
                << "Conclusion: Order Flow Imbalance (OFI) and volume confluence never crossed the\n"
                << "required 0.85 threshold. Invariant E1-E10 and Rule R-001 enforced complete capital\n"
                << "preservation on low-conviction market flow.\n\n";
@@ -213,7 +214,8 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
                << "      • <b>Peak OFI Observed:</b> " << std::fixed << std::setprecision(4) << data.max_ofi 
                << " (Average confidence: " << std::fixed << std::setprecision(4) << data.avg_ofi << ").<br/>"
                << "      • <b>Near-Miss Setups:</b> " << data.near_miss_count << " ticks approached the 0.70-0.849 range.<br/>"
-               << "      • <b>Risk Engine Vetoes:</b> " << data.risk_vetoes_count << "<br/><br/>"
+               << "      • <b>Risk Engine Vetoes:</b> " << data.risk_vetoes_count << "<br/>"
+               << "      • <b>Margin Insufficient Vetoes:</b> " << data.margin_vetoes_count << "<br/><br/>"
                << "      <i>Conclusion: Market flow never satisfied the required Order Flow Imbalance and liquidity confluence. "
                << "Invariant E1-E10 and Rule R-001 enforced total capital preservation.</i>"
                << "    </div>";
@@ -393,6 +395,7 @@ bool DailyPnLEmailer::send_daily_summary_email(
     data.evaluated_decisions = psa_report.evaluated_decisions_count;
     data.ofi_below_threshold_count = psa_report.no_action_count;
     data.risk_vetoes_count = psa_report.risk_vetoes_count;
+    data.margin_vetoes_count = psa_report.margin_vetoes_count;
     data.actionable_signals_count = psa_report.actionable_signals_count;
     data.avg_ofi = psa_report.avg_ofi;
     data.max_ofi = psa_report.max_ofi;

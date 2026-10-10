@@ -122,6 +122,28 @@ IndependentRiskVeto IndependentRiskEngine::verify_order_proposal(
     double ai_model_confidence,
     double current_capital_in_hand
 ) {
+    return verify_order_proposal_with_margin(
+        symbol,
+        proposed_risk_inr,
+        proposed_risk_inr, // default fallback: required margin equals proposed risk
+        current_open_exposure_inr,
+        current_session_drawdown_inr,
+        current_open_positions_for_symbol,
+        ai_model_confidence,
+        current_capital_in_hand
+    );
+}
+
+IndependentRiskVeto IndependentRiskEngine::verify_order_proposal_with_margin(
+    const std::string& symbol,
+    double proposed_risk_inr,
+    double required_margin_inr,
+    double current_open_exposure_inr,
+    double current_session_drawdown_inr,
+    size_t current_open_positions_for_symbol,
+    double ai_model_confidence,
+    double current_capital_in_hand
+) {
     IndependentRiskVeto veto;
     veto.risk_approved = true;
     veto.model_override_attempt_blocked = false;
@@ -133,7 +155,18 @@ IndependentRiskVeto IndependentRiskEngine::verify_order_proposal(
     double effective_per_trade_risk = (current_capital_in_hand > 0.0) ? (per_trade_pct * effective_capital) : max_per_trade_risk_;
     double effective_drawdown_limit = (current_capital_in_hand > 0.0) ? (drawdown_pct * effective_capital) : max_session_drawdown_;
 
-    // Dynamic Per-Trade Risk Limit derived from CAPITAL_IN_HAND
+    // 1. Independent Margin Sufficiency Verification (Available cash/collateral check)
+    double available_margin = (effective_capital > current_open_exposure_inr) ? (effective_capital - current_open_exposure_inr) : 0.0;
+    if (required_margin_inr > available_margin) {
+        veto.risk_approved = false;
+        std::ostringstream ss;
+        ss << "MARGIN_INSUFFICIENT: Required margin (₹" << std::fixed << std::setprecision(2)
+           << required_margin_inr << ") exceeds available capital (₹" << available_margin << ")";
+        veto.veto_reason = ss.str();
+        return veto;
+    }
+
+    // 2. Dynamic Per-Trade Risk Limit derived from CAPITAL_IN_HAND (2% ceiling)
     if (proposed_risk_inr > effective_per_trade_risk) {
         veto.risk_approved = false;
         veto.model_override_attempt_blocked = (ai_model_confidence >= 0.90);
@@ -145,21 +178,14 @@ IndependentRiskVeto IndependentRiskEngine::verify_order_proposal(
         return veto;
     }
 
-    // Aggregate capital ceiling (CAPITAL_IN_HAND = Base Capital + Net Realized PnL)
-    if (current_open_exposure_inr + proposed_risk_inr > effective_capital) {
-        veto.risk_approved = false;
-        veto.veto_reason = "RISK_VETO_AGGREGATE_CAPITAL_CEILING_EXCEEDED";
-        return veto;
-    }
-
-    // Dynamic 5% Session Drawdown Limit derived from CAPITAL_IN_HAND
+    // 3. Dynamic 5% Session Drawdown Limit derived from CAPITAL_IN_HAND
     if (current_session_drawdown_inr >= effective_drawdown_limit) {
         veto.risk_approved = false;
         veto.veto_reason = "RISK_VETO_MAX_SESSION_DRAWDOWN_REACHED";
         return veto;
     }
 
-    // Concentration limit (Max 1 position per instrument)
+    // 4. Concentration limit (Max 1 position per instrument)
     if (current_open_positions_for_symbol >= 1) {
         veto.risk_approved = false;
         veto.veto_reason = "RISK_VETO_CONCENTRATION_LIMIT_EXCEEDED";

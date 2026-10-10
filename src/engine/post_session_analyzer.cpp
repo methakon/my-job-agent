@@ -39,6 +39,7 @@ PostSessionAnalysisReport PostSessionAnalyzer::run_post_session_analysis(const s
     report.no_action_count = dec_stats.no_action;
     report.actionable_signals_count = dec_stats.actionable;
     report.risk_vetoes_count = dec_stats.risk_vetoes;
+    report.margin_vetoes_count = dec_stats.margin_vetoes;
     report.avg_ofi = dec_stats.avg_confidence;
     report.max_ofi = dec_stats.max_confidence;
     report.near_miss_count = dec_stats.near_miss_count;

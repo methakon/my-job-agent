@@ -17,6 +17,7 @@ struct PostSessionAnalysisReport {
     uint64_t no_action_count{0};
     uint64_t actionable_signals_count{0};
     uint64_t risk_vetoes_count{0};
+    uint64_t margin_vetoes_count{0};
     int trades_executed_count{0};
     double realized_drawdown_inr{0.0};
     double avg_ofi{0.0};

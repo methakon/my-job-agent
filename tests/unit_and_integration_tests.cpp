@@ -1014,6 +1014,39 @@ void run_solid_and_acid_test_suite() {
         risk_engine.update_daily_risk_base(100000.0, "2026-10-09", 1200.0); // Recovered ₹1,200 prior loss on restart
         TEST("Gate G16-02c: Daily risk budget initializes with prior realized session loss across restart",
              risk_engine.get_cumulative_daily_loss() == 1200.0 && risk_engine.get_remaining_daily_budget() == 800.0);
+
+        // Case E / RISK-SEP-01: Separated Margin Sufficiency vs. Per-Trade Risk Verification
+        // Scenario 1: Valid Short Option: Capital = ₹300,000, Deployed = ₹50,000 (Available Margin = ₹250,000).
+        // Short NIFTY Option requires ₹47,500 margin, Stop-Loss planned risk = ₹1,500 (<= 2% Kelly limit ₹6,000).
+        // -> PASS (risk_approved = true)
+        IndependentRiskVeto sep_ok = risk_engine.verify_order_proposal_with_margin(
+            "NIFTY", 1500.0, 47500.0, 50000.0, 0.0, 0, 0.85, 300000.0
+        );
+
+        // Scenario 2: Margin Insufficient: Capital = ₹300,000, Deployed = ₹270,000 (Available Margin = ₹30,000).
+        // Short NIFTY Option requires ₹47,500 margin (> ₹30,000 available), Stop-Loss planned risk = ₹1,000 (well within 2%).
+        // -> VETO with MARGIN_INSUFFICIENT (NOT RISK_VETO_PER_TRADE_LIMIT_EXCEEDED)
+        IndependentRiskVeto sep_margin_fail = risk_engine.verify_order_proposal_with_margin(
+            "NIFTY", 1000.0, 47500.0, 270000.0, 0.0, 0, 0.85, 300000.0
+        );
+
+        // Scenario 3: Per-Trade Risk Exceeded: Capital = ₹300,000, Deployed = ₹50,000 (Available Margin = ₹250,000).
+        // Margin required = ₹47,500 (plenty of margin), Stop-Loss planned risk = ₹8,000 (> 2% Kelly limit ₹6,000).
+        // -> VETO with RISK_VETO_PER_TRADE_LIMIT_EXCEEDED (NOT MARGIN_INSUFFICIENT)
+        IndependentRiskVeto sep_risk_fail = risk_engine.verify_order_proposal_with_margin(
+            "NIFTY", 8000.0, 47500.0, 50000.0, 0.0, 0, 0.85, 300000.0
+        );
+
+        TEST("Gate G16-02d / RISK-SEP-01: Valid short option approved when both margin and stop-loss risk pass",
+             sep_ok.risk_approved);
+        TEST("Gate G16-02e / RISK-SEP-01: Margin insufficiency vetoes independently with MARGIN_INSUFFICIENT tag",
+             !sep_margin_fail.risk_approved &&
+             sep_margin_fail.veto_reason.find("MARGIN_INSUFFICIENT") != std::string::npos &&
+             sep_margin_fail.veto_reason.find("RISK_VETO_PER_TRADE_LIMIT_EXCEEDED") == std::string::npos);
+        TEST("Gate G16-02f / RISK-SEP-01: Stop-loss risk excess vetoes independently with RISK_VETO_PER_TRADE_LIMIT_EXCEEDED tag",
+             !sep_risk_fail.risk_approved &&
+             sep_risk_fail.veto_reason.find("RISK_VETO_PER_TRADE_LIMIT_EXCEEDED") != std::string::npos &&
+             sep_risk_fail.veto_reason.find("MARGIN_INSUFFICIENT") == std::string::npos);
     }
 
     // Item G16-03: Consecutive Loss & Feed Quality Shutdowns
