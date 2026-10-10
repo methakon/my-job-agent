@@ -49,15 +49,22 @@ EmailConfig DailyPnLEmailer::load_config() {
         return EnvLoader::get(env_key, def);
     };
 
+    // 2. Load non-secret operational settings (DB config takes precedence over .env)
     std::string enabled_str = get_val("daily_pnl_email_enabled", "DAILY_PNL_EMAIL_ENABLED", "false");
     cfg.enabled = (enabled_str == "true" || enabled_str == "1" || enabled_str == "TRUE");
-    cfg.smtp_host = get_val("smtp_host", "SMTP_HOST", "");
+    cfg.smtp_host = get_val("smtp_host", "SMTP_HOST", "smtp.gmail.com");
     std::string port_str = get_val("smtp_port", "SMTP_PORT", "465");
     try { cfg.smtp_port = std::stoi(port_str); } catch (...) { cfg.smtp_port = 465; }
-    cfg.smtp_user = get_val("smtp_user", "SMTP_USER", "");
-    cfg.smtp_password = get_val("smtp_password", "SMTP_PASSWORD", "");
     std::string ssl_str = get_val("smtp_use_ssl", "SMTP_USE_SSL", "true");
     cfg.use_ssl = (ssl_str == "true" || ssl_str == "1" || ssl_str == "TRUE");
+
+    // 3. SECRETS POLICY: smtp_user and smtp_password MUST NEVER be stored in or read from
+    // cpp_strategy_config to prevent plaintext logging by trg_cpp_strategy_config_audit.
+    // They are loaded exclusively from file-based environment (.env).
+    cfg.smtp_user = EnvLoader::get("SMTP_USER", "");
+    cfg.smtp_password = EnvLoader::get("SMTP_PASSWORD", "");
+
+    // 4. Sender / Recipient addresses (DB config allowed as non-sensitive)
     cfg.sender = get_val("daily_pnl_email_sender", "DAILY_PNL_EMAIL_SENDER", cfg.smtp_user);
     cfg.recipient = get_val("daily_pnl_email_recipient", "DAILY_PNL_EMAIL_RECIPIENT", "");
 
@@ -102,6 +109,27 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
                << "Conclusion: Order Flow Imbalance (OFI) and volume confluence never crossed the\n"
                << "required 0.85 threshold. Invariant E1-E10 and Rule R-001 enforced complete capital\n"
                << "preservation on low-conviction market flow.\n\n";
+        }
+
+        ss << "--- OPEN POSITIONS & REAL EXIT-RULE EVALUATION (" << data.open_positions_count << " Active) ---\n"
+           << "⚠️ Standing Risk Caveat: All unrealized mark-to-market P&L figures below are informational\n"
+           << "                         only and strictly excluded from the daily 5% realized drawdown calculation.\n\n";
+
+        if (data.open_positions.empty()) {
+            ss << "• No active open positions currently in portfolio.\n\n";
+        } else {
+            for (const auto& op : data.open_positions) {
+                ss << "• " << op.instrument << " [" << op.side << " x" << op.quantity << "]\n"
+                   << "  Entry       : ₹" << std::fixed << std::setprecision(2) << op.entry_price 
+                   << " (" << (op.entry_date.empty() ? "N/A" : op.entry_date) << " IST)\n"
+                   << "  Current LTP : ₹" << std::fixed << std::setprecision(2) << op.current_price << "\n"
+                   << "  Unrealized  : " << (op.unrealized_pnl_inr >= 0.0 ? "+₹" : "-₹")
+                   << std::fixed << std::setprecision(2) << std::abs(op.unrealized_pnl_inr)
+                   << " (" << (op.position_return_pct >= 0.0 ? "+" : "")
+                   << std::fixed << std::setprecision(2) << (op.position_return_pct * 100.0) << "%)\n"
+                   << "  Exit Status : " << (op.condition == PositionExitCondition::HOLD_WITHIN_BOUNDS ? "OPEN (Within Bounds)" : "EXIT TRIGGERED") << "\n"
+                   << "  Reason Open : " << op.reason_still_open << "\n\n";
+            }
         }
 
         ss << "--- RISK & CIRCUIT BREAKER STATUS ---\n"
@@ -189,6 +217,36 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
                << "      <i>Conclusion: Market flow never satisfied the required Order Flow Imbalance and liquidity confluence. "
                << "Invariant E1-E10 and Rule R-001 enforced total capital preservation.</i>"
                << "    </div>";
+        }
+
+        ss << "    <div class=\"section-title\">📂 Open Positions &amp; Real Exit Status (" << data.open_positions_count << " Active)</div>"
+           << "    <div class=\"caveat-box\" style=\"margin-top:0;margin-bottom:12px;\">"
+           << "      ⚠️ <b>Standing Risk Caveat:</b> Unrealized mark-to-market P&amp;L on all open positions is informational only and strictly excluded from the daily 5% realized drawdown calculation."
+           << "    </div>";
+
+        if (data.open_positions.empty()) {
+            ss << "    <p style=\"font-size:13px;color:#57606a;\">No active open positions currently in portfolio.</p>";
+        } else {
+            ss << "    <table class=\"trade-table\">"
+               << "      <thead><tr><th>Position / Side</th><th>Entry Price &amp; Date</th><th>Current LTP</th><th>Unrealized P&amp;L (MTM)</th><th>Real Exit-Rule Status &amp; Reason Still Open</th></tr></thead>"
+               << "      <tbody>";
+            for (const auto& op : data.open_positions) {
+                std::string pnl_color = (op.unrealized_pnl_inr >= 0.0 ? "#1a7f37" : "#cf222e");
+                ss << "<tr>"
+                   << "<td><b>" << op.instrument << "</b><br/><small style=\"color:#57606a;\">" << op.side << " x" << op.quantity << "</small></td>"
+                   << "<td>₹" << std::fixed << std::setprecision(2) << op.entry_price << "<br/><small style=\"color:#57606a;\">" << (op.entry_date.empty() ? "N/A" : op.entry_date) << "</small></td>"
+                   << "<td>₹" << std::fixed << std::setprecision(2) << op.current_price << "</td>"
+                   << "<td style=\"font-weight:bold;color:" << pnl_color << ";\">"
+                   << (op.unrealized_pnl_inr >= 0.0 ? "+₹" : "-₹") << std::fixed << std::setprecision(2) << std::abs(op.unrealized_pnl_inr)
+                   << "<br/><small style=\"font-size:11px;\">(" << (op.position_return_pct >= 0.0 ? "+" : "") << std::fixed << std::setprecision(2) << (op.position_return_pct * 100.0) << "%)</small>"
+                   << "<br/><span style=\"font-size:10px;color:#57606a;font-weight:normal;\">[Informational MTM]</span></td>"
+                   << "<td><div style=\"font-size:12.5px;line-height:1.4;\">"
+                   << "<b>" << op.target_progress_str << "</b> | <b>" << op.stop_progress_str << "</b><br/>"
+                   << "<span style=\"color:#57606a;font-size:11.5px;\">" << op.reason_still_open << "</span>"
+                   << "</div></td>"
+                   << "</tr>";
+            }
+            ss << "      </tbody></table>";
         }
 
         ss << "    <div class=\"section-title\">🛡️ Risk Limits &amp; Circuit Breaker</div>"
@@ -324,7 +382,8 @@ bool DailyPnLEmailer::send_daily_summary_email(
         data.today_realized_drawdown = db_client_->fetch_today_session_drawdown();
         data.closed_trades = db_client_->fetch_closed_trades_for_date(session_date);
         data.trades_closed_today = static_cast<int>(data.closed_trades.size());
-        data.open_positions_count = db_client_->fetch_open_positions_count();
+        data.open_positions = db_client_->fetch_open_positions_with_exit_evaluation();
+        data.open_positions_count = static_cast<int>(data.open_positions.size());
     }
 
     data.drawdown_limit_inr = data.starting_capital * 0.05;

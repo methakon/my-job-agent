@@ -19,6 +19,10 @@ namespace analytics {
     struct GeoLocationResult;
 }
 
+namespace hermes {
+    struct PositionExitEvaluation;
+}
+
 struct ChecklistItem {
     int id;
     int item_order;
@@ -322,6 +326,7 @@ public:
     // Session Trades, PSA Record, and Readiness Queries
     std::vector<std::map<std::string, std::string>> fetch_closed_trades_for_date(const std::string& session_date);
     int fetch_open_positions_count();
+    std::vector<hermes::PositionExitEvaluation> fetch_open_positions_with_exit_evaluation();
     double fetch_today_session_realized_pnl(const std::string& session_date = "");
     std::map<std::string, std::string> fetch_latest_post_session_record(const std::string& session_date = "");
     uint64_t count_historical_candles_for_date(const std::string& session_date);

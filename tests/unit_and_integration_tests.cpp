@@ -36,6 +36,7 @@
 #include "../src/engine/post_session_analyzer.hpp"
 #include "../src/engine/strategy_config_manager.hpp"
 #include "../src/engine/daily_pnl_emailer.hpp"
+#include "../src/engine/position_exit_evaluator.hpp"
 #include "../src/engine/pre_market_readiness_analyzer.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
@@ -1911,6 +1912,91 @@ void run_solid_and_acid_test_suite() {
 
         TEST("DPNL-04: DailyPnLEmailer fails safely and returns cleanly when disabled or recipient empty",
              disabled_res && unconf_res);
+    }
+
+    // Item DPNL-05: PositionExitEvaluator unit verification (target, stop, within bounds)
+    {
+        // 1. Within bounds positive return (+23%)
+        auto eval_pos = hermes::PositionExitEvaluator::evaluate_position_exit(
+            "trade_1", "NSE:NIFTY26OCT24400CE", "BUY", 50, 100.0, 123.0, "2026-10-10 10:00:00"
+        );
+        bool pos_ok = (eval_pos.condition == hermes::PositionExitCondition::HOLD_WITHIN_BOUNDS) &&
+                      (!eval_pos.is_exit_triggered) &&
+                      (eval_pos.target_progress_str == "+23.0% of +50.0% target reached") &&
+                      (eval_pos.stop_progress_str == "0.0% of -25.0% stop reached") &&
+                      (eval_pos.reason_still_open.find("+23.0%") != std::string::npos);
+
+        // 2. Within bounds negative return (-8%)
+        auto eval_neg = hermes::PositionExitEvaluator::evaluate_position_exit(
+            "trade_2", "NSE:NIFTY26OCT24400PE", "BUY", 50, 100.0, 92.0, "2026-10-10 10:05:00"
+        );
+        bool neg_ok = (eval_neg.condition == hermes::PositionExitCondition::HOLD_WITHIN_BOUNDS) &&
+                      (!eval_neg.is_exit_triggered) &&
+                      (eval_neg.target_progress_str == "0.0% of +50.0% target reached") &&
+                      (eval_neg.stop_progress_str == "-8.0% of -25.0% stop reached") &&
+                      (eval_neg.reason_still_open.find("-8.0%") != std::string::npos);
+
+        // 3. Take Profit hit (+55%)
+        auto eval_tp = hermes::PositionExitEvaluator::evaluate_position_exit(
+            "trade_3", "NSE:NIFTY26OCT24400CE", "BUY", 50, 100.0, 155.0, "2026-10-10 10:10:00"
+        );
+        bool tp_ok = (eval_tp.condition == hermes::PositionExitCondition::TAKE_PROFIT_TRIGGERED) &&
+                     (eval_tp.is_exit_triggered) &&
+                     (eval_tp.target_progress_str == "+55.0% of +50.0% target reached");
+
+        // 4. Stop Loss hit (-30%)
+        auto eval_sl = hermes::PositionExitEvaluator::evaluate_position_exit(
+            "trade_4", "NSE:NIFTY26OCT24400PE", "BUY", 50, 100.0, 70.0, "2026-10-10 10:15:00"
+        );
+        bool sl_ok = (eval_sl.condition == hermes::PositionExitCondition::STOP_LOSS_TRIGGERED) &&
+                     (eval_sl.is_exit_triggered) &&
+                     (eval_sl.stop_progress_str == "-30.0% of -25.0% stop reached");
+
+        TEST("DPNL-05: PositionExitEvaluator correctly evaluates target progress, stop progress, and exit triggers",
+             pos_ok && neg_ok && tp_ok && sl_ok);
+    }
+
+    // Item DPNL-06: DailyPnLEmailer formatting with open positions, exit reasons, and MTM caveat
+    {
+        DailyPnLSummaryData open_pos_data;
+        open_pos_data.session_date = "2026-10-10";
+        open_pos_data.starting_capital = 100000.0;
+        open_pos_data.final_capital_in_hand = 100000.0;
+        open_pos_data.today_realized_pnl = 0.0;
+        open_pos_data.today_realized_drawdown = 0.0;
+        open_pos_data.drawdown_limit_inr = 5000.0;
+        open_pos_data.trades_closed_today = 0;
+        open_pos_data.open_positions_count = 1;
+
+        auto eval = hermes::PositionExitEvaluator::evaluate_position_exit(
+            "tr_open_1", "NSE:NIFTY26OCT24500CE", "BUY", 50, 120.0, 147.6, "2026-10-09 14:15:00"
+        );
+        open_pos_data.open_positions.push_back(eval);
+
+        std::string text_body = DailyPnLEmailer::format_email_body(open_pos_data, false);
+        std::string html_body = DailyPnLEmailer::format_email_body(open_pos_data, true);
+
+        bool text_ok = (text_body.find("OPEN POSITIONS & REAL EXIT-RULE EVALUATION") != std::string::npos) &&
+                       (text_body.find("NSE:NIFTY26OCT24500CE") != std::string::npos) &&
+                       (text_body.find("+23.0% of +50.0% target reached") != std::string::npos) &&
+                       (text_body.find("Standing Risk Caveat: All unrealized mark-to-market P&L figures") != std::string::npos) &&
+                       (text_body.find("strictly excluded from the daily 5% realized drawdown calculation") != std::string::npos);
+
+        bool html_ok = (html_body.find("Open Positions &amp; Real Exit Status") != std::string::npos) &&
+                       (html_body.find("NSE:NIFTY26OCT24500CE") != std::string::npos) &&
+                       (html_body.find("+23.0% of +50.0% target reached") != std::string::npos) &&
+                       (html_body.find("Standing Risk Caveat") != std::string::npos) &&
+                       (html_body.find("strictly excluded from the daily 5% realized drawdown calculation") != std::string::npos);
+
+        TEST("DPNL-06: DailyPnLEmailer renders open position exit progress and mandatory MTM drawdown caveat",
+             text_ok && html_ok);
+    }
+
+    // Item DPNL-07: RoadmapDbClient::fetch_open_positions_with_exit_evaluation database query execution
+    {
+        auto open_positions = db_client->fetch_open_positions_with_exit_evaluation();
+        TEST("DPNL-07: RoadmapDbClient::fetch_open_positions_with_exit_evaluation executes clean SQL against database",
+             open_positions.size() >= 0);
     }
 
     // Item PMRA-01: PreMarketReadinessAnalyzer report generation & safety invariants

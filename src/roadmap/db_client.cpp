@@ -1,6 +1,7 @@
 #include "db_client.hpp"
 #include "../engine/tick_receiver.hpp"
 #include "../engine/upstox_historical_backfill.hpp"
+#include "../engine/position_exit_evaluator.hpp"
 #include "../common/crypto_util.hpp"
 #include "../common/env_loader.hpp"
 #include <iostream>
@@ -869,15 +870,18 @@ bool RoadmapDbClient::ensure_test_schema() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
     std::string q = "CREATE TABLE IF NOT EXISTS hermes_cpp_decision_journal_test LIKE hermes_cpp_decision_journal;";
-    int r = mysql_query(conn, q.c_str());
+    int r1 = mysql_query(conn, q.c_str());
+    std::string q2 = "CREATE TABLE IF NOT EXISTS cpp_post_session_analysis_test LIKE cpp_post_session_analysis;";
+    int r2 = mysql_query(conn, q2.c_str());
     pool_->release(conn);
-    return (r == 0);
+    return (r1 == 0 && r2 == 0);
 }
 
 void RoadmapDbClient::cleanup_test_schema() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return;
     mysql_query(conn, "TRUNCATE TABLE hermes_cpp_decision_journal_test;");
+    mysql_query(conn, "TRUNCATE TABLE cpp_post_session_analysis_test;");
     pool_->release(conn);
 }
 
@@ -1796,6 +1800,7 @@ RoadmapDbClient::SessionDecisionStats RoadmapDbClient::fetch_session_decision_st
     MYSQL* conn = pool_->acquire();
     if (!conn) return stats;
 
+    std::string dj_table = is_test_isolation_ ? "hermes_cpp_decision_journal_test" : "hermes_cpp_decision_journal";
     std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
     std::string q = "SELECT "
                     "  COUNT(*) as total_eval, "
@@ -1805,7 +1810,7 @@ RoadmapDbClient::SessionDecisionStats RoadmapDbClient::fetch_session_decision_st
                     "  IFNULL(AVG(confidence), 0.0) as avg_conf, "
                     "  IFNULL(MAX(confidence), 0.0) as max_conf, "
                     "  SUM(CASE WHEN confidence >= 0.70 AND confidence < 0.85 THEN 1 ELSE 0 END) as near_miss "
-                    "FROM hermes_cpp_decision_journal "
+                    "FROM " + dj_table + " "
                     "WHERE DATE(created_at) = " + safe_date + ";";
 
     if (mysql_query(conn, q.c_str()) == 0) {
@@ -1838,13 +1843,15 @@ bool RoadmapDbClient::save_post_session_analysis_record(
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
 
+    std::string table = is_test_isolation_ ? "cpp_post_session_analysis_test" : "cpp_post_session_analysis";
+
     TransactionGuard tx(conn);
     std::string safe_id = escape_string(conn, id);
     std::string safe_date = escape_string(conn, session_date);
     std::string safe_phase = escape_string(conn, session_phase);
     std::string safe_rec = escape_string(conn, recommendations_json);
 
-    std::string query = "INSERT INTO cpp_post_session_analysis "
+    std::string query = "INSERT INTO " + table + " "
                         "(id, session_date, session_phase, total_ticks_ingested, evaluated_decisions_count, "
                         "no_action_count, actionable_signals_count, risk_vetoes_count, trades_executed_count, "
                         "realized_drawdown_inr, avg_ofi, max_ofi, near_miss_count, recommendations_json, created_at) VALUES ('"
@@ -1874,6 +1881,10 @@ bool RoadmapDbClient::save_post_session_analysis_record(
 }
 
 uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& session_date) {
+    if (is_test_isolation_) {
+        // Under test isolation, do not pollute production daily candles table
+        return 0;
+    }
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;
 
@@ -2929,6 +2940,58 @@ int RoadmapDbClient::fetch_open_positions_count() {
     }
     pool_->release(conn);
     return count;
+}
+
+std::vector<hermes::PositionExitEvaluation> RoadmapDbClient::fetch_open_positions_with_exit_evaluation() {
+    std::vector<hermes::PositionExitEvaluation> results;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return results;
+
+    std::string query = "SELECT id, instrument, side, quantity, entryPrice, DATE_FORMAT(orderedAt, '%Y-%m-%d %H:%i:%s') "
+                        "FROM cpp_trade_reports WHERE status = 'OPEN' ORDER BY orderedAt ASC;";
+
+    struct TempOpenTrade {
+        std::string id;
+        std::string inst;
+        std::string side;
+        int qty{0};
+        double entry{0.0};
+        std::string ordered_at;
+    };
+    std::vector<TempOpenTrade> open_list;
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                TempOpenTrade t;
+                t.id = row[0] ? row[0] : "";
+                t.inst = row[1] ? row[1] : "";
+                t.side = row[2] ? row[2] : "BUY";
+                try {
+                    t.qty = row[3] ? std::stoi(row[3]) : 0;
+                    t.entry = row[4] ? std::stod(row[4]) : 0.0;
+                } catch (...) {}
+                t.ordered_at = row[5] ? row[5] : "";
+                open_list.push_back(t);
+            }
+            mysql_free_result(res);
+        }
+    }
+
+    auto quote_map = fetch_latest_quotes_map(conn);
+    pool_->release(conn);
+
+    for (const auto& t : open_list) {
+        double cur_ltp = lookup_ltp_from_map(quote_map, t.inst, t.entry);
+        auto eval = hermes::PositionExitEvaluator::evaluate_position_exit(
+            t.id, t.inst, t.side, t.qty, t.entry, cur_ltp, t.ordered_at
+        );
+        results.push_back(eval);
+    }
+
+    return results;
 }
 
 double RoadmapDbClient::fetch_today_session_realized_pnl(const std::string& session_date) {

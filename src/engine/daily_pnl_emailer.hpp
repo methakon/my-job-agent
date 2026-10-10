@@ -7,6 +7,7 @@
 #include <map>
 #include "roadmap/db_client.hpp"
 #include "engine/post_session_analyzer.hpp"
+#include "engine/position_exit_evaluator.hpp"
 
 namespace hermes {
 
@@ -31,6 +32,7 @@ struct DailyPnLSummaryData {
     int trades_closed_today{0};
     std::vector<std::map<std::string, std::string>> closed_trades;
     int open_positions_count{0};
+    std::vector<PositionExitEvaluation> open_positions;
     
     // PostSessionAnalyzer metrics for zero-trade explanations
     uint64_t total_ticks_ingested{0};

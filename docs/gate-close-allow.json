@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "b9ae2b2f93b422de16ba1369dbaa395424dc650b": {
+      "short": "b9ae2b2",
+      "reason": "Trading Agent workstream — feat(quant-email): separate smtp secrets into env, add open positions exit evaluation, fix test isolation, add manual email trigger",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "92c3fcb3a0a28ec02b85c72675ef69d2baa3bf76": {
       "short": "92c3fcb",
       "reason": "Trading Agent workstream — feat(pnl-email): implement automated daily P&L email and pre-market readiness analyzer",

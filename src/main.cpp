@@ -9,6 +9,10 @@
 #include "engine/gate22_seasonality_patterns.hpp"
 #include "engine/strategy_config_manager.hpp"
 #include "engine/hardware_config.hpp"
+#include "engine/position_exit_evaluator.hpp"
+#include "engine/market_calendar.hpp"
+#include "engine/daily_pnl_emailer.hpp"
+#include "engine/post_session_analyzer.hpp"
 #include "market_data/broker_feed_supervisor.hpp"
 #include <iostream>
 #include <memory>
@@ -26,6 +30,54 @@ int main(int argc, char* argv[]) {
     std::cout << "       ⚡ C++ AUTONOMOUS TRADING AGENT & ROADMAP SERVER ⚡\n";
     std::cout << "===================================================================\n";
 
+    // Load environment configuration from .env file
+    EnvLoader::load(".env");
+
+    // Optional Manual Operator CLI Trigger: Dispatch Test Daily P&L Email
+    if (argc > 1 && (std::string(argv[1]) == "--test-email" || std::string(argv[1]) == "--send-test-summary-email")) {
+        std::string remote_host = EnvLoader::get("MYSQL_REMOTE_HOST", EnvLoader::get("MYSQL_HOST", "10.0.0.99"));
+        int remote_port = EnvLoader::get_int("MYSQL_REMOTE_PORT", EnvLoader::get_int("MYSQL_PORT", 3306));
+        std::string remote_user = EnvLoader::get("MYSQL_REMOTE_USER", EnvLoader::get("MYSQL_USER", "mylife"));
+        std::string remote_pass = EnvLoader::get("MYSQL_REMOTE_PASSWORD", EnvLoader::get("MYSQL_PASSWORD", ""));
+        std::string remote_db = EnvLoader::get("MYSQL_REMOTE_NAME", EnvLoader::get("DATABASE_NAME", "myjob_agent"));
+        auto test_db = std::make_shared<RoadmapDbClient>(remote_host, remote_port, remote_user, remote_pass, remote_db);
+
+        std::cout << "\n📧 [Manual Test Trigger] Initializing DailyPnLEmailer for test dispatch...\n";
+        hermes::DailyPnLEmailer emailer(test_db);
+        auto cfg = emailer.load_config();
+        std::cout << "• SMTP Host     : " << cfg.smtp_host << ":" << cfg.smtp_port << " (SSL: " << (cfg.use_ssl ? "true" : "false") << ")\n";
+        std::cout << "• SMTP User     : " << (cfg.smtp_user.empty() ? "(EMPTY - set SMTP_USER in .env)" : cfg.smtp_user) << "\n";
+        std::cout << "• SMTP Password : " << (cfg.smtp_password.empty() ? "(EMPTY - set SMTP_PASSWORD in .env)" : "[CONFIGURED - length " + std::to_string(cfg.smtp_password.length()) + "]") << "\n";
+        std::cout << "• Sender        : " << cfg.sender << "\n";
+        std::cout << "• Recipient     : " << (cfg.recipient.empty() ? "(EMPTY - set DAILY_PNL_EMAIL_RECIPIENT in .env)" : cfg.recipient) << "\n";
+        std::cout << "• Config Enabled: " << (cfg.enabled ? "true" : "false") << "\n\n";
+
+        hermes::PostSessionAnalysisReport test_report;
+        test_report.total_ticks_ingested = 125000;
+        test_report.evaluated_decisions_count = 1420;
+        test_report.no_action_count = 1410;
+        test_report.avg_ofi = 0.1284;
+        test_report.max_ofi = 0.7420;
+        test_report.near_miss_count = 10;
+        test_report.risk_vetoes_count = 0;
+
+        char buf[32];
+        auto now = std::chrono::system_clock::now();
+        std::time_t t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm_now;
+        localtime_r(&t, &tm_now);
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tm_now);
+
+        bool ok = emailer.send_daily_summary_email(buf, test_report);
+        if (ok) {
+            std::cout << "✅ [Manual Test Trigger] Email dispatch SUCCESSFUL.\n";
+            return 0;
+        } else {
+            std::cerr << "❌ [Manual Test Trigger] Email dispatch FAILED or SKIPPED. Verify credentials in .env and network connection.\n";
+            return 1;
+        }
+    }
+
     // Single Instance Process Lock Guard (Strict Fatal Exit on Duplicate Instance)
     int lock_fd = open("/tmp/cpp_trading_agent.lock", O_RDWR | O_CREAT, 0666);
     if (lock_fd < 0) {
@@ -36,9 +88,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "❌ [Main] Fatal: Another instance of cpp-trading-agent is already running (lock file /tmp/cpp_trading_agent.lock active). Exiting to enforce single-instance safety.\n";
         return 1;
     }
-
-    // Load environment configuration from .env file
-    EnvLoader::load(".env");
 
     std::string remote_host = EnvLoader::get("MYSQL_REMOTE_HOST", EnvLoader::get("MYSQL_HOST", "10.0.0.99"));
     int remote_port = EnvLoader::get_int("MYSQL_REMOTE_PORT", EnvLoader::get_int("MYSQL_PORT", 3306));
@@ -180,9 +229,14 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // If native feed supervisor is not connected, fallback to shared DB polling
+            // Gated Market Hours Check: continuous trading occurs strictly 09:15 - 15:30 IST on trading weekdays
+            auto ist_now = hermes::MarketCalendar::get_ist_time();
+            bool is_trading_day = hermes::MarketCalendar::is_trading_weekday(ist_now);
+            auto session_phase = hermes::MarketCalendar::get_session_phase();
+
+            // If native feed supervisor is not connected, fallback to shared DB polling during continuous market hours
             auto sup_status = feed_supervisor->get_status();
-            if (!sup_status.is_connected) {
+            if (!sup_status.is_connected && is_trading_day && session_phase == hermes::SessionPhase::MARKET_OPEN) {
                 auto new_ticks = db_client->fetch_live_quotes_since(last_seen_ts);
                 for (const auto& tick : new_ticks) {
                     receiver.ingest_tick(tick);
@@ -190,6 +244,9 @@ int main(int argc, char* argv[]) {
                         last_seen_ts = tick.raw_timestamp;
                     }
                 }
+            } else if (!is_trading_day || session_phase != hermes::SessionPhase::MARKET_OPEN) {
+                // Outside continuous trading, sleep to avoid busy polling and synthetic decision generation
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
 
             // Periodically refresh in-memory trade/portfolio cache every 2,000 ticks
@@ -211,11 +268,11 @@ int main(int argc, char* argv[]) {
                             continue;
                         }
 
-                        double position_return_pct = (tr.side == "BUY") 
-                            ? ((tick.ltp - tr.entryPrice) / (tr.entryPrice > 0 ? tr.entryPrice : 1.0))
-                            : ((tr.entryPrice - tick.ltp) / (tr.entryPrice > 0 ? tr.entryPrice : 1.0));
+                        auto exit_eval = hermes::PositionExitEvaluator::evaluate_position_exit(
+                            tr.id, tr.instrument, tr.side, tr.quantity, tr.entryPrice, tick.ltp, tr.orderedAt
+                        );
 
-                        if (position_return_pct >= 0.50) {
+                        if (exit_eval.condition == hermes::PositionExitCondition::TAKE_PROFIT_TRIGGERED) {
                             double exit_px = (tr.side == "BUY") ? (tick.bid_price > 0 ? tick.bid_price : tick.ltp) : (tick.ask_price > 0 ? tick.ask_price : tick.ltp);
                             double gross_pnl = (tr.side == "BUY") ? (tr.quantity * (exit_px - tr.entryPrice)) : (tr.quantity * (tr.entryPrice - exit_px));
                             double cost = 40.0;
@@ -225,7 +282,7 @@ int main(int argc, char* argv[]) {
                             tr.status = "CLOSED";
                             refresh_trade_cache();
                             std::cout << "🎯 [ExitEngine] TAKE_PROFIT Triggered! Trade " << tr.id << " (" << tr.instrument << ") Closed @ ₹" << exit_px << " | Net PnL: ₹" << net_pnl << "\n";
-                        } else if (position_return_pct <= -0.25) {
+                        } else if (exit_eval.condition == hermes::PositionExitCondition::STOP_LOSS_TRIGGERED) {
                             double exit_px = (tr.side == "BUY") ? (tick.bid_price > 0 ? tick.bid_price : tick.ltp) : (tick.ask_price > 0 ? tick.ask_price : tick.ltp);
                             double gross_pnl = (tr.side == "BUY") ? (tr.quantity * (exit_px - tr.entryPrice)) : (tr.quantity * (tr.entryPrice - exit_px));
                             double cost = 40.0;
