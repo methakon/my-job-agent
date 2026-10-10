@@ -432,6 +432,34 @@ UserProfile RoadmapDbClient::fetch_user_by_email_or_id(const std::string& identi
     return user;
 }
 
+bool RoadmapDbClient::verify_operator_password(const std::string& email, const std::string& candidate_password) {
+    if (candidate_password.empty()) return false;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+
+    std::string safe_email = escape_string(conn, email.empty() ? "bapay.9@gmail.com" : email);
+    std::string query = "SELECT passwordEnc FROM portal_users WHERE email = '" + safe_email + "' LIMIT 1;";
+    bool verified = false;
+
+    if (mysql_query(conn, query.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                std::string enc = row[0];
+                std::string enc_key = EnvLoader::get("ENCRYPTION_KEY", "");
+                std::string decrypted = crypto_util::decrypt_token_if_needed(enc, enc_key);
+                if (!decrypted.empty() && decrypted == candidate_password) {
+                    verified = true;
+                }
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return verified;
+}
+
 UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_id) {
     UserPortfolioData p;
     MYSQL* conn = pool_->acquire();

@@ -241,6 +241,7 @@ public:
     bool update_item_note(int id, const std::string& note);
 
     UserProfile fetch_user_by_email_or_id(const std::string& identifier);
+    bool verify_operator_password(const std::string& email, const std::string& candidate_password);
     UserPortfolioData fetch_user_portfolio(const std::string& user_id);
     std::vector<UserTradeData> fetch_user_trades(const std::string& user_id, int limit = 20, int offset = 0);
     int fetch_user_trade_count(const std::string& user_id);
