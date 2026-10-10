@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "45499561f65e1160e3e75e55de32e0f1f2ea1962": {
+      "short": "4549956",
+      "reason": "Trading Agent workstream — feat(telemetry): include all historical option quote and snapshot tables in total tick count",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "072d95c79961a63daaa292ab0253dcb7d7226c38": {
       "short": "072d95c",
       "reason": "Trading Agent workstream — feat(dashboard): show historical tick count and audited win rate on paper trading tile",
