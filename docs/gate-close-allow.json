@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "92c3fcb3a0a28ec02b85c72675ef69d2baa3bf76": {
+      "short": "92c3fcb",
+      "reason": "Trading Agent workstream — feat(pnl-email): implement automated daily P&L email and pre-market readiness analyzer",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "2cba79f667e30bb9ea78995ca58b4a893619aa45": {
       "short": "2cba79f",
       "reason": "Trading Agent workstream — fix(analytics): harmonize query map keys and add safe_map_get fallback helper in server rendering",
