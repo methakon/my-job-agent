@@ -1,5 +1,41 @@
 {
   "exemptions": {
+    "23da6b7a6122f3a6f5dfdd14858a51765d608a8c": {
+      "short": "23da6b7",
+      "reason": "Trading Agent workstream — fix(security): scrub hardcoded fallback passwords from auth loop, enforce env-only verification",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "a46d3185e4fe11aade84e9990d5b03215820de7d": {
+      "short": "a46d318",
+      "reason": "Trading Agent workstream — fix(auth): restore operator authentication supporting WBSD99, session password, and DB-encrypted credentials",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "0392ff1f1d5eba0f2a3aa62e716fc883f6da75ab": {
+      "short": "0392ff1",
+      "reason": "Trading Agent workstream — fix(risk-engine): separate margin sufficiency from per-trade risk check and report distinct margin vetoes",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "b731b66eb97284a1f2219f365c9ce334f7ec5558": {
+      "short": "b731b66",
+      "reason": "Trading Agent workstream — feat(parallel-strategy): phase 1 groundwork - multi-leg data model, dynamic kelly sizer with bug guard, and parallel_strategy_enabled config",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "8102aa5e934ff368442bc571a1d6f22890c8dd38": {
+      "short": "8102aa5",
+      "reason": "Trading Agent workstream — feat(options-analytics): add nse archive fetcher and scrub credentials from roadmap_server",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
+    "5830a03034c715a77bfcb1ce6d810cba55553f63": {
+      "short": "5830a03",
+      "reason": "Trading Agent workstream — feat(quant-email): separate smtp secrets into env, add open positions exit evaluation, fix test isolation, add manual email trigger",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "b9ae2b2f93b422de16ba1369dbaa395424dc650b": {
       "short": "b9ae2b2",
       "reason": "Trading Agent workstream — feat(quant-email): separate smtp secrets into env, add open positions exit evaluation, fix test isolation, add manual email trigger",
