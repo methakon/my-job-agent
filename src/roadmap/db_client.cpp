@@ -1999,7 +1999,8 @@ bool RoadmapDbClient::ensure_strategy_config_schema() {
         "('min_volume_threshold', '100', 'Minimum option contract tick volume for trade trigger', 'SYSTEM_BASELINE'), "
         "('per_trade_risk_pct', '0.02', 'Dynamic per-trade risk ceiling percentage (Regime A / Kelly)', 'SYSTEM_BASELINE'), "
         "('session_drawdown_limit_pct', '0.05', 'Dynamic session drawdown limit percentage', 'SYSTEM_BASELINE'), "
-        "('base_confidence', '0.85', 'Base confidence score for confirmed signals', 'SYSTEM_BASELINE');";
+        "('base_confidence', '0.85', 'Base confidence score for confirmed signals', 'SYSTEM_BASELINE'), "
+        "('parallel_strategy_enabled', 'false', 'Enable parallel predictive multi-leg strategy engine', 'SYSTEM_BASELINE');";
     mysql_query(conn, seed_sql);
 
     // Ensure database trigger exists for immutable, autonomous auditing of all parameter updates

@@ -16,6 +16,7 @@ void StrategyConfigManager::reset_to_defaults() {
     per_trade_risk_pct_.store(DEFAULT_PER_TRADE_RISK_PCT, std::memory_order_relaxed);
     session_drawdown_limit_pct_.store(DEFAULT_SESSION_DRAWDOWN_LIMIT_PCT, std::memory_order_relaxed);
     base_confidence_.store(DEFAULT_BASE_CONFIDENCE, std::memory_order_relaxed);
+    parallel_strategy_enabled_.store(DEFAULT_PARALLEL_STRATEGY_ENABLED, std::memory_order_relaxed);
 }
 
 bool StrategyConfigManager::load_from_db(RoadmapDbClient* db_client) {
@@ -89,6 +90,15 @@ bool StrategyConfigManager::load_from_db(RoadmapDbClient* db_client) {
             } catch (...) {}
         }
 
+        auto it_pse = configs.find("parallel_strategy_enabled");
+        if (it_pse != configs.end()) {
+            bool val = (it_pse->second == "true" || it_pse->second == "1");
+            bool old = parallel_strategy_enabled_.exchange(val, std::memory_order_relaxed);
+            if (old != val) {
+                std::cout << "⚙️ [Config] Parameter 'parallel_strategy_enabled' updated: " << (old ? "true" : "false") << " -> " << (val ? "true" : "false") << "\n";
+            }
+        }
+
         last_reload_time_.store(std::time(nullptr), std::memory_order_relaxed);
         return true;
     } catch (const std::exception& e) {
@@ -130,7 +140,8 @@ std::string StrategyConfigManager::to_json() const {
        << "\"min_volume_threshold\":" << get_min_volume_threshold() << ","
        << "\"per_trade_risk_pct\":" << get_per_trade_risk_pct() << ","
        << "\"session_drawdown_limit_pct\":" << get_session_drawdown_limit_pct() << ","
-       << "\"base_confidence\":" << get_base_confidence()
+       << "\"base_confidence\":" << get_base_confidence() << ","
+       << "\"parallel_strategy_enabled\":" << (is_parallel_strategy_enabled() ? "true" : "false")
        << "}";
     return ss.str();
 }

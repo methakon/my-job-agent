@@ -35,6 +35,7 @@ public:
     static constexpr double DEFAULT_PER_TRADE_RISK_PCT = 0.02;
     static constexpr double DEFAULT_SESSION_DRAWDOWN_LIMIT_PCT = 0.05;
     static constexpr double DEFAULT_BASE_CONFIDENCE = 0.85;
+    static constexpr bool DEFAULT_PARALLEL_STRATEGY_ENABLED = false;
 
     // Hot-path lock-free atomic accessors
     double get_ofi_threshold() const { return ofi_threshold_.load(std::memory_order_relaxed); }
@@ -42,6 +43,7 @@ public:
     double get_per_trade_risk_pct() const { return per_trade_risk_pct_.load(std::memory_order_relaxed); }
     double get_session_drawdown_limit_pct() const { return session_drawdown_limit_pct_.load(std::memory_order_relaxed); }
     double get_base_confidence() const { return base_confidence_.load(std::memory_order_relaxed); }
+    bool is_parallel_strategy_enabled() const { return parallel_strategy_enabled_.load(std::memory_order_relaxed); }
 
     // Direct atomic setters (for tests & programmatic initialization)
     void set_ofi_threshold(double val) { ofi_threshold_.store(val, std::memory_order_relaxed); }
@@ -49,6 +51,7 @@ public:
     void set_per_trade_risk_pct(double val) { per_trade_risk_pct_.store(val, std::memory_order_relaxed); }
     void set_session_drawdown_limit_pct(double val) { session_drawdown_limit_pct_.store(val, std::memory_order_relaxed); }
     void set_base_confidence(double val) { base_confidence_.store(val, std::memory_order_relaxed); }
+    void set_parallel_strategy_enabled(bool val) { parallel_strategy_enabled_.store(val, std::memory_order_relaxed); }
 
     // Reset all parameters to hardcoded baselines
     void reset_to_defaults();
@@ -80,6 +83,7 @@ private:
     std::atomic<double> per_trade_risk_pct_{DEFAULT_PER_TRADE_RISK_PCT};
     std::atomic<double> session_drawdown_limit_pct_{DEFAULT_SESSION_DRAWDOWN_LIMIT_PCT};
     std::atomic<double> base_confidence_{DEFAULT_BASE_CONFIDENCE};
+    std::atomic<bool> parallel_strategy_enabled_{DEFAULT_PARALLEL_STRATEGY_ENABLED};
 
     std::atomic<std::time_t> last_reload_time_{0};
     std::mutex reload_mutex_;

@@ -39,6 +39,8 @@
 #include "../src/engine/position_exit_evaluator.hpp"
 #include "../src/engine/pre_market_readiness_analyzer.hpp"
 #include "../src/engine/nse_archive_fetcher.hpp"
+#include "../src/engine/spread_position.hpp"
+#include "../src/engine/predictive_kelly_sizer.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -2102,6 +2104,179 @@ void run_solid_and_acid_test_suite() {
 
         TEST("NAF-02: NseArchiveFetcher parse_bhavcopy_csv filters underlying, aggregates Call/Put OI and calculates PCR",
              ok_success && ok_strikes && ok_call_oi && ok_put_oi && ok_pcr && ok_underlying);
+    }
+
+    // Item PKS-01: Multi-leg SpreadOrder and SpreadPosition modeling
+    {
+        using namespace hermes;
+        // Bear Call Spread: Sell 25000 CE @ 150, Buy 25200 CE @ 60
+        auto bcs = SpreadOrder::create_bear_call_spread(
+            "NIFTY", "2026-10-15",
+            "NSE:NIFTY26OCT25000CE", 25000.0, 150.0,
+            "NSE:NIFTY26OCT25200CE", 25200.0, 60.0,
+            2, 25
+        );
+
+        bool bcs_ok = (bcs.legs.size() == 2) &&
+                      (bcs.target_net_credit == 90.0) &&
+                      (bcs.strike_width == 200.0) &&
+                      (bcs.max_loss_per_unit == 110.0) &&
+                      (bcs.total_margin_required == 110.0 * 50);
+
+        // Iron Condor: 4 legs
+        auto ic = SpreadOrder::create_iron_condor(
+            "NIFTY", "2026-10-15",
+            "NSE:NIFTY26OCT24600PE", 24600.0, 40.0,
+            "NSE:NIFTY26OCT24800PE", 24800.0, 100.0,
+            "NSE:NIFTY26OCT25200CE", 25200.0, 110.0,
+            "NSE:NIFTY26OCT25400CE", 25400.0, 45.0,
+            1, 25
+        );
+
+        bool ic_ok = (ic.legs.size() == 4) &&
+                     (ic.target_net_credit == (60.0 + 65.0)) && // 125.0
+                     (ic.strike_width == 200.0) &&
+                     (ic.max_loss_per_unit == 75.0);
+
+        // Position MTM and Profit/Stop triggers
+        SpreadPosition pos;
+        pos.spread_id = bcs.spread_id;
+        pos.spread_type = bcs.spread_type;
+        pos.underlying = bcs.underlying;
+        pos.legs = bcs.legs;
+        pos.total_quantity = 50;
+        pos.entry_net_credit = bcs.target_net_credit; // 90.0
+        pos.max_profit_inr = bcs.target_net_credit * 50; // 4500.0
+        pos.max_loss_inr = bcs.max_loss_per_unit * 50;  // 5500.0
+
+        // Prices drop favorably: short CE drops to 50, long CE drops to 15 -> spread cost = 35.0
+        std::map<std::string, double> favorable_prices = {
+            {"NSE:NIFTY26OCT25000CE", 50.0},
+            {"NSE:NIFTY26OCT25200CE", 15.0}
+        };
+        pos.update_market_prices(favorable_prices);
+        // Profit = (90 - 35) * 50 = 2750 >= 0.50 * 4500 (2250) -> target reached
+        bool target_reached = pos.check_profit_target_reached(0.50);
+
+        // Prices spike adversely: short CE surges to 300, long CE rises to 120 -> spread cost = 180.0
+        std::map<std::string, double> adverse_prices = {
+            {"NSE:NIFTY26OCT25000CE", 300.0},
+            {"NSE:NIFTY26OCT25200CE", 120.0}
+        };
+        pos.update_market_prices(adverse_prices);
+        // Loss = (90 - 180) * 50 = -4500.0 <= -1.0 * 4500.0 -> stop loss reached
+        bool stop_reached = pos.check_stop_loss_reached(1.0);
+
+        TEST("PKS-01: Multi-leg SpreadOrder and SpreadPosition compute defined risk and track paired exits",
+             bcs_ok && ic_ok && target_reached && stop_reached);
+    }
+
+    // Item PKS-02: PredictiveKellySizer positive edge Quarter-Kelly calculation
+    {
+        using namespace hermes;
+        PredictiveKellyInput inp;
+        inp.capital_in_hand = 100000.0;
+        inp.raw_win_rate = 0.65;
+        inp.payoff_ratio = 1.0;
+        inp.model_confidence = 0.75;
+        inp.avg_historical_confidence = 0.70;
+        inp.vrp_spread = 2.5; // Favorable VRP
+        inp.is_long_gamma_regime = true; // Long gamma regime
+        inp.recent_consecutive_losses = 0;
+        inp.max_loss_per_spread_unit = 100.0;
+        inp.lot_size = 25;
+
+        auto res = PredictiveKellySizer::calculate_sizing(inp);
+
+        bool valid = res.is_valid;
+        bool edge = res.raw_kelly_fraction > 0.0;
+        bool qk = res.quarter_kelly_fraction > 0.0;
+        bool lots = res.suggested_lots >= 1;
+        bool not_tripped = !res.bug_guard_tripped;
+
+        TEST("PKS-02: PredictiveKellySizer positive edge Quarter-Kelly produces calibrated dynamic lots",
+             valid && edge && qk && lots && not_tripped);
+    }
+
+    // Item PKS-03: PredictiveKellySizer boundary & edge-case safety
+    {
+        using namespace hermes;
+        // Case A: Negative edge (win rate 0.35, payoff 0.8) -> must return 0 lots
+        PredictiveKellyInput neg_inp;
+        neg_inp.capital_in_hand = 100000.0;
+        neg_inp.raw_win_rate = 0.35;
+        neg_inp.payoff_ratio = 0.8;
+        neg_inp.model_confidence = 0.40;
+        neg_inp.avg_historical_confidence = 0.50;
+        neg_inp.max_loss_per_spread_unit = 100.0;
+        neg_inp.lot_size = 25;
+        auto neg_res = PredictiveKellySizer::calculate_sizing(neg_inp);
+
+        // Case B: Exactly 50% win rate and 1.0 payoff -> zero edge -> 0 lots
+        PredictiveKellyInput zero_inp;
+        zero_inp.capital_in_hand = 100000.0;
+        zero_inp.raw_win_rate = 0.50;
+        zero_inp.payoff_ratio = 1.0;
+        zero_inp.model_confidence = 0.50;
+        zero_inp.avg_historical_confidence = 0.50;
+        zero_inp.max_loss_per_spread_unit = 100.0;
+        zero_inp.lot_size = 25;
+        auto zero_res = PredictiveKellySizer::calculate_sizing(zero_inp);
+
+        // Case C: Divide-by-zero protection (0 capital, 0 max loss)
+        PredictiveKellyInput div0_inp;
+        div0_inp.capital_in_hand = 0.0;
+        div0_inp.max_loss_per_spread_unit = 0.0;
+        div0_inp.lot_size = 0;
+        auto div0_res = PredictiveKellySizer::calculate_sizing(div0_inp);
+
+        TEST("PKS-03: PredictiveKellySizer handles zero edge, 50% win-rate, and invalid inputs safely with 0 lots",
+             neg_res.suggested_lots == 0 && zero_res.suggested_lots == 0 && !div0_res.is_valid && div0_res.suggested_lots == 0);
+    }
+
+    // Item PKS-04: PredictiveKellySizer software bug guard tripwire
+    {
+        using namespace hermes;
+        // Synthetic extreme input designed to produce mathematical fraction > 40%
+        PredictiveKellyInput extreme_inp;
+        extreme_inp.capital_in_hand = 100000.0;
+        extreme_inp.raw_win_rate = 0.98;
+        extreme_inp.payoff_ratio = 4.0;
+        extreme_inp.model_confidence = 0.95;
+        extreme_inp.avg_historical_confidence = 0.90;
+        extreme_inp.vrp_spread = 5.0;
+        extreme_inp.is_long_gamma_regime = true;
+        extreme_inp.max_loss_per_spread_unit = 50.0;
+        extreme_inp.lot_size = 25;
+        extreme_inp.kelly_fraction_multiplier = 0.75; // Aggressive fractional multiplier to trigger bug guard
+
+        auto res = PredictiveKellySizer::calculate_sizing(extreme_inp);
+
+        bool tripped = res.bug_guard_tripped;
+        bool capped = (std::abs(res.dynamic_effective_fraction - PredictiveKellySizer::KELLY_SIZING_BUG_GUARD_PCT) < 1e-4);
+        bool bounded_alloc = (res.allocated_risk_capital <= 40000.0 + 1e-4);
+
+        TEST("PKS-04: PredictiveKellySizer software bug guard tripwire (40%) caps extreme anomalies safely",
+             tripped && capped && bounded_alloc);
+    }
+
+    // Item PKS-05: StrategyConfigManager parallel_strategy_enabled default & dynamic reload
+    {
+        auto& mgr = hermes::StrategyConfigManager::instance();
+        // Baseline default must be false
+        mgr.reset_to_defaults();
+        bool def_false = (mgr.is_parallel_strategy_enabled() == false);
+
+        // Programmatic toggle
+        mgr.set_parallel_strategy_enabled(true);
+        bool toggled_true = (mgr.is_parallel_strategy_enabled() == true);
+
+        // Reset back to safe default
+        mgr.reset_to_defaults();
+        bool restored_false = (mgr.is_parallel_strategy_enabled() == false);
+
+        TEST("PKS-05: StrategyConfigManager parallel_strategy_enabled is false by default and hot-reloads cleanly",
+             def_false && toggled_true && restored_false);
     }
 
     db_client->cleanup_test_schema();
