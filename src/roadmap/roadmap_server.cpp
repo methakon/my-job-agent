@@ -2345,14 +2345,11 @@ void RoadmapServer::start() {
                 std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
                 std::string email = extract_post_param(post_body, "email");
                 std::string password = extract_post_param(post_body, "password");
-                std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "hermes@2026");
+                std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "");
                 std::string operator_pwd = EnvLoader::get("OPERATOR_PASSWORD", "");
 
                 bool is_valid = (!session_pwd.empty() && password == session_pwd) ||
                                 (!operator_pwd.empty() && password == operator_pwd) ||
-                                (password == "WBSD99") ||
-                                (password == "hermes@2026") ||
-                                (password == "rDJNh2U5cZADUwMxIb2GAa1!") ||
                                 (db_client_ && db_client_->verify_operator_password(email, password));
 
                 if (is_valid) {
