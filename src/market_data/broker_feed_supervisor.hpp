@@ -58,6 +58,10 @@ public:
     void trigger_eod_analysis_and_archival(const std::string& forced_date = "", bool async = true);
     std::string get_last_eod_completed_date() const;
 
+    // In-Process Pre-Market Readiness Trigger
+    void trigger_pre_market_readiness_check(const std::string& forced_date = "", bool async = true);
+    std::string get_last_premarket_completed_date() const;
+
 private:
     void supervisor_loop();
     void update_state_machine();
@@ -103,6 +107,10 @@ private:
     // In-process EOD synchronization
     mutable std::mutex eod_mutex_;
     std::string last_eod_completed_date_;
+
+    // In-process Pre-Market synchronization
+    mutable std::mutex premarket_mutex_;
+    std::string last_premarket_completed_date_;
 };
 
 #endif // MARKET_DATA_BROKER_FEED_SUPERVISOR_HPP

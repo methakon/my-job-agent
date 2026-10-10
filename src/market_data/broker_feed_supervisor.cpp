@@ -1,5 +1,7 @@
 #include "market_data/broker_feed_supervisor.hpp"
 #include "engine/post_session_analyzer.hpp"
+#include "engine/daily_pnl_emailer.hpp"
+#include "engine/pre_market_readiness_analyzer.hpp"
 #include "common/env_loader.hpp"
 #include "common/crypto_util.hpp"
 #include <iostream>
@@ -362,6 +364,12 @@ void BrokerFeedSupervisor::update_state_machine() {
         }
     }
 
+    if (trading_day && (phase == hermes::SessionPhase::PRE_OPEN || 
+                        phase == hermes::SessionPhase::OPEN_AUCTION || 
+                        new_state == PaperTradingState::IDLE_WAITING_TOKEN)) {
+        trigger_pre_market_readiness_check("", true);
+    }
+
     std::lock_guard<std::mutex> lock(status_mutex_);
     if (new_state != paper_state_) {
         std::string prev_str = "IDLE";
@@ -467,7 +475,7 @@ void BrokerFeedSupervisor::trigger_eod_analysis_and_archival(const std::string& 
         date_str = buf;
     }
 
-    auto run_eod = [this, date_str]() {
+    auto run_eod = [this, date_str, forced_date]() {
         std::lock_guard<std::mutex> lock(eod_mutex_);
         if (last_eod_completed_date_ == date_str) {
             return; // Idempotent: already ran for this date
@@ -481,6 +489,19 @@ void BrokerFeedSupervisor::trigger_eod_analysis_and_archival(const std::string& 
             std::cout << "✅ [BrokerFeedSupervisor] In-Process EOD Complete: "
                       << psa.evaluated_decisions_count << " decisions analyzed, "
                       << arch.candles_rolled_up << " candles rolled up.\n";
+
+            // In-Process Autonomous Daily P&L Email: Triggered after PSA on trading weekdays or forced run
+            try {
+                auto ist = hermes::MarketCalendar::get_ist_time();
+                if (hermes::MarketCalendar::is_trading_weekday(ist) || !forced_date.empty()) {
+                    hermes::DailyPnLEmailer emailer(db_client_);
+                    emailer.send_daily_summary_email(date_str, psa);
+                }
+            } catch (const std::exception& mail_ex) {
+                std::cerr << "⚠️ [BrokerFeedSupervisor] Daily PnL Emailer error: " << mail_ex.what() << " (non-fatal, continuing)\n";
+            } catch (...) {
+                std::cerr << "⚠️ [BrokerFeedSupervisor] Unknown Daily PnL Emailer error (non-fatal, continuing)\n";
+            }
         } catch (const std::exception& e) {
             std::cerr << "❌ [BrokerFeedSupervisor] EOD Analysis error: " << e.what() << "\n";
         }
@@ -496,4 +517,47 @@ void BrokerFeedSupervisor::trigger_eod_analysis_and_archival(const std::string& 
 std::string BrokerFeedSupervisor::get_last_eod_completed_date() const {
     std::lock_guard<std::mutex> lock(eod_mutex_);
     return last_eod_completed_date_;
+}
+
+void BrokerFeedSupervisor::trigger_pre_market_readiness_check(const std::string& forced_date, bool async) {
+    if (!db_client_) return;
+
+    std::string date_str = forced_date;
+    if (date_str.empty()) {
+        auto ist = hermes::MarketCalendar::get_ist_time();
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d", ist.year, ist.month, ist.day);
+        date_str = buf;
+    }
+
+    auto run_premarket = [this, date_str]() {
+        std::lock_guard<std::mutex> lock(premarket_mutex_);
+        if (last_premarket_completed_date_ == date_str) {
+            return; // Idempotent: already ran for this date
+        }
+        std::cout << "🌅 [BrokerFeedSupervisor] Running In-Process Pre-Market Readiness Check for " << date_str << "...\n";
+        try {
+            hermes::PreMarketReadinessAnalyzer analyzer(db_client_);
+            auto report = analyzer.run_pre_market_readiness_check(date_str);
+            last_premarket_completed_date_ = date_str;
+            std::cout << "✅ [BrokerFeedSupervisor] Pre-Market Readiness complete: "
+                      << (report.overall_readiness_passed ? "ALL GREEN" : "WARNINGS/BLOCKERS DETECTED") << "\n";
+            if (!report.overall_readiness_passed) {
+                analyzer.send_alert_if_blocked(report);
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "❌ [BrokerFeedSupervisor] Pre-Market Readiness error: " << e.what() << "\n";
+        }
+    };
+
+    if (async) {
+        std::thread(run_premarket).detach();
+    } else {
+        run_premarket();
+    }
+}
+
+std::string BrokerFeedSupervisor::get_last_premarket_completed_date() const {
+    std::lock_guard<std::mutex> lock(premarket_mutex_);
+    return last_premarket_completed_date_;
 }

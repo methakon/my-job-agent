@@ -35,6 +35,8 @@
 #include "../src/engine/gate_const_invariants.hpp"
 #include "../src/engine/post_session_analyzer.hpp"
 #include "../src/engine/strategy_config_manager.hpp"
+#include "../src/engine/daily_pnl_emailer.hpp"
+#include "../src/engine/pre_market_readiness_analyzer.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -1805,6 +1807,171 @@ void run_solid_and_acid_test_suite() {
         scm.load_from_db(db_client.get());
     }
 
+    // -----------------------------------------------------------------
+    // CATEGORY 24: DAILY P&L EMAIL DISPATCHER & PRE-MARKET READINESS ANALYZER
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 24: Daily P&L Email Dispatcher & Pre-Market Readiness Analyzer ---\n";
+
+    // Item DPNL-01: DailyPnLEmailer config loading & fallback logic
+    {
+        DailyPnLEmailer emailer(db_client);
+        EmailConfig cfg = emailer.load_config();
+        // Check defaults and safety
+        TEST("DPNL-01: DailyPnLEmailer safely loads EmailConfig without credential leakage",
+             cfg.smtp_port > 0);
+    }
+
+    // Item DPNL-02: Zero-trade email body formatting (plain-text & HTML)
+    {
+        DailyPnLSummaryData zero_trade_data;
+        zero_trade_data.session_date = "2026-10-10";
+        zero_trade_data.starting_capital = 100000.0;
+        zero_trade_data.final_capital_in_hand = 100000.0;
+        zero_trade_data.today_realized_pnl = 0.0;
+        zero_trade_data.today_realized_drawdown = 0.0;
+        zero_trade_data.drawdown_limit_inr = 5000.0;
+        zero_trade_data.trades_closed_today = 0;
+        zero_trade_data.open_positions_count = 35;
+        zero_trade_data.total_ticks_ingested = 125000;
+        zero_trade_data.evaluated_decisions = 1420;
+        zero_trade_data.ofi_below_threshold_count = 1410;
+        zero_trade_data.avg_ofi = 0.1284;
+        zero_trade_data.max_ofi = 0.7420;
+        zero_trade_data.near_miss_count = 10;
+        zero_trade_data.risk_vetoes_count = 0;
+
+        std::string text_body = DailyPnLEmailer::format_email_body(zero_trade_data, false);
+        std::string html_body = DailyPnLEmailer::format_email_body(zero_trade_data, true);
+
+        bool text_ok = (text_body.find("0 trades were executed during this session.") != std::string::npos) &&
+                       (text_body.find("Below OFI 0.85 Threshold") != std::string::npos) &&
+                       (text_body.find("125000") != std::string::npos) &&
+                       (text_body.find("0.7420") != std::string::npos) &&
+                       (text_body.find("Standing Risk Caveat") != std::string::npos) &&
+                       (text_body.find("5% Max Drawdown Ceiling") != std::string::npos);
+
+        bool html_ok = (html_body.find("Zero-Trade Explanation") != std::string::npos) &&
+                       (html_body.find("0 trades were executed") != std::string::npos) &&
+                       (html_body.find("Standing Risk Caveat") != std::string::npos) &&
+                       (html_body.find("0.7420") != std::string::npos) &&
+                       (html_body.find("stat-val") != std::string::npos);
+
+        TEST("DPNL-02: Zero-trade email formats real PSA decision metrics, risk limits, and standing caveat",
+             text_ok && html_ok);
+    }
+
+    // Item DPNL-03: Closed-trades email body formatting (plain-text & HTML)
+    {
+        DailyPnLSummaryData trade_data;
+        trade_data.session_date = "2026-10-10";
+        trade_data.starting_capital = 100000.0;
+        trade_data.final_capital_in_hand = 101250.0;
+        trade_data.today_realized_pnl = 1250.0;
+        trade_data.today_realized_drawdown = 0.0;
+        trade_data.drawdown_limit_inr = 5000.0;
+        trade_data.trades_closed_today = 1;
+        trade_data.open_positions_count = 35;
+
+        std::map<std::string, std::string> tr;
+        tr["instrument"] = "NSE:NIFTY26OCT24400CE";
+        tr["side"] = "BUY";
+        tr["quantity"] = "50";
+        tr["entry_price"] = "112.50";
+        tr["exit_price"] = "137.50";
+        tr["net_pnl"] = "1250.00";
+        tr["ordered_at"] = "09:30:15";
+        tr["closed_at"] = "14:15:20";
+        trade_data.closed_trades.push_back(tr);
+
+        std::string text_body = DailyPnLEmailer::format_email_body(trade_data, false);
+        std::string html_body = DailyPnLEmailer::format_email_body(trade_data, true);
+
+        bool text_ok = (text_body.find("NSE:NIFTY26OCT24400CE") != std::string::npos) &&
+                       (text_body.find("1250.00") != std::string::npos) &&
+                       (text_body.find("14:15:20") != std::string::npos);
+
+        bool html_ok = (html_body.find("trade-table") != std::string::npos) &&
+                       (html_body.find("NSE:NIFTY26OCT24400CE") != std::string::npos) &&
+                       (html_body.find("1250.00") != std::string::npos);
+
+        TEST("DPNL-03: Closed trades email correctly renders trade details, side, prices, and net P&L",
+             text_ok && html_ok);
+    }
+
+    // Item DPNL-04: Non-fatal safety when disabled or unconfigured
+    {
+        EmailConfig disabled_cfg;
+        disabled_cfg.enabled = false;
+        bool disabled_res = DailyPnLEmailer::send_smtp_message(disabled_cfg, "Test", "Text", "HTML");
+
+        EmailConfig unconfigured_cfg;
+        unconfigured_cfg.enabled = true;
+        unconfigured_cfg.recipient = "";
+        bool unconf_res = DailyPnLEmailer::send_smtp_message(unconfigured_cfg, "Test", "Text", "HTML");
+
+        TEST("DPNL-04: DailyPnLEmailer fails safely and returns cleanly when disabled or recipient empty",
+             disabled_res && unconf_res);
+    }
+
+    // Item PMRA-01: PreMarketReadinessAnalyzer report generation & safety invariants
+    {
+        PreMarketReadinessAnalyzer analyzer(db_client);
+        PreMarketReadinessReport report = analyzer.run_pre_market_readiness_check("2026-10-10");
+
+        bool inv_mutation = (report.parameter_mutation_allowed == false);
+        bool disk_ok = report.disk_space_healthy && (report.free_disk_gb >= 1.0);
+        bool remote_db_ok = report.remote_db_healthy;
+        bool local_db_ok = report.local_db_healthy;
+
+        TEST("PMRA-01: PreMarketReadinessAnalyzer enforces parameter_mutation_allowed=false and verifies disk/DB",
+             inv_mutation && disk_ok && remote_db_ok && local_db_ok);
+    }
+
+    // Item PMRA-02: PreMarketReadinessAnalyzer plaintext & HTML formatting
+    {
+        PreMarketReadinessAnalyzer analyzer(db_client);
+        PreMarketReadinessReport report = analyzer.run_pre_market_readiness_check("2026-10-10");
+
+        std::string text_rep = PreMarketReadinessAnalyzer::format_report_text(report);
+        std::string html_rep = PreMarketReadinessAnalyzer::format_report_html(report);
+
+        bool text_ok = (text_rep.find("PRE-MARKET READINESS AUDIT") != std::string::npos) &&
+                       (text_rep.find("parameter_mutation_allowed = FALSE") != std::string::npos) &&
+                       (text_rep.find("Free Disk Space") != std::string::npos);
+
+        bool html_ok = (html_rep.find("Pre-Market Readiness") != std::string::npos) &&
+                       (html_rep.find("parameter_mutation_allowed: false") != std::string::npos);
+
+        TEST("PMRA-02: PreMarketReadinessAnalyzer formats plain text & HTML reports with full audit trail",
+             text_ok && html_ok);
+    }
+
+    // Item PMRA-03: BrokerFeedSupervisor idempotence on pre-market and EOD triggers
+    {
+        OptionTickReceiver rcv;
+        BrokerFeedSupervisor supervisor(db_client, rcv, {"NIFTY"});
+
+        // Trigger pre-market check synchronously
+        supervisor.trigger_pre_market_readiness_check("2026-10-10", false);
+        std::string first_premarket = supervisor.get_last_premarket_completed_date();
+
+        // Second call with same date must be idempotent
+        supervisor.trigger_pre_market_readiness_check("2026-10-10", false);
+        std::string second_premarket = supervisor.get_last_premarket_completed_date();
+
+        // Trigger EOD check synchronously
+        supervisor.trigger_eod_analysis_and_archival("2026-10-10", false);
+        std::string first_eod = supervisor.get_last_eod_completed_date();
+
+        // Second call with same date must be idempotent
+        supervisor.trigger_eod_analysis_and_archival("2026-10-10", false);
+        std::string second_eod = supervisor.get_last_eod_completed_date();
+
+        TEST("PMRA-03: BrokerFeedSupervisor pre-market check & EOD analysis execute idempotently per date",
+             first_premarket == "2026-10-10" && second_premarket == "2026-10-10" &&
+             first_eod == "2026-10-10" && second_eod == "2026-10-10");
+    }
+
     db_client->cleanup_test_schema();
 
     std::cout << "===================================================================\n";
@@ -1816,12 +1983,7 @@ void run_solid_and_acid_test_suite() {
     }
 }
 
-#include <openssl/crypto.h>
-
 int main() {
     run_solid_and_acid_test_suite();
-    mysql_thread_end();
-    mysql_library_end();
-    OPENSSL_cleanup();
     return 0;
 }

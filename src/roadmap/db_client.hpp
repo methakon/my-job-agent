@@ -319,6 +319,13 @@ public:
     std::vector<std::map<std::string, std::string>> fetch_strategy_config_audit(int limit = 20);
     bool execute_raw_sql(const std::string& sql);
 
+    // Session Trades, PSA Record, and Readiness Queries
+    std::vector<std::map<std::string, std::string>> fetch_closed_trades_for_date(const std::string& session_date);
+    int fetch_open_positions_count();
+    double fetch_today_session_realized_pnl(const std::string& session_date = "");
+    std::map<std::string, std::string> fetch_latest_post_session_record(const std::string& session_date = "");
+    uint64_t count_historical_candles_for_date(const std::string& session_date);
+
     // Cookie-Less Privacy-Conscious Visitor Analytics Engine (v8 Master)
     bool record_analytics_event(const analytics::AnalyticsEvent& event, const analytics::GeoLocationResult& geo, const std::string& secret);
     void run_analytics_retention_purge(int raw_ip_days, int pv_days, int sess_days, int loc_days);

@@ -35,8 +35,6 @@ MySQLConnectionPool::~MySQLConnectionPool() {
     while (!pool_.empty()) {
         pool_.pop();
     }
-    mysql_thread_end();
-    mysql_library_end();
 }
 
 MYSQL* MySQLConnectionPool::create_connection() {
@@ -74,6 +72,7 @@ MYSQL* MySQLConnectionPool::acquire() {
     if (!conn) {
         conn = create_connection();
     } else if (mysql_ping(conn) != 0) {
+        all_created_connections_.erase(conn);
         mysql_close(conn);
         conn = create_connection();
     }
@@ -2877,4 +2876,139 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_admin_vis
     pool_->release(conn);
     return records;
 }
+
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_closed_trades_for_date(const std::string& session_date) {
+    std::vector<std::map<std::string, std::string>> trades;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return trades;
+
+    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
+    std::string q = "SELECT instrument, side, quantity, entryPrice, exitPrice, netPnl, "
+                    "DATE_FORMAT(orderedAt, '%H:%i:%s'), DATE_FORMAT(closedAt, '%H:%i:%s') "
+                    "FROM cpp_trade_reports WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + " "
+                    "ORDER BY closedAt ASC;";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::map<std::string, std::string> t;
+                t["instrument"] = row[0] ? row[0] : "";
+                t["side"] = row[1] ? row[1] : "";
+                t["quantity"] = row[2] ? row[2] : "0";
+                t["entry_price"] = row[3] ? row[3] : "0.0";
+                t["exit_price"] = row[4] ? row[4] : "0.0";
+                t["net_pnl"] = row[5] ? row[5] : "0.0";
+                t["ordered_at"] = row[6] ? row[6] : "";
+                t["closed_at"] = row[7] ? row[7] : "";
+                trades.push_back(t);
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return trades;
+}
+
+int RoadmapDbClient::fetch_open_positions_count() {
+    int count = 0;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0;
+
+    std::string q = "SELECT COUNT(*) FROM cpp_trade_reports WHERE status = 'OPEN';";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try { count = std::stoi(row[0]); } catch (...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return count;
+}
+
+double RoadmapDbClient::fetch_today_session_realized_pnl(const std::string& session_date) {
+    double pnl = 0.0;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return 0.0;
+
+    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
+    std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM cpp_trade_reports WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + ";";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try { pnl = std::stod(row[0]); } catch (...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return pnl;
+}
+
+std::map<std::string, std::string> RoadmapDbClient::fetch_latest_post_session_record(const std::string& session_date) {
+    std::map<std::string, std::string> record;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return record;
+
+    std::string where = session_date.empty() ? "ORDER BY session_date DESC LIMIT 1"
+                                             : ("WHERE session_date = '" + escape_string(conn, session_date) + "' LIMIT 1");
+    std::string q = "SELECT session_date, total_ticks, evaluated_decisions, no_action_count, actionable_count, "
+                    "risk_veto_count, trades_executed, realized_drawdown, avg_ofi, max_ofi, near_miss_count, "
+                    "recommendations_json, DATE_FORMAT(analyzed_at, '%Y-%m-%d %H:%i:%s') "
+                    "FROM cpp_post_session_analysis " + where + ";";
+
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                record["session_date"] = row[0] ? row[0] : "";
+                record["total_ticks"] = row[1] ? row[1] : "0";
+                record["evaluated_decisions"] = row[2] ? row[2] : "0";
+                record["no_action_count"] = row[3] ? row[3] : "0";
+                record["actionable_count"] = row[4] ? row[4] : "0";
+                record["risk_veto_count"] = row[5] ? row[5] : "0";
+                record["trades_executed"] = row[6] ? row[6] : "0";
+                record["realized_drawdown"] = row[7] ? row[7] : "0.0";
+                record["avg_ofi"] = row[8] ? row[8] : "0.0";
+                record["max_ofi"] = row[9] ? row[9] : "0.0";
+                record["near_miss_count"] = row[10] ? row[10] : "0";
+                record["recommendations_json"] = row[11] ? row[11] : "{}";
+                record["analyzed_at"] = row[12] ? row[12] : "";
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return record;
+}
+
+uint64_t RoadmapDbClient::count_historical_candles_for_date(const std::string& session_date) {
+    uint64_t count = 0;
+    MYSQL* conn = pool_local_->acquire();
+    if (!conn) return 0;
+
+    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
+    std::string q = "SELECT COUNT(*) FROM cpp_historical_daily_candles WHERE candle_date = " + safe_date + ";";
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try { count = std::stoull(row[0]); } catch (...) {}
+            }
+            mysql_free_result(res);
+        }
+    }
+    release_local(conn);
+    return count;
+}
+
 
