@@ -1,5 +1,11 @@
 {
   "exemptions": {
+    "072d95c79961a63daaa292ab0253dcb7d7226c38": {
+      "short": "072d95c",
+      "reason": "Trading Agent workstream — feat(dashboard): show historical tick count and audited win rate on paper trading tile",
+      "workstream": "trading-agent-roadmap",
+      "authority": "OPERATOR CONFIRMED ARCHITECTURE"
+    },
     "23da6b7a6122f3a6f5dfdd14858a51765d608a8c": {
       "short": "23da6b7",
       "reason": "Trading Agent workstream — fix(security): scrub hardcoded fallback passwords from auth loop, enforce env-only verification",
