@@ -1569,7 +1569,7 @@ std::string RoadmapServer::render_health_page(bool is_authenticated) {
        << "      <h3>📊 Stored Market Ticks</h3>"
        << "      <div class=\"stat-row\"><span class=\"stat-label\">Current Day Ticks (Today)</span><span id=\"sys-today-ticks-val\" class=\"stat-value\" style=\"color:var(--warn);\">" << initial_today_ticks << " ticks</span></div>"
        << "      <div class=\"stat-row\"><span class=\"stat-label\">Total Stored Ticks (All Time)</span><span id=\"sys-total-ticks-val\" class=\"stat-value\" style=\"color:var(--accent);\">" << initial_total_ticks << " ticks</span></div>"
-       << "      <div class=\"stat-row\"><span class=\"stat-label\">Storage Table</span><span class=\"stat-value\">upstox_live_paper_option_quotes</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Storage Scope</span><span class=\"stat-value\">Multi-Table (Quotes &amp; Snapshots)</span></div>"
        << "      <div class=\"stat-row\"><span class=\"stat-label\">Ingestion Stream</span><span class=\"status-pill ok\">LIVE STREAMING</span></div>"
        << "    </div>"
        << "    <div class=\"card\">"

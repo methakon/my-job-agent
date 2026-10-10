@@ -1470,7 +1470,7 @@ std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     static std::pair<long long, long long> cached_counts{0, 0};
     static auto last_fetch_time = std::chrono::steady_clock::time_point{};
     auto now = std::chrono::steady_clock::now();
-    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_fetch_time).count() < 10 && cached_counts.second > 0) {
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - last_fetch_time).count() < 60 && cached_counts.second > 0) {
         return cached_counts;
     }
 
@@ -1480,7 +1480,7 @@ std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     long long total_count = 0;
     const char* query = "SELECT "
                         "(SELECT COUNT(*) FROM fnf_market_snapshots WHERE createdAt >= CURRENT_DATE() AND createdAt < CURRENT_DATE() + INTERVAL 1 DAY) AS today_ticks, "
-                        "(SELECT (SELECT COUNT(*) FROM fnf_market_snapshots) + (SELECT COUNT(*) FROM fnf_market_snapshots_history)) AS total_ticks;";
+                        "(SELECT IFNULL(SUM(table_rows), 0) FROM information_schema.tables WHERE table_schema = DATABASE() AND (table_name LIKE '%option_quotes%' OR table_name LIKE '%market_snapshots%')) AS total_ticks;";
     if (mysql_query(conn, query) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
