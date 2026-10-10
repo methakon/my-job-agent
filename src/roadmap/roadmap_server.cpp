@@ -320,7 +320,7 @@ std::string RoadmapServer::render_dashboard_page(bool is_authenticated, const st
        << "  <div class=\"header-card\">"
        << "    <div>"
        << "      <div class=\"user-title\">👋 Welcome, " << html_escape(user.name.empty() ? "Swarna Sekhar Dhar" : user.name) << "</div>"
-       << "      <div class=\"user-meta\">Email: " << html_escape(user.email.empty() ? "bapay.9@gmail.com" : user.email) << " | Role: <span class=\"badge ok\">" << html_escape(user.role.empty() ? "operator" : user.role) << "</span> | User ID: <code>" << html_escape(user.id.empty() ? target_id : user.id) << "</code></div>"
+       << "      <div class=\"user-meta\">Email: " << html_escape(user.email.empty() ? "operator@hermes" : user.email) << " | Role: <span class=\"badge ok\">" << html_escape(user.role.empty() ? "operator" : user.role) << "</span> | User ID: <code>" << html_escape(user.id.empty() ? target_id : user.id) << "</code></div>"
        << "    </div>"
        << "    <div>"
        << "      <span class=\"badge isolation\">🔒 Multi-Tenant Data Privacy Active</span>"
@@ -446,7 +446,7 @@ std::string RoadmapServer::render_portfolio_page(bool is_authenticated, const st
        << "  <div class=\"header-card\">"
        << "    <div>"
        << "      <div class=\"title\">💰 Portfolio Capital &amp; Risk Guard Sub-Page</div>"
-       << "      <div class=\"meta\">Isolated User: <b>" << html_escape(user.email.empty() ? "bapay.9@gmail.com" : user.email) << "</b> | Portfolio ID: <code>" << html_escape(p.portfolioId) << "</code></div>"
+       << "      <div class=\"meta\">Isolated User: <b>" << html_escape(user.email.empty() ? "operator@hermes" : user.email) << "</b> | Portfolio ID: <code>" << html_escape(p.portfolioId) << "</code></div>"
        << "    </div>"
        << "    <div><span class=\"badge isolation\">🔒 Multi-Tenant Data Privacy Active</span></div>"
        << "  </div>"
@@ -1093,14 +1093,11 @@ std::string RoadmapServer::render_login_page(const std::string& error_msg) {
     }
 
     ss << "  <form method=\"post\" action=\"/auth/login\">"
-       << "    <label>Operator Email / User</label>"
-       << "    <input type=\"text\" name=\"email\" value=\"bapay.9@gmail.com\" required/>"
+       << "    <label>Operator Username</label>"
+       << "    <input type=\"text\" name=\"email\" placeholder=\"operator username\" required/>"
        << "    <label>Operator Password</label>"
        << "    <input type=\"password\" name=\"password\" placeholder=\"enter operator password…\" required autofocus/>"
        << "    <button type=\"submit\">Login as Operator</button>"
-       << "  </form>"
-       << "  <form method=\"post\" action=\"/auth/send-password\" style=\"margin-top:12px;\">"
-       << "    <button type=\"submit\" style=\"background:#21262d;color:#58a6ff;border:1px solid #30363d;margin-top:8px;\">📧 Send Password to bapay.9@gmail.com</button>"
        << "  </form>"
        << "</div>"
        << GOOGLE_ANALYTICS_FOOTER_TAG
@@ -2347,8 +2344,8 @@ void RoadmapServer::start() {
                 auto body_pos = req.find("\r\n\r\n");
                 std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
                 std::string password = extract_post_param(post_body, "password");
-                std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "hermes@2026");
-                if (password == session_pwd || password == "hermes@2026" || password == "WBSD99" || password == "rDJNh2U5cZADUwMxIb2GAa1!") {
+                std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "");
+                if (!session_pwd.empty() && password == session_pwd) {
                     status_code = 303;
                     extra_headers = "Set-Cookie: auth_token=operator_valid_session; Path=/; HttpOnly\r\nLocation: /dashboard\r\n";
                     body = "Redirecting to dashboard...";
@@ -2359,13 +2356,6 @@ void RoadmapServer::start() {
                 status_code = 303;
                 extra_headers = "Set-Cookie: auth_token=; Path=/; Max-Age=0\r\nLocation: /\r\n";
                 body = "Redirecting...";
-            } else if (req.find("POST /auth/send-password") != std::string::npos) {
-                int res = system("python3 -c \"import smtplib; from email.mime.text import MIMEText; msg=MIMEText('Hello Operator,\\n\\nYour C++ Trading Agent operator password is: WBSD99\\n\\nRegards,\\nC++ Autonomous Trading Engine'); msg['Subject']='🔑 Operator Password Recovery — C++ Trading Agent'; msg['From']='swarna.s.jobs@gmail.com'; msg['To']='bapay.9@gmail.com'; server=smtplib.SMTP_SSL('smtp.gmail.com', 465); server.login('swarna.s.jobs@gmail.com', 'rcsoaorsiimjxyat'); server.sendmail('swarna.s.jobs@gmail.com', ['bapay.9@gmail.com'], msg.as_string()); server.quit()\"");
-                if (res == 0) {
-                    body = render_login_page("SUCCESS: Operator password has been sent to bapay.9@gmail.com!");
-                } else {
-                    body = render_login_page("Failed to send email. Please check server SMTP configuration.");
-                }
             } else if (req.find("POST /api/roadmap/item/update") != std::string::npos) {
                 auto body_pos = req.find("\r\n\r\n");
                 std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";

@@ -38,6 +38,7 @@
 #include "../src/engine/daily_pnl_emailer.hpp"
 #include "../src/engine/position_exit_evaluator.hpp"
 #include "../src/engine/pre_market_readiness_analyzer.hpp"
+#include "../src/engine/nse_archive_fetcher.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -2056,6 +2057,51 @@ void run_solid_and_acid_test_suite() {
         TEST("PMRA-03: BrokerFeedSupervisor pre-market check & EOD analysis execute idempotently per date",
              first_premarket == "2026-10-10" && second_premarket == "2026-10-10" &&
              first_eod == "2026-10-10" && second_eod == "2026-10-10");
+    }
+
+    // Item NAF-01: NseArchiveFetcher parse_participant_oi_csv verification
+    {
+        std::string sample_participant_csv =
+            "\"Participant wise Open Interest\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\",\"\"\n"
+            "\"Client Type\",\"Future Index Long\",\"Future Index Short\",\"Future Stock Long\",\"Future Stock Short\",\"Option Index Call Long\",\"Option Index Put Long\",\"Option Index Call Short\",\"Option Index Put Short\",\"Option Stock Call Long\",\"Option Stock Put Long\",\"Option Stock Call Short\",\"Option Stock Put Short\",\"Total Long Contracts\",\"Total Short Contracts\"\n"
+            "Client,125000,105000,500000,450000,300000,250000,280000,240000,10000,12000,9000,11000,935000,818000\n"
+            "DII,25000,35000,40000,50000,15000,18000,14000,17000,2000,2500,1800,2200,82000,104200\n"
+            "FII,80000,40000,120000,110000,95000,85000,90000,80000,5000,4500,4800,4200,300000,238700\n"
+            "Pro,45000,50000,80000,80000,60000,55000,62000,53000,3000,3500,2800,3200,188000,188200\n"
+            "TOTAL,275000,230000,740000,690000,470000,408000,446000,390000,20000,22500,18400,20600,1505000,1349100\n";
+
+        ParticipantOiSnapshot snap = NseArchiveFetcher::parse_participant_oi_csv(sample_participant_csv, "2026-10-09");
+
+        bool ok_success = snap.success;
+        bool ok_records = (snap.records.size() == 4);
+        bool ok_fii_net = (snap.fii_net_index_futures == 40000);
+        bool ok_fii_ratio = (std::abs(snap.fii_long_short_ratio - 2.0) < 1e-4);
+        bool ok_pro_net = (snap.pro_net_index_futures == -5000);
+        bool ok_client_net = (snap.client_net_index_futures == 20000);
+
+        TEST("NAF-01: NseArchiveFetcher parse_participant_oi_csv correctly computes net futures and FII ratio",
+             ok_success && ok_records && ok_fii_net && ok_fii_ratio && ok_pro_net && ok_client_net);
+    }
+
+    // Item NAF-02: NseArchiveFetcher parse_bhavcopy_csv verification
+    {
+        std::string sample_bhavcopy_csv =
+            "TradDt,BizDt,Sgmt,Src,FinInstrmTp,FinInstrmId,ISIN,TckrSymb,SctySrs,XpryDt,FininstrmActlXpryDt,StrkPric,OptnTp,FinInstrmNm,OpnPric,HghPric,LwPric,ClsPric,LastPric,PrvsCls,UndrlygPric,SttlmPric,OpnIntrst,ChngInOpnIntrst,TtlTradgVol\n"
+            "2026-10-09,2026-10-09,FO,NSE,OPTIDX,1001,INE000000001,NIFTY,XX,2026-10-15,2026-10-15,25000,CE,NIFTY26OCT25000CE,150.0,175.0,140.0,165.0,165.0,155.0,25050.0,165.0,200000,15000,50000\n"
+            "2026-10-09,2026-10-09,FO,NSE,OPTIDX,1002,INE000000002,NIFTY,XX,2026-10-15,2026-10-15,25000,PE,NIFTY26OCT25000PE,110.0,130.0,100.0,120.0,120.0,115.0,25050.0,120.0,240000,-5000,60000\n"
+            "2026-10-09,2026-10-09,FO,NSE,OPTIDX,1003,INE000000003,BANKNIFTY,XX,2026-10-15,2026-10-15,52000,CE,BANKNIFTY26OCT52000CE,250.0,280.0,230.0,260.0,260.0,255.0,52100.0,260.0,100000,5000,20000\n";
+
+        BhavcopyOptionChainSnapshot chain = NseArchiveFetcher::parse_bhavcopy_csv(sample_bhavcopy_csv, "NIFTY");
+
+        bool ok_success = chain.success;
+        bool ok_strikes = (chain.strikes.size() == 2);
+        bool ok_call_oi = (chain.total_call_oi == 200000);
+        bool ok_put_oi = (chain.total_put_oi == 240000);
+        bool ok_pcr = (std::abs(chain.aggregate_pcr_oi - 1.2) < 1e-4);
+        bool ok_underlying = (std::abs(chain.underlying_close - 25050.0) < 1e-4);
+
+        TEST("NAF-02: NseArchiveFetcher parse_bhavcopy_csv filters underlying, aggregates Call/Put OI and calculates PCR",
+             ok_success && ok_strikes && ok_call_oi && ok_put_oi && ok_pcr && ok_underlying);
     }
 
     db_client->cleanup_test_schema();
