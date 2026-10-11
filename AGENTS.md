@@ -86,3 +86,12 @@ that is an auth problem, not evidence drift: the tools say so loudly and fail op
 - No live trading, no order widening, no threshold loosening without explicit
   operator approval; FNF data and funds are never touched.
 - No secrets in commits, notes or memory.
+
+### Temporary Staging Exemption — Historical Market Data Migration Benchmark
+- **Granted by:** @SWARNA SEKHAR DHAR (Operator)
+- **Date:** 2026-10-11
+- **Scope & Applicability:**
+  1. This exemption applies strictly and exclusively to the isolated staging execution and load benchmarking of `scripts/historical_market_data_migrator.py` under `docs/HISTORICAL_MIGRATION_STAGING_BENCHMARK_PROTOCOL.md`.
+  2. It authorizes a single temporary, local, throwaway Docker container (MySQL 8.0 on an isolated non-standard port, e.g., `:3308`) solely for synthetic candidate data ingestion and query plan validation.
+  3. **Mandatory Destruction:** The temporary container must be completely stopped and destroyed (`docker compose down -v` / `docker rm -f -v`) immediately upon completion and operator sign-off of the staging benchmark protocol. It must NEVER be left running across sessions or retained "just in case."
+  4. **Strict Isolation & Non-Expansion:** This exemption does NOT authorize any other use of a second, local, or fallback database anywhere else in this project. All production and staging application services, desk processes, and trading agents remain strictly bound to the single Oracle Cloud MySQL database via the SSH tunnel (`127.0.0.1:3307`).
