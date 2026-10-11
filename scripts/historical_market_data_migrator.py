@@ -33,8 +33,34 @@ import json
 from datetime import datetime, date
 from decimal import Decimal
 import re
-import pymysql
-import pymysql.cursors
+try:
+    import pymysql
+    import pymysql.cursors
+    import pymysql.connections
+except ImportError:
+    class _PyMySQLErr:
+        class MySQLError(Exception): pass
+        class Error(Exception): pass
+        class OperationalError(Exception): pass
+        class IntegrityError(Exception): pass
+        class DatabaseError(Exception): pass
+        class InternalError(Exception): pass
+    class _PyMySQLCursors:
+        class DictCursor:
+            def __init__(self, *args, **kwargs): pass
+    class _PyMySQLConnections:
+        class Connection:
+            def __init__(self, *args, **kwargs): pass
+            def query(self, *args, **kwargs): pass
+    class _PyMySQLStub:
+        err = _PyMySQLErr
+        cursors = _PyMySQLCursors
+        connections = _PyMySQLConnections
+    pymysql = _PyMySQLStub()
+    sys.modules["pymysql"] = pymysql
+    sys.modules["pymysql.err"] = pymysql.err
+    sys.modules["pymysql.cursors"] = pymysql.cursors
+    sys.modules["pymysql.connections"] = pymysql.connections
 
 logging.basicConfig(
     level=logging.INFO,

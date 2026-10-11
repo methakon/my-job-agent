@@ -28,7 +28,7 @@ Before executing tests, the staging schema must be reconciled against the docume
 | `sourceOrigin` | ABSENT | `VARCHAR(32) NOT NULL DEFAULT 'UNIFIED_NATIVE'` | **UNKNOWN** (Must verify) | Preflight halts (`missing_extension_columns`) |
 | `sourceRecordId` | ABSENT | `VARCHAR(64) NULL` | **UNKNOWN** (Must verify) | Preflight halts (`missing_extension_columns`) |
 | `underlyingPrice` | ABSENT | `DECIMAL(14,4) NULL` | **UNKNOWN** (Must verify) | Preflight halts (`missing_extension_columns`) |
-| `bidDepth`, `askDepth` | ABSENT | `INT NULL` | **UNKNOWN** (Must verify) | Preflight halts (`missing_extension_columns`) |
+| `bidDepth`, `askDepth` | ABSENT | `BIGINT NULL` | **UNKNOWN** (Must verify) | Preflight halts (`missing_extension_columns`) |
 | `instrumentToken` | ABSENT | `VARCHAR(96) NULL` | **UNKNOWN** (Must verify) | Preflight halts (`missing_extension_columns`) |
 | `payloadHash` | ABSENT | `VARCHAR(64) NULL` | **UNKNOWN** (Must verify) | Preflight halts (`missing_extension_columns`) |
 | `cpp_historical_migration_checkpoints` | ABSENT | Checkpoint table with lease fields | **UNKNOWN** (Must verify) | Preflight halts (`checkpoint_table_exists: false`) |
@@ -98,16 +98,19 @@ Execute across chunk sizes $N \in \{100, 200, 500\}$ against staging data (ideal
 ## 4. Functional Correctness Matrix and Test Coverage Status
 
 ### 4.1 Offline Unit Test Baseline
-- **Verified Offline Test Suite**: 53 tests in `scripts/test_historical_market_data_migrator.py` executed cleanly in 0.404s (Exit Code: 0).
+- **Verified Offline Test Suite**: 62 tests in `scripts/test_historical_market_data_migrator.py` executed cleanly in 0.914s (Exit Code: 0).
 - **Core Tested Areas**:
   - 15 canonical market fields verified; sequence number and payload hash invariance confirmed in canonical mode.
   - Provider normalization contract (`normalize_provider_venue`): whitespace stripping, case insensitivity, alias mapping (`fyers` $\rightarrow$ `FYERS_LIVE`, `upstox` $\rightarrow$ `UPSTOX_LIVE`), rejection of `None`/empty/literal `"NULL"`.
   - Tier 2 recovery of legacy unnormalized hashes (`src=fyers;...`) without `canonicalDedupHash IS NULL` restriction.
   - Fail-fast rollback and lease release on `InvalidProviderProvenanceError`.
+  - Checkpoint fencing token validation (`WorkerLeaseLostError` on `rowcount != 1`) and atomic rollback of target inserts.
+  - Phase B DDL market-depth types verified as `BIGINT NULL`.
+  - Simulated process crashes and seamless resumption across checkpoints.
 
-### 4.2 Staging Correctness Cases and Outstanding Gaps
+### 4.2 Staging Correctness Cases and Coverage Status
 
-| Test ID | Case Description | Staging Execution Details | Expected Outcome | Existing Offline Test or Outstanding Gap |
+| Test ID | Case Description | Staging Execution Details | Expected Outcome | Existing Offline Test or Staging Scope |
 | :--- | :--- | :--- | :--- | :--- |
 | **STG-01** | Exact Canonical Hash Match | Seed target row with $H_1$; ingest identical candidate with $H_1$. | Tier 1 detects duplicate; 0 rows inserted; duplicate counter incremented. | Covered offline: `TestMarketDataMigrator.test_two_tier_deduplication...` |
 | **STG-02** | Legacy Hash Compatibility | Seed target row with legacy hash ($H_{\text{old}}$); candidate has normalized hash ($H_{\text{norm}}$). | Tier 1 misses; Tier 2 matches via venue normalization and market state; 0 rows inserted. | Covered offline: `TestProviderVenue...test_tier2_recovers_legacy_unnormalized_target_hash` |
@@ -116,9 +119,10 @@ Execute across chunk sizes $N \in \{100, 200, 500\}$ against staging data (ideal
 | **STG-05** | Intra-Batch Duplication | Candidate batch contains 2 identical rows. | In-memory `seen_in_batch` filter identifies second row; 1 inserted, 1 duplicate. | Covered offline: Baseline unit tests |
 | **STG-06** | Sentinel Timestamp Preservation | Source contains `ts = '1980-01-01 00:00:00'`. | Mapped with `dataQuality = 'SENTINEL_TS'`; original arrival time preserved in `sourceTimestamp`. | Covered offline: `TestMarketDataMigrator.test_sentinel_preservation...` |
 | **STG-07** | Invalid Provenance Abortion | Candidate has `source = ''` or literal `'NULL'`. | Mapping raises `InvalidProviderProvenanceError`; transaction rolls back; checkpoint preserved. | Covered offline: `TestProviderVenue...test_invalid_provider_provenance_aborts...` |
-| **STG-08** | Multi-Venue Collision Disambiguation | Target contains 2 rows for same `(instrumentKey, ts)`: one Fyers, one Upstox. Candidate is Upstox. | Tier 2 retrieves both candidates; matches the Upstox row; correctly deduplicates without false collision on Fyers row. | **OUTSTANDING TEST GAP 1**: Must be verified empirically on staging. |
-| **STG-09** | Chunk-Boundary Splitting | Batch requires Tier 2 lookup for 1,200 unique candidate tuples. | Migrator partitions lookups into 3 chunks ($500 + 500 + 200$); aggregates results seamlessly. | **OUTSTANDING TEST GAP 2**: Must be verified empirically on staging. |
+| **STG-08** | Multi-Venue Collision Disambiguation | Target contains 2 rows for same `(instrumentKey, ts)`: one Fyers, one Upstox. Candidate is Upstox. | Tier 2 retrieves both candidates; matches the Upstox row; correctly deduplicates without false collision on Fyers row. | Covered offline: `test_tier2_multi_venue_collision_disambiguation` (Empirical staging verification pending) |
+| **STG-09** | Chunk-Boundary Splitting | Batch requires Tier 2 lookup for 1,200 unique candidate tuples. | Migrator partitions lookups into 3 chunks ($500 + 500 + 200$); aggregates results seamlessly. | Covered offline: `test_tier2_chunking_boundary_splitting` (Empirical staging verification pending) |
 | **STG-10** | Accounting Invariant | Normal batch execution. | Process asserts `len(records) == inserted + duplicates`. Discrepancies raise `RowAccountingInvariantError`. | Covered offline: Baseline unit tests |
+| **STG-11** | Checkpoint Fencing & Atomic Rollback | Stolen lease or stale worker commit attempt (`rowcount != 1`). | Raises `WorkerLeaseLostError`; rolls back uncommitted target batch; does not commit. | Covered offline: `TestCheckpointFencingAndSchemaRefinements` (6 tests) |
 
 ---
 
