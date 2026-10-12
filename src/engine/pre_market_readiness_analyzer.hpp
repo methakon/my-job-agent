@@ -78,7 +78,7 @@ public:
     static std::string format_report_html(const PreMarketReadinessReport& report);
 
     // Sends pre-market alert email if critical blockers (e.g. missing/expired token) are detected
-    bool send_alert_if_blocked(const PreMarketReadinessReport& report);
+    bool send_alert_if_blocked(const PreMarketReadinessReport& report, bool verbose = false);
 
     // Evaluates whether token issued timestamp is strictly before the 03:30 AM IST cutoff for session_date
     static bool is_token_issued_before_cutoff(const std::string& session_date,

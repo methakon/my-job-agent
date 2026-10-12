@@ -384,7 +384,7 @@ std::string PreMarketReadinessAnalyzer::format_report_html(const PreMarketReadin
     return ss.str();
 }
 
-bool PreMarketReadinessAnalyzer::send_alert_if_blocked(const PreMarketReadinessReport& report) {
+bool PreMarketReadinessAnalyzer::send_alert_if_blocked(const PreMarketReadinessReport& report, bool verbose) {
     if (report.overall_readiness_passed && report.critical_blockers.empty()) {
         return true; // No blockers to alert about
     }
@@ -399,7 +399,7 @@ bool PreMarketReadinessAnalyzer::send_alert_if_blocked(const PreMarketReadinessR
     std::string text_body = format_report_text(report);
     std::string html_body = format_report_html(report);
 
-    return DailyPnLEmailer::send_smtp_message(cfg, subject, text_body, html_body);
+    return DailyPnLEmailer::send_smtp_message(cfg, subject, text_body, html_body, verbose);
 }
 
 } // namespace hermes

@@ -2,12 +2,15 @@
 #include "../engine/tick_receiver.hpp"
 #include "../engine/upstox_historical_backfill.hpp"
 #include "../engine/position_exit_evaluator.hpp"
+#include "../engine/market_calendar.hpp"
+#include "../engine/pre_market_readiness_analyzer.hpp"
 #include "../common/crypto_util.hpp"
 #include "../common/env_loader.hpp"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <unordered_map>
+#include <cmath>
 
 // MySQLConnectionPool implementation
 MySQLConnectionPool::MySQLConnectionPool(std::string host, int port, std::string user, std::string password, std::string db_name, size_t pool_size)
@@ -1124,6 +1127,280 @@ std::vector<SandboxLogData> RoadmapDbClient::fetch_sandbox_logs(int limit) {
 
     pool_->release(conn);
     return list;
+}
+
+LiveSessionStatusTelemetry RoadmapDbClient::compute_live_session_status_telemetry() {
+    LiveSessionStatusTelemetry t;
+
+    uint64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+    auto ist = hermes::MarketCalendar::get_ist_time(now_ms);
+    char time_buf[64];
+    snprintf(time_buf, sizeof(time_buf), "%04d-%02d-%02d %02d:%02d:%02d IST",
+             ist.year, ist.month, ist.day, ist.hour, ist.minute, ist.second);
+    t.evaluated_at_ist = time_buf;
+
+    char cur_date_buf[32];
+    snprintf(cur_date_buf, sizeof(cur_date_buf), "%04d-%02d-%02d", ist.year, ist.month, ist.day);
+
+    auto phase = hermes::MarketCalendar::get_session_phase(now_ms);
+    bool is_trading_day = hermes::MarketCalendar::is_trading_day(now_ms);
+    t.session_phase_str = hermes::MarketCalendar::session_phase_to_string(phase);
+
+    // Check broker tokens for today
+    auto upstox_tok = fetch_broker_token_status("upstox");
+    auto fyers_tok = fetch_broker_token_status("fyers");
+
+    bool upstox_valid = upstox_tok.is_valid && !hermes::PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(cur_date_buf, upstox_tok.issued_at, upstox_tok.issued_at_epoch);
+    bool fyers_valid = fyers_tok.is_valid && !hermes::PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(cur_date_buf, fyers_tok.issued_at, fyers_tok.issued_at_epoch);
+    bool any_token_usable = upstox_valid || fyers_valid;
+
+    if (!is_trading_day || phase == hermes::SessionPhase::CLOSED) {
+        t.paper_trading_state = "IDLE_OFF_HOURS";
+    } else if (!any_token_usable) {
+        t.paper_trading_state = "IDLE_WAITING_TOKEN";
+    } else if (phase == hermes::SessionPhase::MARKET_OPEN) {
+        t.paper_trading_state = "ACTIVE_PAPER_TRADING";
+    } else if (phase == hermes::SessionPhase::POST_OPEN) {
+        t.paper_trading_state = "SESSION_CLOSED";
+    } else {
+        t.paper_trading_state = "CONNECTING_FEED";
+    }
+
+    // 1. Compute ATR(14) and 20-day Baseline Volatility from clean daily candles
+    MYSQL* conn_loc = acquire_local();
+    if (conn_loc) {
+        std::string q_daily = "SELECT open, high, low, close FROM cpp_historical_daily_candles "
+                              "WHERE symbol IN ('NIFTY50', 'Nifty 50') AND high > low AND DAYOFWEEK(timestamp) NOT IN (1, 7) "
+                              "ORDER BY timestamp DESC LIMIT 25;";
+        if (mysql_query(conn_loc, q_daily.c_str()) == 0) {
+            MYSQL_RES* res = mysql_store_result(conn_loc);
+            if (res) {
+                struct DayRow { double open, high, low, close; };
+                std::vector<DayRow> d_rows;
+                MYSQL_ROW row;
+                while ((row = mysql_fetch_row(res))) {
+                    try {
+                        DayRow dr;
+                        dr.open = row[0] ? std::stod(row[0]) : 0.0;
+                        dr.high = row[1] ? std::stod(row[1]) : 0.0;
+                        dr.low = row[2] ? std::stod(row[2]) : 0.0;
+                        dr.close = row[3] ? std::stod(row[3]) : 0.0;
+                        d_rows.push_back(dr);
+                    } catch(...) {}
+                }
+                mysql_free_result(res);
+
+                if (d_rows.size() >= 15) {
+                    std::reverse(d_rows.begin(), d_rows.end()); // chronological
+                    std::vector<double> trs;
+                    std::vector<double> log_rets;
+                    for (size_t i = 1; i < d_rows.size(); ++i) {
+                        double tr = std::max(d_rows[i].high - d_rows[i].low,
+                                             std::max(std::abs(d_rows[i].high - d_rows[i-1].close),
+                                                      std::abs(d_rows[i].low - d_rows[i-1].close)));
+                        trs.push_back(tr);
+                        if (d_rows[i-1].close > 0.0 && d_rows[i].close > 0.0) {
+                            log_rets.push_back(std::log(d_rows[i].close / d_rows[i-1].close));
+                        }
+                    }
+
+                    if (trs.size() >= 14) {
+                        double sum_tr = 0.0;
+                        for (size_t i = trs.size() - 14; i < trs.size(); ++i) {
+                            sum_tr += trs[i];
+                        }
+                        t.atr_14 = sum_tr / 14.0;
+                    }
+
+                    if (log_rets.size() >= 20) {
+                        double sum_ret = 0.0;
+                        size_t start_idx = log_rets.size() - 20;
+                        for (size_t i = start_idx; i < log_rets.size(); ++i) sum_ret += log_rets[i];
+                        double mean_ret = sum_ret / 20.0;
+                        double var = 0.0;
+                        for (size_t i = start_idx; i < log_rets.size(); ++i) {
+                            var += std::pow(log_rets[i] - mean_ret, 2.0);
+                        }
+                        var /= 19.0;
+                        t.baseline_vol_20d = std::sqrt(var) * std::sqrt(252.0) * 100.0;
+                    }
+
+                    if (!d_rows.empty()) {
+                        t.prev_close = d_rows.back().close;
+                    }
+                }
+            }
+        }
+
+        // 2. Compute Intraday Metrics (LTP, Open, Range, VWAP, ORB High/Low) for today
+        std::string q_intra = "SELECT timestamp, open, high, low, close, volume FROM cpp_historical_intraday_candles "
+                              "WHERE symbol IN ('NIFTY50', 'Nifty 50') AND DATE(timestamp) = '" + std::string(cur_date_buf) + "' "
+                              "ORDER BY timestamp ASC;";
+        if (mysql_query(conn_loc, q_intra.c_str()) == 0) {
+            MYSQL_RES* res = mysql_store_result(conn_loc);
+            if (res) {
+                MYSQL_ROW row;
+                double high_max = 0.0, low_min = 1e9;
+                double vwap_num = 0.0, vwap_den = 0.0;
+                double close_sum = 0.0;
+                size_t candle_count = 0;
+                double orb_h = 0.0, orb_l = 1e9;
+                bool orb_found = false;
+
+                while ((row = mysql_fetch_row(res))) {
+                    try {
+                        std::string ts_str = row[0] ? row[0] : "";
+                        double op = row[1] ? std::stod(row[1]) : 0.0;
+                        double hi = row[2] ? std::stod(row[2]) : 0.0;
+                        double lo = row[3] ? std::stod(row[3]) : 0.0;
+                        double cl = row[4] ? std::stod(row[4]) : 0.0;
+                        double vol = row[5] ? std::stod(row[5]) : 0.0;
+
+                        if (candle_count == 0) t.open_price = op;
+                        t.ltp = cl;
+                        high_max = std::max(high_max, hi);
+                        low_min = std::min(low_min, lo);
+                        vwap_num += (cl * vol);
+                        vwap_den += vol;
+                        close_sum += cl;
+                        candle_count++;
+
+                        // Check if candle falls in 09:15 to 09:45 window
+                        if (ts_str.length() >= 19) {
+                            std::string time_part = ts_str.substr(11, 8);
+                            if (time_part >= "09:15:00" && time_part <= "09:45:00") {
+                                orb_h = std::max(orb_h, hi);
+                                orb_l = std::min(orb_l, lo);
+                                orb_found = true;
+                            }
+                        }
+                    } catch(...) {}
+                }
+                mysql_free_result(res);
+
+                if (candle_count > 0) {
+                    t.intraday_range = (high_max >= low_min) ? (high_max - low_min) : 0.0;
+                    t.vwap = (vwap_den > 0.0) ? (vwap_num / vwap_den) : (close_sum / candle_count);
+                    t.vwap_delta = t.ltp - t.vwap;
+                    if (orb_found && orb_l < 1e8) {
+                        t.orb_high = orb_h;
+                        t.orb_low = orb_l;
+                    }
+                }
+            }
+        }
+
+        release_local(conn_loc);
+    }
+
+    // Fallback LTP if no intraday rows exist yet
+    if (t.ltp <= 0.0) {
+        MYSQL* conn_rem = pool_->acquire();
+        if (conn_rem) {
+            const char* q_snap = "SELECT price FROM fnf_market_snapshots WHERE instrument LIKE '%Nifty%' OR instrument LIKE '%NIFTY%' ORDER BY ts DESC LIMIT 1;";
+            if (mysql_query(conn_rem, q_snap) == 0) {
+                MYSQL_RES* res = mysql_store_result(conn_rem);
+                if (res) {
+                    MYSQL_ROW row = mysql_fetch_row(res);
+                    if (row && row[0]) {
+                        try { t.ltp = std::stod(row[0]); } catch(...) {}
+                    }
+                    mysql_free_result(res);
+                }
+            }
+            pool_->release(conn_rem);
+        }
+    }
+
+    if (t.prev_close > 0.0 && t.ltp > 0.0) {
+        t.change_pct = ((t.ltp - t.prev_close) / t.prev_close) * 100.0;
+    }
+
+    // 3. Strict Deterministic One-Liner Evaluation (Auditable Rules 0 to 6)
+    if (t.paper_trading_state == "IDLE_WAITING_TOKEN") {
+        t.phase_badge_text = "STANDBY (WAITING TOKEN)";
+        t.phase_badge_css = "warn";
+        t.market_read_one_liner = "Session standby — awaiting broker authentication token before market open";
+        t.trigger_rule = "WAITING_BROKER_TOKEN";
+    } else if (phase == hermes::SessionPhase::PRE_OPEN) {
+        t.phase_badge_text = "PRE-MARKET (DISCOVERY)";
+        t.phase_badge_css = "warn";
+        t.market_read_one_liner = "Pre-market equilibrium discovery in progress — indicative gap calculation pending 09:08 auction";
+        t.trigger_rule = "PRE_OPEN_DISCOVERY";
+    } else if (phase == hermes::SessionPhase::OPEN_AUCTION) {
+        t.phase_badge_text = "OPEN AUCTION SETTLING";
+        t.phase_badge_css = "accent";
+        t.market_read_one_liner = "Pre-open auction completed — opening gap classified; awaiting 09:15 regular bell";
+        t.trigger_rule = "OPEN_AUCTION_SETTLEMENT";
+    } else if (phase == hermes::SessionPhase::POST_OPEN) {
+        t.phase_badge_text = "POST-MARKET ARCHIVAL";
+        t.phase_badge_css = "accent";
+        t.market_read_one_liner = "Session closed (15:30 IST) — running end-of-day trade reconciliation and decision ledger archival";
+        t.trigger_rule = "POST_MARKET_ARCHIVAL";
+    } else if (phase == hermes::SessionPhase::CLOSED) {
+        t.phase_badge_text = "SESSION CLOSED";
+        t.phase_badge_css = "dim";
+        t.market_read_one_liner = "Market closed — engine idle in off-hours standby";
+        t.trigger_rule = "OFF_HOURS_STANDBY";
+    } else {
+        // Continuous Trading (MARKET_OPEN)
+        t.phase_badge_text = "● LIVE MARKET OPEN";
+        t.phase_badge_css = "ok";
+
+        const double ORB_BUFFER_PTS = 5.0;
+        const double TREND_VWAP_PCT = 0.0015; // 0.15% above/below VWAP
+        const double VWAP_PIN_PCT = 0.0008;   // within 0.08% of VWAP
+
+        char buf[256];
+        if (t.orb_high > 0.0 && t.ltp > (t.orb_high + ORB_BUFFER_PTS)) {
+            double pts_above = t.ltp - t.orb_high;
+            snprintf(buf, sizeof(buf), "Breakout forming above ORB High (₹%.2f, +%.1f pts)", t.orb_high, pts_above);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "ORB_HIGH_BREAKOUT";
+        } else if (t.orb_low > 0.0 && t.ltp < (t.orb_low - ORB_BUFFER_PTS)) {
+            double pts_below = t.orb_low - t.ltp;
+            snprintf(buf, sizeof(buf), "Breakdown forming below ORB Low (₹%.2f, -%.1f pts)", t.orb_low, pts_below);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "ORB_LOW_BREAKDOWN";
+        } else if (t.atr_14 > 0.0 && t.intraday_range > (1.50 * t.atr_14)) {
+            double sigma_val = t.intraday_range / (t.atr_14 > 0.0 ? t.atr_14 : 1.0);
+            snprintf(buf, sizeof(buf), "Volatility spike detected — intraday range (%.1f pts) exceeding normal band (%.2fσ)", t.intraday_range, sigma_val);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "VOLATILITY_SPIKE";
+        } else if (t.vwap > 0.0 && t.ltp > (t.vwap * (1.0 + TREND_VWAP_PCT)) && t.ofi >= 0.70) {
+            snprintf(buf, sizeof(buf), "NIFTY trending up, +%.2f%% since open — holding firm above VWAP (+%.1f pts)", t.change_pct, t.vwap_delta);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "TRENDING_BULL_VWAP";
+        } else if (t.vwap > 0.0 && t.ltp < (t.vwap * (1.0 - TREND_VWAP_PCT)) && t.ofi <= -0.70) {
+            snprintf(buf, sizeof(buf), "NIFTY trending down, %.2f%% since open — trading weak below VWAP (%.1f pts)", t.change_pct, t.vwap_delta);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "TRENDING_BEAR_VWAP";
+        } else if (t.ofi >= 0.85) {
+            snprintf(buf, sizeof(buf), "Strong institutional buying pressure — buy-side order flow dominating (+%.0f%% OFI)", t.ofi * 100.0);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "INSTITUTIONAL_BUYING_OFI";
+        } else if (t.ofi <= -0.85) {
+            snprintf(buf, sizeof(buf), "Strong institutional selling pressure — sell-side order flow dominating (%.0f%% OFI)", t.ofi * 100.0);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "INSTITUTIONAL_SELLING_OFI";
+        } else if (t.vwap > 0.0 && std::abs(t.ltp - t.vwap) / t.vwap <= VWAP_PIN_PCT) {
+            snprintf(buf, sizeof(buf), "Range-bound, consolidating near VWAP (₹%.2f, delta %+.1f pts)", t.vwap, t.vwap_delta);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "RANGE_BOUND_VWAP_PIN";
+        } else if (t.atr_14 > 0.0 && t.intraday_range <= (0.35 * t.atr_14)) {
+            snprintf(buf, sizeof(buf), "Low volatility compression — trading within tight %.1f pt band inside opening range", t.intraday_range);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "LOW_VOLATILITY_COMPRESSION";
+        } else {
+            snprintf(buf, sizeof(buf), "NIFTY steady at ₹%.2f (%+.2f%%), order flow balanced within normal session envelope", t.ltp, t.change_pct);
+            t.market_read_one_liner = buf;
+            t.trigger_rule = "EQUILIBRIUM_STEADY";
+        }
+    }
+
+    return t;
 }
 
 bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {

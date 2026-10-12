@@ -144,6 +144,29 @@ struct MarketSnapshotData {
     std::string ts;
 };
 
+struct LiveSessionStatusTelemetry {
+    std::string session_phase_str{"CLOSED"};
+    std::string paper_trading_state{"IDLE_OFF_HOURS"};
+    std::string phase_badge_text{"STANDBY / CLOSED"};
+    std::string phase_badge_css{"dim"}; // ok, warn, bad, accent, dim
+    std::string market_read_one_liner{"Market closed — engine idle in off-hours standby"};
+    std::string trigger_rule{"OFF_HOURS_STANDBY"};
+    double ltp{0.0};
+    double prev_close{0.0};
+    double change_pct{0.0};
+    double open_price{0.0};
+    double vwap{0.0};
+    double vwap_delta{0.0};
+    double orb_high{0.0};
+    double orb_low{0.0};
+    double ofi{0.0};
+    double atr_14{0.0};
+    double baseline_vol_20d{0.0};
+    double intraday_range{0.0};
+    double sigma_multiple{0.0};
+    std::string evaluated_at_ist;
+};
+
 struct DecayCalibrationData {
     int weekday{0};
     double decayRate{0.04};
@@ -268,6 +291,7 @@ public:
     std::vector<DecayCalibrationData> fetch_decay_calibrations();
     LearningSummaryData fetch_learning_summary();
     std::vector<SandboxLogData> fetch_sandbox_logs(int limit = 10);
+    LiveSessionStatusTelemetry compute_live_session_status_telemetry();
 
     // Hermes-CPP Zero-Progress Roadmap & Clarifications Methods
     std::vector<HermesCppStage> fetch_hermes_cpp_stages();

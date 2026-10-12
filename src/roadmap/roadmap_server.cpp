@@ -488,6 +488,7 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
     std::vector<DecayCalibrationData> calibrations;
     LearningSummaryData learning;
     std::vector<SandboxLogData> sandbox_logs;
+    LiveSessionStatusTelemetry session_telemetry;
 
     int total_trades = 0;
     int cur_page = std::max(1, page);
@@ -505,6 +506,7 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
         calibrations = db_client_->fetch_decay_calibrations();
         learning = db_client_->fetch_learning_summary();
         sandbox_logs = db_client_->fetch_sandbox_logs(10);
+        session_telemetry = db_client_->compute_live_session_status_telemetry();
     }
 
     int total_pages = (total_trades > 0) ? ((total_trades + cur_limit - 1) / cur_limit) : 1;
@@ -549,12 +551,59 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
        << "  <div class=\"header-card\">"
        << "    <div class=\"title\">📊 F&amp;O Paper Trading &amp; Autonomous Skill Desk</div>"
        << "    <div class=\"meta\">Friday Nifty Futures &amp; Weekly Options Algo Desk · Capital-Envelope Trading · Astro-Matched Muhurta · Self-Learning Ledger</div>"
-       << "    <div class=\"banner-box\">"
-       << "      🧪 <b>Engine Skill Acquisition & Training Purpose</b>:<br/>"
-       << "      <b>PAPER TRADING is exclusively used for training, backtesting, and skill acquisition</b> of the autonomous C++ options engine. "
-       << "      The trading engine continuously validates entry thesis, option chain trap detectors, order flow imbalance (OFI), and microprice signals on real market feeds without financial risk. "
-       << "      <b>Real Trading</b> mode remains locked until the engine passes all Paper-to-Live Promotion Gates (30-Day Sharpe Ratio &gt; 2.0 and Max Drawdown &lt; 5%)."
+       << "    <div class=\"session-panel\" style=\"background:#131d27;border:1px solid #1f364d;border-radius:10px;padding:18px 20px;margin-top:16px;\">"
+       << "      <div style=\"display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;border-bottom:1px solid rgba(48,54,61,0.6);padding-bottom:10px;\">"
+       << "        <div style=\"display:flex;align-items:center;gap:10px;flex-wrap:wrap;\">"
+       << "          <span id=\"session-phase-badge\" class=\"badge " << session_telemetry.phase_badge_css << "\" style=\"font-size:12px;font-weight:700;padding:4px 12px;letter-spacing:0.3px;\">" << session_telemetry.phase_badge_text << "</span>"
+       << "          <span style=\"font-size:13px;color:var(--dim);\">Engine State: <b id=\"session-engine-state\" style=\"color:var(--text);\">" << session_telemetry.paper_trading_state << "</b></span>"
+       << "          <span style=\"font-size:13px;color:var(--dim);\">Phase: <b id=\"session-phase-state\" style=\"color:var(--text);\">" << session_telemetry.session_phase_str << "</b></span>"
+       << "        </div>"
+       << "        <div id=\"session-eval-time\" style=\"font-size:12px;color:var(--dim);\">" << session_telemetry.evaluated_at_ist << "</div>"
+       << "      </div>"
+       << "      <div style=\"margin-bottom:14px;\">"
+       << "        <div style=\"font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--dim);margin-bottom:4px;\">Market Read (Deterministic Signal):</div>"
+       << "        <div id=\"session-market-read\" style=\"font-size:15px;font-weight:600;color:#58a6ff;line-height:1.4;\">&ldquo;" << html_escape(session_telemetry.market_read_one_liner) << "&rdquo;</div>"
+       << "        <div style=\"font-size:11px;color:var(--dim);margin-top:2px;\">Triggered by rule: <code id=\"session-trigger-rule\" style=\"background:rgba(110,118,129,0.2);padding:1px 6px;border-radius:4px;color:#c9d1d9;\">" << session_telemetry.trigger_rule << "</code></div>"
+       << "      </div>"
+       << "      <div style=\"display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;\">"
+       << "        <div style=\"background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;\">"
+       << "          <div style=\"font-size:11px;color:var(--dim);\">NIFTY 50 LTP</div>"
+       << "          <div id=\"telemetry-ltp\" style=\"font-size:14px;font-weight:700;color:var(--text);\">₹" << session_telemetry.ltp << " <span style=\"font-size:12px;font-weight:600;color:" << (session_telemetry.change_pct >= 0 ? "var(--ok)" : "var(--bad)") << ";\">(" << (session_telemetry.change_pct >= 0 ? "+" : "") << session_telemetry.change_pct << "%)</span></div>"
+       << "        </div>"
+       << "        <div style=\"background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;\">"
+       << "          <div style=\"font-size:11px;color:var(--dim);\">Intraday VWAP</div>"
+       << "          <div id=\"telemetry-vwap\" style=\"font-size:14px;font-weight:700;color:var(--text);\">₹" << session_telemetry.vwap << " <span style=\"font-size:11.5px;font-weight:500;color:var(--dim);\">(" << (session_telemetry.vwap_delta >= 0 ? "+" : "") << session_telemetry.vwap_delta << ")</span></div>"
+       << "        </div>"
+       << "        <div style=\"background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;\">"
+       << "          <div style=\"font-size:11px;color:var(--dim);\">ORB [09:15-09:45]</div>"
+       << "          <div id=\"telemetry-orb\" style=\"font-size:13px;font-weight:700;color:var(--text);\">H: ₹" << session_telemetry.orb_high << " <br/><span style=\"font-size:12px;font-weight:500;color:var(--dim);\">&middot; L: ₹" << session_telemetry.orb_low << "</span></div>"
+       << "        </div>"
+       << "        <div style=\"background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;\">"
+       << "          <div style=\"font-size:11px;color:var(--dim);\">ATR (14-Day)</div>"
+       << "          <div id=\"telemetry-atr\" style=\"font-size:14px;font-weight:700;color:var(--text);\">" << session_telemetry.atr_14 << " pts <span style=\"font-size:11px;color:var(--dim);\">(" << session_telemetry.intraday_range << " today)</span></div>"
+       << "        </div>"
+       << "        <div style=\"background:#161b22;border:1px solid #30363d;border-radius:6px;padding:8px 12px;\">"
+       << "          <div style=\"font-size:11px;color:var(--dim);\">20-Day Baseline Vol</div>"
+       << "          <div id=\"telemetry-vol\" style=\"font-size:14px;font-weight:700;color:var(--text);\">" << session_telemetry.baseline_vol_20d << "% <span style=\"font-size:11px;color:var(--dim);\">ann.</span></div>"
+       << "        </div>"
+       << "      </div>"
        << "    </div>"
+       << "    <details style=\"margin-top:12px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:10px 14px;font-size:13px;color:#8b949e;\">"
+       << "      <summary style=\"cursor:pointer;font-weight:600;color:#e6edf3;display:flex;align-items:center;gap:8px;\">"
+       << "        <span>ℹ️ Paper-to-Live Promotion Gate &amp; Engine Training Purpose</span>"
+       << "        <span class=\"badge\" style=\"font-size:10px;padding:1px 6px;\">Standing Policy (Click to expand)</span>"
+       << "      </summary>"
+       << "      <div style=\"margin-top:10px;line-height:1.6;color:#c9d1d9;border-top:1px dashed #30363d;padding-top:10px;\">"
+       << "        🧪 <b>Engine Skill Acquisition &amp; Training Purpose</b>:<br/>"
+       << "        <b>PAPER TRADING is exclusively used for training, backtesting, and skill acquisition</b> of the autonomous C++ options engine. "
+       << "        The trading engine continuously validates entry thesis, option chain trap detectors, order flow imbalance (OFI), and microprice signals on real market feeds without financial risk.<br/>"
+       << "        <b>Real Trading</b> mode remains locked until the engine passes all <b>Paper-to-Live Promotion Gates</b>:"
+       << "        <ul style=\"margin:6px 0 0 18px;padding:0;\">"
+       << "          <li><b>30-Day Rolling Sharpe Ratio &gt; 2.0</b></li>"
+       << "          <li><b>Maximum Session Drawdown &lt; 5.0%</b></li>"
+       << "        </ul>"
+       << "      </div>"
+       << "    </details>"
        << "  </div>"
 
        << "  <div class=\"grid2\">"
@@ -829,6 +878,39 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
 
        << "  <div class=\"footer\">C++ Autonomous Trading Engine · F&amp;O Paper Trading &amp; Skill Desk · Oracle Cloud MySQL (3307)</div>"
        << "</div>"
+       << "<script>\n"
+       << "function fetchSessionStatus(){\n"
+       << "  fetch('/api/market/session-status')\n"
+       << "    .then(function(r){return r.json();})\n"
+       << "    .then(function(d){\n"
+       << "      if(!d||d.status!=='OK')return;\n"
+       << "      var b=document.getElementById('session-phase-badge');if(b){b.className='badge '+d.phase_badge_css;b.innerText=d.phase_badge_text;}\n"
+       << "      var e=document.getElementById('session-engine-state');if(e)e.innerText=d.paper_trading_state;\n"
+       << "      var p=document.getElementById('session-phase-state');if(p)p.innerText=d.session_phase_str;\n"
+       << "      var t=document.getElementById('session-eval-time');if(t)t.innerText=d.evaluated_at_ist;\n"
+       << "      var m=document.getElementById('session-market-read');if(m)m.innerText='\\u201c'+d.market_read_one_liner+'\\u201d';\n"
+       << "      var r=document.getElementById('session-trigger-rule');if(r)r.innerText=d.trigger_rule;\n"
+       << "      var l=document.getElementById('telemetry-ltp');if(l){\n"
+       << "        var s=d.change_pct>=0?'+':'';var c=d.change_pct>=0?'var(--ok)':'var(--bad)';\n"
+       << "        l.innerHTML='\\u20b9'+d.ltp.toFixed(2)+' <span style=\"font-size:12px;font-weight:600;color:'+c+';\">('+s+d.change_pct.toFixed(2)+'%)</span>';\n"
+       << "      }\n"
+       << "      var v=document.getElementById('telemetry-vwap');if(v){\n"
+       << "        var vs=d.vwap_delta>=0?'+':'';\n"
+       << "        v.innerHTML='\\u20b9'+d.vwap.toFixed(2)+' <span style=\"font-size:11.5px;font-weight:500;color:var(--dim);\">('+vs+d.vwap_delta.toFixed(2)+')</span>';\n"
+       << "      }\n"
+       << "      var o=document.getElementById('telemetry-orb');if(o){\n"
+       << "        o.innerHTML='H: \\u20b9'+d.orb_high.toFixed(2)+' <br/><span style=\"font-size:12px;font-weight:500;color:var(--dim);\">&middot; L: \\u20b9'+d.orb_low.toFixed(2)+'</span>';\n"
+       << "      }\n"
+       << "      var a=document.getElementById('telemetry-atr');if(a){\n"
+       << "        a.innerHTML=d.atr_14.toFixed(2)+' pts <span style=\"font-size:11px;color:var(--dim);\">('+d.intraday_range.toFixed(2)+' today)</span>';\n"
+       << "      }\n"
+       << "      var vl=document.getElementById('telemetry-vol');if(vl){\n"
+       << "        vl.innerHTML=d.baseline_vol_20d.toFixed(2)+'% <span style=\"font-size:11px;color:var(--dim);\">ann.</span>';\n"
+       << "      }\n"
+       << "    }).catch(function(){});\n"
+       << "}\n"
+       << "setInterval(fetchSessionStatus, 5000);\n"
+       << "</script>\n"
        << GOOGLE_ANALYTICS_FOOTER_TAG
        << "</body></html>";
 
@@ -2275,6 +2357,39 @@ void RoadmapServer::start() {
                         ss << "\"" << kv.first << "\":\"" << kv.second << "\"";
                     }
                     ss << "}}";
+                    body = ss.str();
+                } else {
+                    body = "{\"status\":\"ERROR\",\"message\":\"Database client unavailable\"}";
+                }
+            } else if (clean_path == "/api/market/session-status") {
+                status_code = 200;
+                content_type = "application/json";
+                if (db_client_) {
+                    auto tel = db_client_->compute_live_session_status_telemetry();
+                    std::ostringstream ss;
+                    ss << std::fixed << std::setprecision(2);
+                    ss << "{"
+                       << "\"status\":\"OK\","
+                       << "\"session_phase_str\":\"" << tel.session_phase_str << "\","
+                       << "\"paper_trading_state\":\"" << tel.paper_trading_state << "\","
+                       << "\"phase_badge_text\":\"" << tel.phase_badge_text << "\","
+                       << "\"phase_badge_css\":\"" << tel.phase_badge_css << "\","
+                       << "\"market_read_one_liner\":\"" << html_escape(tel.market_read_one_liner) << "\","
+                       << "\"trigger_rule\":\"" << tel.trigger_rule << "\","
+                       << "\"ltp\":" << tel.ltp << ","
+                       << "\"prev_close\":" << tel.prev_close << ","
+                       << "\"change_pct\":" << tel.change_pct << ","
+                       << "\"open_price\":" << tel.open_price << ","
+                       << "\"vwap\":" << tel.vwap << ","
+                       << "\"vwap_delta\":" << tel.vwap_delta << ","
+                       << "\"orb_high\":" << tel.orb_high << ","
+                       << "\"orb_low\":" << tel.orb_low << ","
+                       << "\"ofi\":" << tel.ofi << ","
+                       << "\"atr_14\":" << tel.atr_14 << ","
+                       << "\"baseline_vol_20d\":" << tel.baseline_vol_20d << ","
+                       << "\"intraday_range\":" << tel.intraday_range << ","
+                       << "\"evaluated_at_ist\":\"" << tel.evaluated_at_ist << "\""
+                       << "}";
                     body = ss.str();
                 } else {
                     body = "{\"status\":\"ERROR\",\"message\":\"Database client unavailable\"}";

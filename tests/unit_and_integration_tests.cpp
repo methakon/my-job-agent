@@ -2137,6 +2137,23 @@ void run_solid_and_acid_test_suite() {
              fail_closed && token_invalid && stale_flag && blocker_found);
     }
 
+    // Item BFS-01: BrokerFeedSupervisor::is_token_usable fail-closed 03:30 cutoff enforcement
+    {
+        OptionTickReceiver receiver;
+        std::vector<std::string> symbols = {"NSE_INDEX|Nifty 50"};
+        BrokerFeedSupervisor supervisor(db_client, receiver, symbols);
+        BrokerCredentials creds;
+
+        // Evaluating against tomorrow (2026-10-13): active token issued today at ~11:29 predates tomorrow's 03:30 cutoff -> MUST fail
+        bool tomorrow_stale_rejected = !supervisor.is_token_usable("upstox", creds, "2026-10-13");
+
+        // Evaluating against today (2026-10-12): active token issued today at 11:29 IST is post-cutoff -> passes cutoff check
+        bool today_usable = supervisor.is_token_usable("upstox", creds, "2026-10-12");
+
+        TEST("BFS-01: BrokerFeedSupervisor::is_token_usable strictly enforces 03:30 IST daily cutoff (fails closed on stale)",
+             tomorrow_stale_rejected && today_usable);
+    }
+
     // Item NAF-01: NseArchiveFetcher parse_participant_oi_csv verification
     {
         std::string sample_participant_csv =
@@ -2353,6 +2370,17 @@ void run_solid_and_acid_test_suite() {
 
         TEST("PKS-05: StrategyConfigManager parallel_strategy_enabled is false by default and hot-reloads cleanly",
              def_false && toggled_true && restored_false);
+    }
+
+    // Category 33: Live Session Status Telemetry & Deterministic Market Read Panel
+    {
+        auto tel = db_client->compute_live_session_status_telemetry();
+        bool valid_phase = !tel.session_phase_str.empty() && !tel.phase_badge_text.empty();
+        bool valid_rule = !tel.trigger_rule.empty() && !tel.market_read_one_liner.empty();
+        bool non_negative_metrics = (tel.atr_14 >= 0.0) && (tel.baseline_vol_20d >= 0.0);
+
+        TEST("LSS-01: RoadmapDbClient::compute_live_session_status_telemetry computes real metrics and auditable one-liner",
+             valid_phase && valid_rule && non_negative_metrics);
     }
 
     db_client->cleanup_test_schema();

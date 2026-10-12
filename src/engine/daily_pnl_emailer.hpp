@@ -65,7 +65,7 @@ public:
     static std::string format_email_body(const DailyPnLSummaryData& data, bool html_format);
 
     // Transmits via libcurl SMTPS
-    static bool send_smtp_message(const EmailConfig& cfg, const std::string& subject, const std::string& body_text, const std::string& body_html);
+    static bool send_smtp_message(const EmailConfig& cfg, const std::string& subject, const std::string& body_text, const std::string& body_html, bool verbose = false);
 
     // Loads config from StrategyConfigManager / DB falling back to EnvLoader
     EmailConfig load_config();

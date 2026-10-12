@@ -276,7 +276,8 @@ bool DailyPnLEmailer::send_smtp_message(
     const EmailConfig& cfg,
     const std::string& subject,
     const std::string& body_text,
-    const std::string& body_html
+    const std::string& body_html,
+    bool verbose
 ) {
     if (!cfg.enabled) {
         std::cout << "ℹ️ [DailyPnLEmailer] Daily P&L email is disabled (enabled=false). Skipping send.\n";
@@ -295,6 +296,10 @@ bool DailyPnLEmailer::send_smtp_message(
     if (!curl) {
         std::cerr << "⚠️ [DailyPnLEmailer] curl_easy_init failed.\n";
         return false;
+    }
+
+    if (verbose || EnvLoader::get("SMTP_VERBOSE", "0") == "1" || EnvLoader::get("SMTP_VERBOSE", "0") == "true") {
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
     }
 
     // Build MIME multipart/alternative message

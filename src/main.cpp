@@ -13,6 +13,7 @@
 #include "engine/market_calendar.hpp"
 #include "engine/daily_pnl_emailer.hpp"
 #include "engine/post_session_analyzer.hpp"
+#include "engine/pre_market_readiness_analyzer.hpp"
 #include "market_data/broker_feed_supervisor.hpp"
 #include <iostream>
 #include <memory>
@@ -75,6 +76,41 @@ int main(int argc, char* argv[]) {
             return 0;
         } else {
             std::cerr << "❌ [Manual Test Trigger] Email dispatch FAILED or SKIPPED. Verify credentials in .env and network connection.\n";
+            return 1;
+        }
+    }
+
+    // Optional Manual Operator CLI Trigger: Dispatch Test Pre-Market Blocked Readiness Alert
+    if (argc > 1 && (std::string(argv[1]) == "--test-alert" || std::string(argv[1]) == "--test-premarket-alert")) {
+        std::string remote_host = EnvLoader::get("MYSQL_REMOTE_HOST", EnvLoader::get("MYSQL_HOST", "10.0.0.99"));
+        int remote_port = EnvLoader::get_int("MYSQL_REMOTE_PORT", EnvLoader::get_int("MYSQL_PORT", 3306));
+        std::string remote_user = EnvLoader::get("MYSQL_REMOTE_USER", EnvLoader::get("MYSQL_USER", "mylife"));
+        std::string remote_pass = EnvLoader::get("MYSQL_REMOTE_PASSWORD", EnvLoader::get("MYSQL_PASSWORD", ""));
+        std::string remote_db = EnvLoader::get("MYSQL_REMOTE_NAME", EnvLoader::get("DATABASE_NAME", "myjob_agent"));
+        auto test_db = std::make_shared<RoadmapDbClient>(remote_host, remote_port, remote_user, remote_pass, remote_db);
+
+        std::cout << "\n🚨 [Manual Test Trigger] Initializing PreMarketReadinessAnalyzer for blocked-readiness alert dispatch...\n";
+        hermes::PreMarketReadinessAnalyzer analyzer(test_db);
+
+        // Evaluate against specified session date (defaults to tomorrow 2026-10-13 to trigger stale token cutoff blocker)
+        std::string target_session = (argc > 2) ? argv[2] : "2026-10-13";
+        auto report = analyzer.run_pre_market_readiness_check(target_session);
+
+        std::cout << "• Target Session : " << report.session_date << "\n";
+        std::cout << "• Readiness Pass : " << (report.overall_readiness_passed ? "TRUE" : "FALSE") << "\n";
+        std::cout << "• Token Stale Cut: " << (report.token_stale_before_cutoff ? "TRUE" : "FALSE") << "\n";
+        std::cout << "• Blockers Count : " << report.critical_blockers.size() << "\n";
+        for (const auto& blk : report.critical_blockers) {
+            std::cout << "  🚨 " << blk << "\n";
+        }
+
+        std::cout << "\n📡 Transmitting pre-market readiness blocked alert email via SMTP (verbose transcript enabled)...\n";
+        bool ok = analyzer.send_alert_if_blocked(report, true /* verbose */);
+        if (ok) {
+            std::cout << "✅ [Manual Test Trigger] Pre-Market Blocked Readiness Alert SUCCESSFUL.\n";
+            return 0;
+        } else {
+            std::cerr << "❌ [Manual Test Trigger] Pre-Market Alert dispatch FAILED.\n";
             return 1;
         }
     }

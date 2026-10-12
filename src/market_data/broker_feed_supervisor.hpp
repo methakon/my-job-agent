@@ -62,6 +62,8 @@ public:
     void trigger_pre_market_readiness_check(const std::string& forced_date = "", bool async = true);
     std::string get_last_premarket_completed_date() const;
 
+    bool is_token_usable(const std::string& provider, BrokerCredentials& out_creds, const std::string& forced_date = "");
+
 private:
     void supervisor_loop();
     void update_state_machine();
@@ -71,7 +73,6 @@ private:
     void handle_disconnect(const std::string& reason);
 
     std::string select_best_provider(BrokerCredentials& out_creds);
-    bool is_token_usable(const std::string& provider, BrokerCredentials& out_creds);
 
     std::shared_ptr<RoadmapDbClient> db_client_;
     OptionTickReceiver& receiver_;
