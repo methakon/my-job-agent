@@ -1560,6 +1560,37 @@ bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit
     return ok;
 }
 
+bool RoadmapDbClient::delete_trade_report_by_id(const std::string& trade_id) {
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+    std::string q = "DELETE FROM cpp_trade_reports WHERE id = '" + escape_string(conn, trade_id) + "';";
+    bool ok = (mysql_query(conn, q.c_str()) == 0);
+    pool_->release(conn);
+    return ok;
+}
+
+std::map<std::string, int> RoadmapDbClient::fetch_trade_counts_by_algo_source() {
+    std::map<std::string, int> counts;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return counts;
+
+    const char* q = "SELECT algoSource, COUNT(*) FROM cpp_trade_reports GROUP BY algoSource;";
+    if (mysql_query(conn, q) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row;
+            while ((row = mysql_fetch_row(res))) {
+                std::string src = row[0] ? row[0] : "";
+                int cnt = row[1] ? std::stoi(row[1]) : 0;
+                counts[src] = cnt;
+            }
+            mysql_free_result(res);
+        }
+    }
+    pool_->release(conn);
+    return counts;
+}
+
 size_t RoadmapDbClient::count_open_trades_for_symbol(const std::string& instrument) {
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;
@@ -2197,10 +2228,38 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
         // Under test isolation, do not pollute production daily candles table
         return 0;
     }
+    if (!session_date.empty() && session_date.length() >= 10) {
+        try {
+            int y = std::stoi(session_date.substr(0, 4));
+            int m = std::stoi(session_date.substr(5, 2));
+            int d = std::stoi(session_date.substr(8, 2));
+            if (hermes::MarketCalendar::is_nse_holiday(y, m, d)) {
+                std::cout << "ℹ️ [RoadmapDbClient] Date " << session_date << " is an exchange holiday. Skipping daily candle rollup.\n";
+                return 0;
+            }
+        } catch (...) {}
+    }
+
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;
 
     std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
+
+    // Guard: Prevent rollup on weekends (Saturday=7, Sunday=1 in MySQL DAYOFWEEK)
+    std::string weekend_check = "SELECT DAYOFWEEK(" + safe_date + ") IN (1, 7);";
+    if (mysql_query(conn, weekend_check.c_str()) == 0) {
+        MYSQL_RES* w_res = mysql_store_result(conn);
+        if (w_res) {
+            MYSQL_ROW w_row = mysql_fetch_row(w_res);
+            if (w_row && w_row[0] && std::string(w_row[0]) == "1") {
+                std::cout << "ℹ️ [RoadmapDbClient] Target date " << safe_date << " is a weekend. Skipping daily candle rollup.\n";
+                mysql_free_result(w_res);
+                pool_->release(conn);
+                return 0;
+            }
+            mysql_free_result(w_res);
+        }
+    }
 
     std::string rollup_sql = 
         "INSERT INTO cpp_historical_daily_candles "
@@ -2220,6 +2279,7 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
         "FROM fnf_market_snapshots t "
         "WHERE DATE(t.ts) = " + safe_date + " AND t.price > 0 "
         "GROUP BY t.instrument "
+        "HAVING MAX(t.price) > MIN(t.price) "
         "ON DUPLICATE KEY UPDATE "
         "  open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), ingested_at=NOW(6);";
 

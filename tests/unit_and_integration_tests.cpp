@@ -2353,6 +2353,31 @@ void run_solid_and_acid_test_suite() {
              tripped && capped && bounded_alloc);
     }
 
+    // Item PKS-04b: Corrupted input bug guard failsafe (near-zero denominator & extreme payoff)
+    {
+        using namespace hermes;
+        // Edge case: Corrupted inputs with near-infinite payoff ratio (1000.0) and win-rate 0.999
+        PredictiveKellyInput corrupt_inp;
+        corrupt_inp.capital_in_hand = 100000.0;
+        corrupt_inp.raw_win_rate = 0.999;
+        corrupt_inp.payoff_ratio = 1000.0; // Corrupted extreme payoff
+        corrupt_inp.model_confidence = 0.999;
+        corrupt_inp.avg_historical_confidence = 0.50; // High divergence
+        corrupt_inp.max_loss_per_spread_unit = 0.001; // Near-zero denominator
+        corrupt_inp.lot_size = 25;
+        corrupt_inp.kelly_fraction_multiplier = 1.0; // Full Kelly requested
+
+        auto res = PredictiveKellySizer::calculate_sizing(corrupt_inp);
+
+        // Failsafe MUST bind: dynamic fraction strictly capped at 40% (0.40) and risk capital <= 40,000
+        bool failsafe_tripped = res.bug_guard_tripped;
+        bool fraction_capped = (res.dynamic_effective_fraction <= PredictiveKellySizer::KELLY_SIZING_BUG_GUARD_PCT + 1e-4);
+        bool capital_safe = (res.allocated_risk_capital <= 40000.0 + 1e-4);
+
+        TEST("PKS-04b: PredictiveKellySizer corrupted near-zero denominator and 1000x payoff strictly bounded by 40% bug guard",
+             failsafe_tripped && fraction_capped && capital_safe);
+    }
+
     // Item PKS-05: StrategyConfigManager parallel_strategy_enabled default & dynamic reload
     {
         auto& mgr = hermes::StrategyConfigManager::instance();
@@ -2370,6 +2395,36 @@ void run_solid_and_acid_test_suite() {
 
         TEST("PKS-05: StrategyConfigManager parallel_strategy_enabled is false by default and hot-reloads cleanly",
              def_false && toggled_true && restored_false);
+    }
+
+    // Item PKS-06: Distinct Strategy Tagging in cpp_trade_reports (OFI vs PredictiveStrategyV1)
+    {
+        UserTradeData parallel_trade;
+        parallel_trade.id = "TEST-PREDICTIVE-TRADE-001";
+        parallel_trade.instrument = "NSE:NIFTY26OCT25000CE";
+        parallel_trade.side = "SELL";
+        parallel_trade.quantity = 50;
+        parallel_trade.entryPrice = 120.0;
+        parallel_trade.exitPrice = 0.0;
+        parallel_trade.netPnl = 0.0;
+        parallel_trade.status = "OPEN";
+        parallel_trade.orderedAt = "2026-10-12 10:00:00";
+        parallel_trade.signal_timestamp = "2026-10-12 10:00:00.000000";
+        parallel_trade.algoSource = "PredictiveStrategyV1"; // Separate strategy tag
+        parallel_trade.executionMode = "PAPER";
+
+        bool inserted = db_client->create_paper_trade(parallel_trade);
+
+        // Verify distinct attribution query returns both strategies coexisting
+        auto counts = db_client->fetch_trade_counts_by_algo_source();
+        int ofi_count = counts["OFI_Microstructure_Breakout"];
+        int predictive_count = counts["PredictiveStrategyV1"];
+
+        // Clean up test trade
+        db_client->delete_trade_report_by_id(parallel_trade.id);
+
+        TEST("PKS-06: Multi-strategy trade reports tag PredictiveStrategyV1 separately from OFI_Microstructure_Breakout",
+             inserted && ofi_count > 0 && predictive_count > 0);
     }
 
     // Category 33: Live Session Status Telemetry & Deterministic Market Read Panel
