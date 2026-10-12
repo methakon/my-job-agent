@@ -614,7 +614,7 @@ BrokerTokenInfo RoadmapDbClient::fetch_broker_token_status(const std::string& pr
     if (!conn) return info;
 
     std::string safe_prov = escape_string(conn, provider);
-    std::string query = "SELECT clientId, status, IFNULL(expiresAt,''), IFNULL(issuedAt,'') FROM provider_tokens WHERE provider = '" + safe_prov + "' ORDER BY issuedAt DESC LIMIT 1;";
+    std::string query = "SELECT clientId, status, IFNULL(expiresAt,''), IFNULL(issuedAt,''), IFNULL(UNIX_TIMESTAMP(issuedAt), 0) FROM provider_tokens WHERE provider = '" + safe_prov + "' ORDER BY issuedAt DESC LIMIT 1;";
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
@@ -624,6 +624,11 @@ BrokerTokenInfo RoadmapDbClient::fetch_broker_token_status(const std::string& pr
                 info.status = row[1] ? row[1] : "EXPIRED";
                 info.expires_at = row[2] ? row[2] : "";
                 info.issued_at = row[3] ? row[3] : "";
+                try {
+                    info.issued_at_epoch = row[4] ? std::stoll(row[4]) : 0;
+                } catch (...) {
+                    info.issued_at_epoch = 0;
+                }
                 info.is_valid = (info.status == "active" || info.status == "TOKEN_VALID" || info.status == "ACTIVE");
             }
             mysql_free_result(res);

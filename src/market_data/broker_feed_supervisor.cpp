@@ -105,6 +105,16 @@ bool BrokerFeedSupervisor::is_token_usable(const std::string& provider, BrokerCr
         return false;
     }
 
+    // Fail-closed cutoff check: reject token if issued prior to today's 03:30 AM IST cutoff
+    auto ist = hermes::MarketCalendar::get_ist_time();
+    char cur_date_buf[32];
+    snprintf(cur_date_buf, sizeof(cur_date_buf), "%04d-%02d-%02d", ist.year, ist.month, ist.day);
+    if (hermes::PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(cur_date_buf, status_info.issued_at, status_info.issued_at_epoch)) {
+        std::cerr << "⚠️ [BrokerFeedSupervisor] Token for " << provider 
+                  << " was issued before today's 03:30 IST cutoff (" << status_info.issued_at << "). Rejecting as stale.\n";
+        return false;
+    }
+
     // Permanent guard: reject test / mock client_ids
     if (status_info.client_id.empty() ||
         status_info.client_id.rfind("test_", 0) == 0 ||

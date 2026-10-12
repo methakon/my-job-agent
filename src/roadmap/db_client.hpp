@@ -218,6 +218,7 @@ struct UpstoxTokenInfo {
     std::string status = "EXPIRED";
     std::string expires_at;
     std::string issued_at;
+    int64_t issued_at_epoch = 0;
     bool is_valid = false;
 };
 

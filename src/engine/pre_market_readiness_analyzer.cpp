@@ -50,6 +50,61 @@ bool PreMarketReadinessAnalyzer::check_local_db() {
     }
 }
 
+bool PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(const std::string& session_date,
+                                                              const std::string& issued_at_str,
+                                                              int64_t issued_at_epoch) {
+    if (session_date.empty()) return true;
+
+    int year = 0, month = 0, day = 0;
+    if (sscanf(session_date.c_str(), "%d-%d-%d", &year, &month, &day) != 3) {
+        return true;
+    }
+
+    // Daily SEBI broker token expiry cutoff is 03:30 AM IST on session_date.
+    // 03:30 AM IST = 22:00:00 UTC of prior calendar day.
+    // In terms of epoch: timegm(year, month, day, 03:30:00) minus 19800 sec (5h30m).
+    struct tm tm_cutoff = {};
+    tm_cutoff.tm_year = year - 1900;
+    tm_cutoff.tm_mon = month - 1;
+    tm_cutoff.tm_mday = day;
+    tm_cutoff.tm_hour = 3;
+    tm_cutoff.tm_min = 30;
+    tm_cutoff.tm_sec = 0;
+    time_t cutoff_utc_epoch = timegm(&tm_cutoff) - 19800;
+
+    if (issued_at_epoch > 0) {
+        return issued_at_epoch < cutoff_utc_epoch;
+    }
+
+    if (issued_at_str.empty()) {
+        return true;
+    }
+
+    int iy = 0, im = 0, id = 0, ih = 0, imin = 0, isec = 0;
+    char tz_tag[16] = {0};
+    if (sscanf(issued_at_str.c_str(), "%d-%d-%d %d:%d:%d %15s", &iy, &im, &id, &ih, &imin, &isec, tz_tag) < 6 &&
+        sscanf(issued_at_str.c_str(), "%d-%d-%dT%d:%d:%d", &iy, &im, &id, &ih, &imin, &isec) < 6) {
+        return true; // malformed date -> fail closed
+    }
+
+    struct tm tm_issued = {};
+    tm_issued.tm_year = iy - 1900;
+    tm_issued.tm_mon = im - 1;
+    tm_issued.tm_mday = id;
+    tm_issued.tm_hour = ih;
+    tm_issued.tm_min = imin;
+    tm_issued.tm_sec = isec;
+
+    time_t token_utc_epoch = 0;
+    if (std::string(tz_tag) == "IST") {
+        token_utc_epoch = timegm(&tm_issued) - 19800;
+    } else {
+        token_utc_epoch = timegm(&tm_issued);
+    }
+
+    return token_utc_epoch < cutoff_utc_epoch;
+}
+
 void PreMarketReadinessAnalyzer::evaluate_token_status(PreMarketReadinessReport& report) {
     if (!db_client_) {
         report.token_missing_or_expired = true;
@@ -59,6 +114,8 @@ void PreMarketReadinessAnalyzer::evaluate_token_status(PreMarketReadinessReport&
 
     std::vector<std::string> providers = {"upstox", "fyers"};
     bool found_active = false;
+    bool found_stale_before_cutoff = false;
+    std::string stale_details;
 
     for (const auto& prov : providers) {
         auto status_info = db_client_->fetch_broker_token_status(prov);
@@ -66,6 +123,21 @@ void PreMarketReadinessAnalyzer::evaluate_token_status(PreMarketReadinessReport&
             status_info.client_id.rfind("test_", 0) != 0 && 
             status_info.client_id.rfind("mock_", 0) != 0 && 
             status_info.client_id != "test_client_id") {
+
+            // FAIL-CLOSED CUTOFF CHECK:
+            // Verify whether token was issued prior to today's 03:30 AM IST cutoff
+            bool is_stale_cutoff = is_token_issued_before_cutoff(
+                report.session_date, status_info.issued_at, status_info.issued_at_epoch);
+
+            if (is_stale_cutoff) {
+                found_stale_before_cutoff = true;
+                std::string warn = "Provider [" + prov + "] token was issued before today's 03:30 IST cutoff (" + 
+                                   status_info.issued_at + "). Broker token expired overnight. Action required: Complete OAuth token exchange before 09:15 IST.";
+                report.advisory_warnings.push_back(warn);
+                if (!stale_details.empty()) stale_details += "; ";
+                stale_details += prov + " issued: " + status_info.issued_at;
+                continue; // Stale token must not be used
+            }
 
             std::string raw_token = db_client_->fetch_active_broker_token_raw(prov);
             if (!raw_token.empty()) {
@@ -85,6 +157,7 @@ void PreMarketReadinessAnalyzer::evaluate_token_status(PreMarketReadinessReport&
                     report.token_client_id = status_info.client_id;
                     report.token_status = status_info.status;
                     report.token_expires_at = status_info.expires_at;
+                    report.token_issued_at = status_info.issued_at;
                     found_active = true;
                     break;
                 } else if (expired) {
@@ -97,7 +170,17 @@ void PreMarketReadinessAnalyzer::evaluate_token_status(PreMarketReadinessReport&
     if (!found_active) {
         report.token_valid = false;
         report.token_missing_or_expired = true;
-        report.critical_blockers.push_back("CRITICAL: No active, unexpired broker token found in provider_tokens table. Action required: Complete OAuth token exchange before 09:15 IST.");
+        report.token_stale_before_cutoff = found_stale_before_cutoff;
+        if (found_stale_before_cutoff) {
+            report.critical_blockers.push_back(
+                "CRITICAL: Active broker token was issued before today's 03:30 IST cutoff (" + stale_details + 
+                "). Token expired overnight and requires daily re-authentication before 09:15 IST."
+            );
+        } else {
+            report.critical_blockers.push_back(
+                "CRITICAL: No active, unexpired broker token found in provider_tokens table. Action required: Complete OAuth token exchange before 09:15 IST."
+            );
+        }
     }
 }
 
@@ -199,7 +282,8 @@ std::string PreMarketReadinessAnalyzer::format_report_text(const PreMarketReadin
     if (report.token_valid) {
         ss << "  Provider              : " << report.token_provider << "\n"
            << "  Client ID             : " << report.token_client_id << "\n"
-           << "  Status / Expires      : " << report.token_status << " (Expires: " << report.token_expires_at << ")\n";
+           << "  Status / Expires      : " << report.token_status << " (Expires: " << report.token_expires_at << ")\n"
+           << "  Issued At             : " << report.token_issued_at << "\n";
     }
     ss << "\n--- PRIOR SESSION HISTORICAL CONTEXT ---\n";
     if (report.prior_psa_found) {
@@ -272,6 +356,7 @@ std::string PreMarketReadinessAnalyzer::format_report_html(const PreMarketReadin
 
     if (report.token_valid) {
         ss << "    <div class=\"row\"><span>Client ID</span><b>" << report.token_client_id << "</b></div>"
+           << "    <div class=\"row\"><span>Issued At</span><b>" << report.token_issued_at << "</b></div>"
            << "    <div class=\"row\"><span>Expiration</span><b>" << report.token_expires_at << "</b></div>";
     }
 

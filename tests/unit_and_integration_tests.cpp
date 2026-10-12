@@ -2094,6 +2094,49 @@ void run_solid_and_acid_test_suite() {
              first_eod == "2026-10-10" && second_eod == "2026-10-10");
     }
 
+    // Item PMRA-04: PreMarketReadinessAnalyzer 03:30 AM IST cutoff evaluation
+    {
+        // 1. Sunday night token (2026-10-11 20:15:45 UTC == 2026-10-12 01:45:45 IST) evaluated against 2026-10-12
+        bool sunday_stale_utc = PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(
+            "2026-10-12", "2026-10-11 20:15:45");
+        bool sunday_stale_ist = PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(
+            "2026-10-12", "2026-10-12 01:45:45 IST");
+        // 2. Monday morning tokens evaluated against 2026-10-12
+        bool monday_fresh_utc = !PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(
+            "2026-10-12", "2026-10-12 05:13:11"); // 10:43:11 IST
+        bool monday_fresh_ist = !PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(
+            "2026-10-12", "2026-10-12 11:29:08 IST");
+        // 3. Epoch verification: cutoff for 2026-10-12 is 1791756000
+        bool epoch_stale = PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(
+            "2026-10-12", "", 1791749745); // Sunday night epoch
+        bool epoch_fresh = !PreMarketReadinessAnalyzer::is_token_issued_before_cutoff(
+            "2026-10-12", "", 1791781991); // Monday morning epoch
+
+        TEST("PMRA-04: PreMarketReadinessAnalyzer strictly rejects pre-03:30 IST tokens as stale across UTC, IST, and epoch",
+             sunday_stale_utc && sunday_stale_ist && monday_fresh_utc && monday_fresh_ist && epoch_stale && epoch_fresh);
+    }
+
+    // Item PMRA-05: PreMarketReadinessAnalyzer fail-closed report and alert dispatch on stale token
+    {
+        PreMarketReadinessAnalyzer analyzer(db_client);
+        // Evaluating session 2026-10-13 against 2026-10-12 tokens (which pre-date the 2026-10-13 03:30 IST cutoff)
+        PreMarketReadinessReport report = analyzer.run_pre_market_readiness_check("2026-10-13");
+
+        bool fail_closed = (report.overall_readiness_passed == false);
+        bool token_invalid = (report.token_valid == false);
+        bool stale_flag = report.token_stale_before_cutoff;
+        bool blocker_found = false;
+        for (const auto& blk : report.critical_blockers) {
+            if (blk.find("03:30 IST cutoff") != std::string::npos) {
+                blocker_found = true;
+                break;
+            }
+        }
+
+        TEST("PMRA-05: PreMarketReadinessAnalyzer fails closed (passed=false) and triggers alert on stale broker token",
+             fail_closed && token_invalid && stale_flag && blocker_found);
+    }
+
     // Item NAF-01: NseArchiveFetcher parse_participant_oi_csv verification
     {
         std::string sample_participant_csv =

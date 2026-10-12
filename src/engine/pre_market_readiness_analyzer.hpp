@@ -33,7 +33,9 @@ struct PreMarketReadinessReport {
     std::string token_client_id;
     std::string token_status;
     std::string token_expires_at;
+    std::string token_issued_at;
     bool token_missing_or_expired{false};
+    bool token_stale_before_cutoff{false};
 
     // Prior Session Post-Session-Analysis Context
     bool prior_psa_found{false};
@@ -77,6 +79,11 @@ public:
 
     // Sends pre-market alert email if critical blockers (e.g. missing/expired token) are detected
     bool send_alert_if_blocked(const PreMarketReadinessReport& report);
+
+    // Evaluates whether token issued timestamp is strictly before the 03:30 AM IST cutoff for session_date
+    static bool is_token_issued_before_cutoff(const std::string& session_date,
+                                             const std::string& issued_at_str,
+                                             int64_t issued_at_epoch = 0);
 
 private:
     std::shared_ptr<RoadmapDbClient> db_client_;

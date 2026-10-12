@@ -22,7 +22,7 @@ void FyersWebSocketClient::send_auth_handshake() {
 
     std::ostringstream ss;
     ss << "{\"type\":\"cn\",\"user\":\"" << credentials_.app_id
-       << "\",\"x-access-token\":\"" << credentials_.access_token << "\"}";
+       << "\",\"x-access-token\":\"" << auth_token << "\"}";
 
     transport_->send_text(ss.str());
     std::cout << "🔑 [FyersWS] Sent authentication handshake frame for app: " << credentials_.app_id << "\n";
@@ -92,22 +92,34 @@ bool FyersWebSocketClient::subscribe(const std::vector<std::string>& symbols) {
         return true;
     }
 
-    // Subscription frame format: {"type":"sub","scrips":["NSE:NIFTY50-INDEX", ...],"channel":1}
+    // FYERS API v3 Data Socket subscription frame format:
+    // {"symbol":["NSE:NIFTY50-INDEX", ...],"type":"symbolUpdate"}
     std::ostringstream ss;
-    ss << "{\"type\":\"sub\",\"scrips\":[";
+    ss << "{\"symbol\":[";
     for (size_t i = 0; i < symbols.size(); ++i) {
         ss << "\"" << symbols[i] << "\"";
         if (i + 1 < symbols.size()) ss << ",";
     }
-    ss << "],\"channel\":1}";
+    ss << "],\"type\":\"symbolUpdate\"}";
 
     std::string payload = ss.str();
     bool ok = transport_->send_text(payload);
     if (ok) {
-        std::cout << "📡 [FyersWS] Subscribed to " << symbols.size() << " instruments: " << payload << "\n";
+        std::cout << "📡 [FyersWS] Subscribed to " << symbols.size() << " instruments (v3 format): " << payload << "\n";
     } else {
         std::cerr << "⚠️ [FyersWS] Failed to send subscription frame.\n";
     }
+
+    // Also send legacy sub frame for backward compatibility
+    std::ostringstream ss_leg;
+    ss_leg << "{\"type\":\"sub\",\"scrips\":[";
+    for (size_t i = 0; i < symbols.size(); ++i) {
+        ss_leg << "\"" << symbols[i] << "\"";
+        if (i + 1 < symbols.size()) ss_leg << ",";
+    }
+    ss_leg << "],\"channel\":1}";
+    transport_->send_text(ss_leg.str());
+
     return ok;
 }
 
@@ -123,6 +135,13 @@ bool FyersWebSocketClient::is_connected() const {
 }
 
 void FyersWebSocketClient::handle_message(const uint8_t* data, size_t len, bool is_binary) {
+    if (!is_binary) {
+        std::string txt(reinterpret_cast<const char*>(data), len);
+        std::cout << "📥 [FyersWS] Text frame len=" << len << ": " << txt << "\n";
+    } else {
+        std::cout << "📥 [FyersWS] Binary frame len=" << len << "\n";
+    }
+
     std::vector<CanonicalOptionTick> ticks;
     bool decoded = FyersDecoder::decode_frame(data, len, is_binary, ticks);
     if (decoded && !ticks.empty() && on_tick_) {
