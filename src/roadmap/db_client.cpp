@@ -1837,10 +1837,20 @@ std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     if (!conn) return cached_counts;
     long long today_count = 0;
     long long total_count = 0;
-    const char* query = "SELECT "
-                        "(SELECT COUNT(*) FROM fnf_market_snapshots WHERE createdAt >= CURRENT_DATE() AND createdAt < CURRENT_DATE() + INTERVAL 1 DAY) AS today_ticks, "
-                        "(SELECT IFNULL(SUM(table_rows), 0) FROM information_schema.tables WHERE table_schema = DATABASE() AND (table_name LIKE '%option_quotes%' OR table_name LIKE '%market_snapshots%')) AS total_ticks;";
-    if (mysql_query(conn, query) == 0) {
+
+    // "Today" must mean the IST trading day, not the database's current date. The session
+    // runs under UTC (@@global.time_zone = UTC) and createdAt holds a UTC wall clock, so
+    // between 00:00 and 05:30 IST the previous UTC date is still current: at 02:47 IST
+    // this reported yesterday's 295,694 session ticks as "today's". Shift into IST before
+    // taking the date, the same way the rest of the engine reasons about session days.
+    auto ist = hermes::MarketCalendar::get_ist_time();
+    char ist_day[16];
+    snprintf(ist_day, sizeof(ist_day), "%04d-%02d-%02d", ist.year, ist.month, ist.day);
+
+    std::string query = std::string("SELECT ")
+        + "(SELECT COUNT(*) FROM fnf_market_snapshots WHERE DATE(createdAt + INTERVAL 330 MINUTE) = '" + ist_day + "') AS today_ticks, "
+        + "(SELECT IFNULL(SUM(table_rows), 0) FROM information_schema.tables WHERE table_schema = DATABASE() AND (table_name LIKE '%option_quotes%' OR table_name LIKE '%market_snapshots%')) AS total_ticks;";
+    if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
             MYSQL_ROW row = mysql_fetch_row(res);
