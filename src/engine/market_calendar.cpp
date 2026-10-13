@@ -1,4 +1,5 @@
 #include "market_calendar.hpp"
+#include <cctype>
 #include <ctime>
 #include <set>
 #include <tuple>
@@ -62,6 +63,43 @@ bool MarketCalendar::is_trading_day(uint64_t epoch_ms) {
     if (!is_trading_weekday(ist)) return false;
     if (is_nse_holiday(ist.year, ist.month, ist.day)) return false;
     return true;
+}
+
+bool MarketCalendar::is_contract_expired(const std::string& symbol, uint64_t epoch_ms) {
+    // Locate the first run of six consecutive digits, the YYMMDD expiry that option
+    // trading symbols embed after the underlying name: SENSEX26100172400CE -> 261001.
+    std::size_t pos = std::string::npos;
+    for (std::size_t i = 0; i + 6 <= symbol.size(); ++i) {
+        bool six_digits = true;
+        for (std::size_t j = 0; j < 6; ++j) {
+            if (!std::isdigit(static_cast<unsigned char>(symbol[i + j]))) {
+                six_digits = false;
+                break;
+            }
+        }
+        if (six_digits) {
+            pos = i;
+            break;
+        }
+    }
+
+    // No readable expiry: not expired. Fail "open" here on purpose -- the insert-time
+    // guard is the backstop, and silently dropping unrecognised symbols would be a
+    // worse failure than evaluating one contract too many.
+    if (pos == std::string::npos) return false;
+
+    const int yy = std::stoi(symbol.substr(pos, 2)) + 2000;
+    const int mm = std::stoi(symbol.substr(pos + 2, 2));
+    const int dd = std::stoi(symbol.substr(pos + 4, 2));
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return false;
+
+    const auto ist = get_ist_time(epoch_ms);
+
+    const long expiry_num = static_cast<long>(yy) * 10000L + mm * 100L + dd;
+    const long today_num = static_cast<long>(ist.year) * 10000L + ist.month * 100L + ist.day;
+
+    // Strictly before today: a contract expiring today is still tradable.
+    return expiry_num < today_num;
 }
 
 SessionPhase MarketCalendar::get_session_phase(uint64_t epoch_ms) {

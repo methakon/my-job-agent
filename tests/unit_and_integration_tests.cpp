@@ -2189,6 +2189,49 @@ void run_solid_and_acid_test_suite() {
              supervisor.is_token_usable("upstox", creds, "2099-01-01") == false);
     }
 
+    // Item EXP-01: MarketCalendar::is_contract_expired -- the gate that keeps dead contracts
+    // out of the decision path.
+    //
+    // Every case passes an explicit epoch, so this is hermetic rather than dependent on the
+    // day it happens to run.
+    {
+        const uint64_t ref = 1791959400000ULL;        // 2026-10-14 12:00:00 IST
+        const uint64_t day_before = 1791873000000ULL; // 2026-10-13 12:00:00 IST
+
+        // The real shape: SENSEX26100172000PE -> expiry 2026-10-01, thirteen days past.
+        TEST("EXP-01a: an expired contract is reported expired",
+             hermes::MarketCalendar::is_contract_expired("SENSEX26100172400CE", ref) == true);
+
+        // Expiry date == today: tradable until end of day, so must NOT count as expired.
+        TEST("EXP-01b: a contract expiring today is NOT reported expired",
+             hermes::MarketCalendar::is_contract_expired("SENSEX26101472400CE", ref) == false);
+
+        // A contract that expired the previous day IS expired the next day: the boundary
+        // must advance with the calendar, not with the process start time.
+        TEST("EXP-01c: a contract that expired yesterday is reported expired today",
+             hermes::MarketCalendar::is_contract_expired("SENSEX26101372400CE", ref) == true);
+
+        // Same contract, evaluated the day before its expiry: not yet expired.
+        TEST("EXP-01d: a contract expiring tomorrow is NOT reported expired today",
+             hermes::MarketCalendar::is_contract_expired("SENSEX26101572400CE", ref) == false);
+        TEST("EXP-01e: that same contract is NOT expired when evaluated a day earlier",
+             hermes::MarketCalendar::is_contract_expired("SENSEX26101572400CE", day_before) == false);
+
+        // Fail-open by design. Unrecognised symbols must never be silently dropped: the
+        // insert-time guard in create_paper_trade remains the backstop, and dropping a
+        // contract we simply failed to parse would be the worse error.
+        TEST("EXP-01f: a symbol with no readable YYMMDD is NOT reported expired",
+             hermes::MarketCalendar::is_contract_expired("NIFTY26OCT24500CE", ref) == false);
+        TEST("EXP-01g: an index symbol is NOT reported expired",
+             hermes::MarketCalendar::is_contract_expired("NSE_INDEX|Nifty 50", ref) == false);
+        TEST("EXP-01h: an empty symbol is NOT reported expired",
+             hermes::MarketCalendar::is_contract_expired("", ref) == false);
+
+        // Out-of-range month/day are unreadable, not a date that happens to be in the past.
+        TEST("EXP-01i: an out-of-range month is NOT treated as an expiry date",
+             hermes::MarketCalendar::is_contract_expired("SENSEX26999972400CE", ref) == false);
+    }
+
     // Item NAF-01: NseArchiveFetcher parse_participant_oi_csv verification
     {
         std::string sample_participant_csv =

@@ -212,6 +212,7 @@ int main(int argc, char* argv[]) {
         bool last_active_state = false;
         int check_counter = 0;
         size_t total_saved_ticks = 0;
+        size_t expired_contract_ticks_skipped = 0;
         std::string last_seen_ts = "2026-09-30 00:00:00.000000";
         std::cout << "🛡️ [Supervisor] Token Validation & Ingestion Supervisor Thread Started.\n";
 
@@ -338,6 +339,27 @@ int main(int argc, char* argv[]) {
                             std::cout << "🛑 [ExitEngine] STOP_LOSS Triggered! Trade " << tr.id << " (" << tr.instrument << ") Closed @ ₹" << exit_px << " | Net PnL: ₹" << net_pnl << "\n";
                         }
                     }
+                }
+
+                // Expired contracts are dropped before any work is done on them.
+                //
+                // Previously they were evaluated in full -- features computed, a decision
+                // journal row written -- and only rejected by the insert-time guard in
+                // create_paper_trade, which runs after all of that. The result was a journal
+                // padded with rows for contracts that could never trade: on 2026-10-14 a
+                // single contract that expired on 2026-10-01 still held 2,754 journal rows.
+                // They also stayed subscribed on the feed. Skipping here is the earliest
+                // point in the path that still has the symbol to test.
+                if (hermes::MarketCalendar::is_contract_expired(tick.symbol)) {
+                    ++expired_contract_ticks_skipped;
+                    // Coarse interval on purpose: a per-tick line here would recreate the
+                    // unbounded-log problem this project has already been bitten by.
+                    if (expired_contract_ticks_skipped % 5000 == 0) {
+                        std::cout << "⏭️  [Engine] Skipped " << expired_contract_ticks_skipped
+                                  << " ticks for already-expired contracts (latest: "
+                                  << tick.symbol << ")\n";
+                    }
+                    continue;
                 }
 
                 auto feat = feature_engine.process_tick(tick);

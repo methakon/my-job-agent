@@ -1477,39 +1477,21 @@ bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {
         return false;
     }
 
-    // Expiry Pre-Insert Guard: Prevent inserting paper trades for contracts whose expiry date string (YYMMDD) is in the past
+    // Expiry Pre-Insert Guard: refuse to persist a paper trade for a contract whose
+    // embedded YYMMDD expiry (e.g. 261001) is already in the past.
+    //
+    // The date basis now comes from MarketCalendar, which is an explicit IST conversion.
+    // This previously called localtime(), so it was correct only for as long as the
+    // host's timezone happened to be IST; under UTC -- or any other zone -- it would have
+    // compared against the wrong calendar day, slipping a full day either side of
+    // midnight IST. Both this guard and the decision-path check in main.cpp now share one
+    // implementation, so they cannot drift apart.
     std::string sym = extract_symbol(trade.instrument);
-    // Find 6-digit date pattern YYMMDD (e.g. 261001)
-    std::size_t exp_pos = std::string::npos;
-    for (size_t i = 0; i + 6 <= sym.size(); ++i) {
-        if (std::isdigit(sym[i]) && std::isdigit(sym[i+1]) && std::isdigit(sym[i+2]) &&
-            std::isdigit(sym[i+3]) && std::isdigit(sym[i+4]) && std::isdigit(sym[i+5])) {
-            exp_pos = i;
-            break;
-        }
-    }
-    if (exp_pos != std::string::npos) {
-        int exp_yy = std::stoi(sym.substr(exp_pos, 2)) + 2000;
-        int exp_mm = std::stoi(sym.substr(exp_pos + 2, 2));
-        int exp_dd = std::stoi(sym.substr(exp_pos + 4, 2));
-
-        time_t rawtime;
-        time(&rawtime);
-        struct tm* timeinfo = localtime(&rawtime);
-        int cur_yy = timeinfo->tm_year + 1900;
-        int cur_mm = timeinfo->tm_mon + 1;
-        int cur_dd = timeinfo->tm_mday;
-
-        long exp_date_num = exp_yy * 10000 + exp_mm * 100 + exp_dd;
-        long cur_date_num = cur_yy * 10000 + cur_mm * 100 + cur_dd;
-
-        if (exp_date_num < cur_date_num) {
-            std::cerr << "❌ [RoadmapDbClient] Rejected paper trade creation: Expired contract " 
-                      << sym << " (Expiry " << exp_yy << "-" << exp_mm << "-" << exp_dd 
-                      << " < Current Date " << cur_yy << "-" << cur_mm << "-" << cur_dd << ").\n";
-            pool_->release(conn);
-            return false;
-        }
+    if (hermes::MarketCalendar::is_contract_expired(sym)) {
+        std::cerr << "❌ [RoadmapDbClient] Rejected paper trade creation: Expired contract "
+                  << sym << " (expiry is before the current IST date).\n";
+        pool_->release(conn);
+        return false;
     }
 
     std::string safe_signal_ts = escape_string(conn, trade.signal_timestamp);
