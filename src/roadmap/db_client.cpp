@@ -1354,7 +1354,16 @@ LiveSessionStatusTelemetry RoadmapDbClient::compute_live_session_status_telemetr
     if (t.ltp <= 0.0) {
         MYSQL* conn_rem = pool_->acquire();
         if (conn_rem) {
-            const char* q_snap = "SELECT price FROM fnf_market_snapshots WHERE instrument LIKE '%Nifty%' OR instrument LIKE '%NIFTY%' ORDER BY ts DESC LIMIT 1;";
+            // Ask for Nifty 50 by name. The previous pattern was
+            //   LIKE '%Nifty%' OR LIKE '%NIFTY%'
+            // which also matches 'NSE_INDEX|Nifty Bank' -- both are present in this
+            // table -- so ORDER BY ts DESC LIMIT 1 could hand back a Bank price. The
+            // caller then divided that by Nifty 50's previous close and the session
+            // panel reported a fictional +144% index move. Several spellings are
+            // listed because the feed has used more than one; none can match Bank.
+            const char* q_snap = "SELECT price FROM fnf_market_snapshots "
+                                 "WHERE instrument IN ('NSE_INDEX|Nifty 50','Nifty 50','NIFTY 50','NIFTY') "
+                                 "ORDER BY ts DESC LIMIT 1;";
             if (mysql_query(conn_rem, q_snap) == 0) {
                 MYSQL_RES* res = mysql_store_result(conn_rem);
                 if (res) {
