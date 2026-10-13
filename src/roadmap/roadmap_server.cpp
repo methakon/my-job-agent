@@ -1664,6 +1664,7 @@ std::string RoadmapServer::render_health_page(bool is_authenticated) {
        << (db_ok ? "<span class=\"status-pill ok\">CONNECTED</span>" : "<span class=\"status-pill bad\">DISCONNECTED</span>")
        << "</div>"
        << "      <div class=\"stat-row\"><span class=\"stat-label\">System Service</span><span class=\"stat-value\">systemctl (cpp-trading-agent)</span></div>"
+       << "      <div class=\"stat-row\"><span class=\"stat-label\">Deployed Revision</span><span class=\"stat-value\" style=\"font-family:ui-monospace,monospace;\">" << HERMES_BUILD_GIT_SHA << "</span></div>"
        << "      <div class=\"stat-row\"><span class=\"stat-label\">JSON Endpoint</span><span class=\"stat-value\"><a href=\"/api/health\" target=\"_blank\" style=\"color:var(--accent);text-decoration:none;\">/api/health</a></span></div>"
        << "    </div>"
        << "    <div class=\"card\">"
@@ -2654,7 +2655,13 @@ void RoadmapServer::start() {
                 try {
                     if (db_client_) is_db_connected = db_client_->test_connection();
                 } catch (...) {}
-                body = "{\"status\":\"OK\",\"engine\":\"C++20\",\"db_connected\":" + std::string(is_db_connected ? "true" : "false") + "}";
+                // Deploy marker: the exact revision this binary was built from, so that
+                // "is the running build the one I just deployed?" is a single GET rather
+                // than an inference from behaviour. That inference is precisely what made
+                // item 12's session-status panel look deployed when it was not.
+                body = std::string("{\"status\":\"OK\",\"engine\":\"C++20\",\"revision\":\"")
+                     + HERMES_BUILD_GIT_SHA
+                     + "\",\"db_connected\":" + (is_db_connected ? "true" : "false") + "}";
                 content_type = "application/json";
             } else if (req.find("GET /health") != std::string::npos) {
                 body = render_health_page(is_auth);
