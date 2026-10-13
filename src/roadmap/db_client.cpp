@@ -1062,7 +1062,11 @@ LearningSummaryData RoadmapDbClient::fetch_learning_summary() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return summary;
 
-    const char* query = "SELECT status, netPnl, IFNULL(algoSource, 'GapFadeP0Strategy') FROM fnf_trades WHERE onRealData = 1 AND executionMode != 'SANDBOX';";
+    // A trade with no algoSource is unattributed - say so. The previous default silently
+    // labelled such rows "GapFadeP0Strategy", which is how 9 unrelated trades came to read as
+    // output of a strategy that is never called (main.cpp:223 constructs it and nothing else).
+    const char* query = "SELECT status, netPnl, IFNULL(algoSource, 'UNATTRIBUTED') FROM fnf_trades WHERE onRealData = 1 AND executionMode != 'SANDBOX';";
+    std::map<std::string, int> algo_winners;
     if (mysql_query(conn, query) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
@@ -1076,14 +1080,22 @@ LearningSummaryData RoadmapDbClient::fetch_learning_summary() {
                     summary.netPnl += pnl;
                     if (pnl >= 0) summary.winners++;
 
-                    std::string algo = row[2] ? row[2] : "GapFadeP0Strategy";
+                    std::string algo = (row[2] && *row[2]) ? std::string(row[2]) : std::string("UNATTRIBUTED");
                     auto& item = summary.byAlgo[algo];
                     std::get<0>(item)++;
                     std::get<2>(item) += pnl;
+                    if (pnl >= 0) algo_winners[algo]++;
                 }
             }
             mysql_free_result(res);
         }
+    }
+
+    // The tuple's middle slot (per-algo win rate) was never populated, so any per-algo win
+    // rate displayed or derived from it was 0. Fill it from the per-algo winner counts.
+    for (auto& kv : summary.byAlgo) {
+        const int n = std::get<0>(kv.second);
+        if (n > 0) std::get<1>(kv.second) = (100.0 * algo_winners[kv.first]) / n;
     }
 
     if (summary.totalClosed > 0) {

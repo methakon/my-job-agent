@@ -56,8 +56,8 @@ int main(int argc, char** argv) {
         std::cout << "Margin Vetoes:              " << report.margin_vetoes_count << "\n";
         std::cout << "Trades Executed:            " << report.trades_executed_count << "\n";
         std::cout << "Realized Drawdown (INR):    ₹" << report.realized_drawdown_inr << "\n";
-        std::cout << "Average OFI Confidence:     " << report.avg_ofi << "\n";
-        std::cout << "Max OFI Confidence:         " << report.max_ofi << "\n";
+        std::cout << "Average decision confidence: " << report.avg_confidence << "\n";
+        std::cout << "Max decision confidence:     " << report.max_confidence << "\n";
         std::cout << "Near-Miss Threshold Count:  " << report.near_miss_count << "\n";
         std::cout << "Recommendations (Advisory): " << report.recommendations_json << "\n";
         std::cout << "Analysis Status:            " << (report.execution_success ? "✅ SAVED" : "❌ FAILED") << "\n";

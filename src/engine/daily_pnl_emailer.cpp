@@ -102,8 +102,8 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
                << "• Total Ticks Processed    : " << data.total_ticks_ingested << "\n"
                << "• Evaluated Decisions      : " << data.evaluated_decisions << "\n"
                << "• Below OFI 0.85 Threshold : " << data.ofi_below_threshold_count << " decisions\n"
-               << "• Max OFI Observed         : " << std::fixed << std::setprecision(4) << data.max_ofi 
-               << " (Average OFI: " << std::fixed << std::setprecision(4) << data.avg_ofi << ")\n"
+               << "• Max decision confidence  : " << std::fixed << std::setprecision(4) << data.max_confidence 
+               << " (Average confidence: " << std::fixed << std::setprecision(4) << data.avg_confidence << ")\n"
                << "• Near-Miss Setups (0.70-0.85): " << data.near_miss_count << "\n"
                << "• Risk Engine Vetoes       : " << data.risk_vetoes_count << "\n"
                << "• Margin Insufficient Vetoes: " << data.margin_vetoes_count << "\n\n"
@@ -211,8 +211,8 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
                << data.total_ticks_ingested << "</b> market ticks.<br/><br/>"
                << "      <b>Specific Factor Breakdown:</b><br/>"
                << "      • <b>OFI Below Threshold:</b> " << data.ofi_below_threshold_count << " candidate setups did not cross the 0.85 OFI gate.<br/>"
-               << "      • <b>Peak OFI Observed:</b> " << std::fixed << std::setprecision(4) << data.max_ofi 
-               << " (Average confidence: " << std::fixed << std::setprecision(4) << data.avg_ofi << ").<br/>"
+               << "      • <b>Peak decision confidence:</b> " << std::fixed << std::setprecision(4) << data.max_confidence 
+               << " (Average confidence: " << std::fixed << std::setprecision(4) << data.avg_confidence << ").<br/>"
                << "      • <b>Near-Miss Setups:</b> " << data.near_miss_count << " ticks approached the 0.70-0.849 range.<br/>"
                << "      • <b>Risk Engine Vetoes:</b> " << data.risk_vetoes_count << "<br/>"
                << "      • <b>Margin Insufficient Vetoes:</b> " << data.margin_vetoes_count << "<br/><br/>"
@@ -402,8 +402,8 @@ bool DailyPnLEmailer::send_daily_summary_email(
     data.risk_vetoes_count = psa_report.risk_vetoes_count;
     data.margin_vetoes_count = psa_report.margin_vetoes_count;
     data.actionable_signals_count = psa_report.actionable_signals_count;
-    data.avg_ofi = psa_report.avg_ofi;
-    data.max_ofi = psa_report.max_ofi;
+    data.avg_confidence = psa_report.avg_confidence;
+    data.max_confidence = psa_report.max_confidence;
     data.near_miss_count = psa_report.near_miss_count;
     data.recommendation_summary = psa_report.recommendations_json;
 

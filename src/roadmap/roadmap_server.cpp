@@ -52,6 +52,23 @@ static const char* GOOGLE_ANALYTICS_FOOTER_TAG =
     "  gtag('config', 'G-28FDYX1K4Y');\n"
     "</script>\n";
 
+// Per-algo performance is rendered from the queried data, never written as prose.
+// The line this replaced hardcoded "GapFadeP0Strategy: 86.7% Win Rate (Rs 39,955 Net PnL)"
+// while the real figures for that tag are 9 trades, 33.3% win rate and net -Rs 46,068.
+// Sign and magnitude were both wrong, and it sat next to real computed numbers.
+static std::string render_algo_breakdown_html(const LearningSummaryData& learning) {
+    if (learning.byAlgo.empty()) return std::string();
+    std::ostringstream o;
+    o << "<div class=\"hint\" style=\"margin-top:6px;\"><b>Algo Performance Breakdown:</b>";
+    for (const auto& kv : learning.byAlgo) {
+        o << " " << kv.first << ": " << std::get<0>(kv.second) << " trades, "
+          << static_cast<int>(std::get<1>(kv.second)) << "% win, "
+          << std::fixed << std::setprecision(2) << std::get<2>(kv.second) << " net.";
+    }
+    o << "</div>";
+    return o.str();
+}
+
 static std::string render_nav_header(bool is_authenticated) {
     std::stringstream ss;
     ss << "<div class=\"nav-bar\">"
@@ -757,10 +774,12 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
        << "      <h3>📈 Learning Summary (Closed Real Trades)</h3>"
        << "      <div class=\"kv\">"
        << "        <div><span>Total Closed Trades</span><b>" << learning.totalClosed << "</b></div>"
-       << "        <div><span>Win Rate</span><b class=\"ok\">" << (learning.totalClosed > 0 ? std::to_string((int)learning.winRate) : "86") << "% (" << learning.winners << " wins)</b></div>"
+       << "        <div><span>Win Rate</span><b class=\"ok\">"
+       << (learning.totalClosed > 0 ? (std::to_string((int)learning.winRate) + "%") : std::string("n/a"))
+       << " (" << learning.winners << " wins)</b></div>"
        << "        <div><span>Lifetime Net P&amp;L</span><b style=\"color:" << (learning.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";\">₹" << learning.netPnl << "</b></div>"
        << "      </div>"
-       << "      <div class=\"hint\" style=\"margin-top:6px;\"><b>Algo Performance Breakdown:</b> GapFadeP0Strategy: 86.7% Win Rate (₹39,955 Net PnL).</div>"
+       << render_algo_breakdown_html(learning)
        << "    </div>"
 
        << "  </div>"

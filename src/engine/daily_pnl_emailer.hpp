@@ -41,8 +41,10 @@ struct DailyPnLSummaryData {
     uint64_t risk_vetoes_count{0};
     uint64_t margin_vetoes_count{0};
     uint64_t actionable_signals_count{0};
-    double avg_ofi{0.0};
-    double max_ofi{0.0};
+    // Decision-confidence statistics, not OFI. Named honestly here; the source columns
+    // (cpp_post_session_analysis.avg_ofi / .max_ofi) are legacy misnomers.
+    double avg_confidence{0.0};
+    double max_confidence{0.0};
     int near_miss_count{0};
     std::string recommendation_summary;
 };

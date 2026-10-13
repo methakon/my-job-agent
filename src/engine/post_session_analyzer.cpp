@@ -1,6 +1,8 @@
 #include "engine/post_session_analyzer.hpp"
+#include "engine/strategy_config_manager.hpp"
 #include <iostream>
 #include <sstream>
+#include <iomanip>
 #include <cmath>
 #include <chrono>
 
@@ -40,24 +42,59 @@ PostSessionAnalysisReport PostSessionAnalyzer::run_post_session_analysis(const s
     report.actionable_signals_count = dec_stats.actionable;
     report.risk_vetoes_count = dec_stats.risk_vetoes;
     report.margin_vetoes_count = dec_stats.margin_vetoes;
-    report.avg_ofi = dec_stats.avg_confidence;
-    report.max_ofi = dec_stats.max_confidence;
+    report.avg_confidence = dec_stats.avg_confidence;
+    report.max_confidence = dec_stats.max_confidence;
     report.near_miss_count = dec_stats.near_miss_count;
 
     // Fetch closed trades and drawdown
     report.realized_drawdown_inr = db_client_->fetch_today_session_drawdown();
     report.trades_executed_count = 0; // Derived from today closed trades count
 
-    // Generate analytical recommendations (STRICTLY ADVISORY - NEVER MUTATES LIVE PARAMETERS)
+    // Generate analytical recommendations (STRICTLY ADVISORY - NEVER MUTATES LIVE PARAMETERS).
+    // Every figure below is read from live config or from this session's own counts. This block
+    // previously emitted a fixed string: it named the gates as the literals 0.85 / 100 and
+    // asserted a conclusion ("successfully prevented false breakout fills") regardless of what
+    // the session did. That is how psa-2026-10-09 came to describe 12,239 evaluations and 9,172
+    // risk vetoes for a session whose journal holds 1,944 rows, all no-action, zero vetoes.
+    auto& scm = hermes::StrategyConfigManager::instance();
+    const double gate_ofi = scm.get_ofi_threshold();
+    const std::string gate_ofi_str = [&] {
+        std::ostringstream g; g << std::fixed << std::setprecision(2) << gate_ofi; return g.str();
+    }();
+    const int gate_vol = scm.get_min_volume_threshold();
+    const uint64_t vetoes = report.risk_vetoes_count + report.margin_vetoes_count;
+
+    std::ostringstream summary_txt;
+    summary_txt << "Evaluated " << report.evaluated_decisions_count << " decisions: "
+                << report.no_action_count << " no-action, " << vetoes << " risk/margin vetoes, "
+                << report.actionable_signals_count << " actionable, "
+                << report.trades_executed_count << " trades executed.";
+
+    std::ostringstream rec_txt;
+    if (report.evaluated_decisions_count == 0) {
+        rec_txt << "No decisions were evaluated for this session, so no inference can be drawn "
+                   "about the current gate values.";
+    } else if (report.actionable_signals_count == 0) {
+        rec_txt << "Every evaluation was declined with the OFI gate at " << gate_ofi_str
+                << " and min-volume at " << gate_vol
+                << ". This describes the session; it is not evidence the gates are correctly "
+                   "calibrated. Threshold calibration requires a counterfactual run against the "
+                   "same ticks, not a reading of the live gate.";
+    } else {
+        rec_txt << report.actionable_signals_count << " actionable signal(s) produced "
+                << report.trades_executed_count << " trade(s) with the OFI gate at "
+                << gate_ofi_str << " and min-volume at " << gate_vol << ".";
+    }
+
     std::ostringstream rec;
     rec << "{"
         << "\"advisory_mode\": \"READ_ONLY\","
         << "\"parameter_mutation_allowed\": false,"
         << "\"session_date\": \"" << date_str << "\","
-        << "\"ofi_breakout_gate_evaluated\": 0.85,"
-        << "\"min_volume_gate_evaluated\": 100,"
-        << "\"summary\": \"Engine maintained complete capital preservation under strict risk invariants.\","
-        << "\"recommendation\": \"No parameter adjustments recommended. Current 0.85 OFI gate successfully prevented false breakout fills on low-liquidity strikes.\""
+        << "\"ofi_breakout_gate_evaluated\": " << gate_ofi << ","
+        << "\"min_volume_gate_evaluated\": " << gate_vol << ","
+        << "\"summary\": \"" << summary_txt.str() << "\","
+        << "\"recommendation\": \"" << rec_txt.str() << "\""
         << "}";
     report.recommendations_json = rec.str();
 
@@ -68,7 +105,7 @@ PostSessionAnalysisReport PostSessionAnalyzer::run_post_session_analysis(const s
         report.total_ticks_ingested, report.evaluated_decisions_count,
         report.no_action_count, report.actionable_signals_count,
         report.risk_vetoes_count, report.trades_executed_count,
-        report.realized_drawdown_inr, report.avg_ofi, report.max_ofi,
+        report.realized_drawdown_inr, report.avg_confidence, report.max_confidence,
         report.near_miss_count, report.recommendations_json
     );
 

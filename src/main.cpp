@@ -64,8 +64,8 @@ int main(int argc, char* argv[]) {
         test_report.total_ticks_ingested = 125000;
         test_report.evaluated_decisions_count = 1420;
         test_report.no_action_count = 1410;
-        test_report.avg_ofi = 0.1284;
-        test_report.max_ofi = 0.7420;
+        test_report.avg_confidence = 0.1284;
+        test_report.max_confidence = 0.7420;
         test_report.near_miss_count = 10;
         test_report.risk_vetoes_count = 0;
         test_report.margin_vetoes_count = 0;
@@ -349,7 +349,18 @@ int main(int argc, char* argv[]) {
                 int min_vol = hermes::StrategyConfigManager::instance().get_min_volume_threshold();
                 double base_conf = hermes::StrategyConfigManager::instance().get_base_confidence();
 
-                bool is_option_contract = !tick.symbol.empty() && tick.symbol != "NIFTY" && tick.symbol != "BANKNIFTY" && tick.symbol != "SENSEX";
+                // Index quotes are not tradable options: they arrive in an _INDEX segment
+                // (NSE_INDEX|Nifty 50, NSE_INDEX|Nifty Bank, BSE_INDEX|SENSEX) while tradable
+                // contracts sit in an _FO segment (e.g. BSE_FO|887080). The previous test
+                // compared tick.symbol against the bare literals "NIFTY" / "BANKNIFTY" /
+                // "SENSEX", which never occur in either broker's real symbol format - so it was
+                // always true and depth-less index quotes were admitted as option candidates,
+                // mislabelling index rows as "OFI below breakout threshold".
+                const bool is_index_quote =
+                    tick.instrument_key.find("_INDEX|") != std::string::npos ||
+                    tick.symbol.rfind("NSE_INDEX|", 0) == 0 ||
+                    tick.symbol.rfind("BSE_INDEX|", 0) == 0;
+                bool is_option_contract = !tick.symbol.empty() && !is_index_quote;
                 bool is_ofi_breakout = is_option_contract && (std::abs(feat.order_flow_imbalance) >= ofi_threshold) && (tick.volume >= min_vol);
 
                 if (is_ofi_breakout) {

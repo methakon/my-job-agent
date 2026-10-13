@@ -20,9 +20,12 @@ struct PostSessionAnalysisReport {
     uint64_t margin_vetoes_count{0};
     int trades_executed_count{0};
     double realized_drawdown_inr{0.0};
-    double avg_ofi{0.0};
-    double max_ofi{0.0};
-    int near_miss_count{0}; // Signals with OFI between 0.70 and 0.849
+    // These carry decision CONFIDENCE, not order-flow imbalance. They are persisted to the
+    // legacy columns cpp_post_session_analysis.avg_ofi / .max_ofi, which are misnamed; the
+    // column names stay only until a migration renames them.
+    double avg_confidence{0.0};
+    double max_confidence{0.0};
+    int near_miss_count{0}; // Decisions with confidence in [0.70, 0.85) - just under the gate
     std::string recommendations_json;
     bool execution_success{false};
 };

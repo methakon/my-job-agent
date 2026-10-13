@@ -1872,8 +1872,8 @@ void run_solid_and_acid_test_suite() {
         zero_trade_data.total_ticks_ingested = 125000;
         zero_trade_data.evaluated_decisions = 1420;
         zero_trade_data.ofi_below_threshold_count = 1410;
-        zero_trade_data.avg_ofi = 0.1284;
-        zero_trade_data.max_ofi = 0.7420;
+        zero_trade_data.avg_confidence = 0.1284;
+        zero_trade_data.max_confidence = 0.7420;
         zero_trade_data.near_miss_count = 10;
         zero_trade_data.risk_vetoes_count = 0;
 
