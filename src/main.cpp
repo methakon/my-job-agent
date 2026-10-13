@@ -23,6 +23,13 @@
 #include <unistd.h>
 #include <csignal>
 
+// Build revision, injected by CMake (see CMakeLists.txt). The fallback means a build outside a
+// git tree reports "unknown" instead of silently claiming a revision it does not have.
+#ifndef HERMES_BUILD_GIT_SHA
+#define HERMES_BUILD_GIT_SHA "unknown"
+#endif
+static constexpr const char* kBuildGitSha = HERMES_BUILD_GIT_SHA;
+
 int main(int argc, char* argv[]) {
     std::cout.setf(std::ios::unitbuf);
     std::cerr.setf(std::ios::unitbuf);
@@ -421,7 +428,7 @@ int main(int argc, char* argv[]) {
                     std::string uuid = "dj-" + std::to_string(now_ns) + "-" + std::to_string(decision_seq.fetch_add(1));
 
                     if (veto.risk_approved) {
-                        db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, side + "_" + option_kind, final_confidence, 0.05, "OFI_BULLISH_BREAKOUT_CONFIRMED", "{}");
+                        db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, side + "_" + option_kind, final_confidence, 0.05, "OFI_BULLISH_BREAKOUT_CONFIRMED", "{}");
 
                         UserTradeData trade;
                         trade.id = "cpp-paper-" + std::to_string(now_ns) + "-" + std::to_string(decision_seq.load());
@@ -442,14 +449,14 @@ int main(int argc, char* argv[]) {
                         refresh_trade_cache();
                     } else {
                         std::string prefix = (veto.veto_reason.find("MARGIN_INSUFFICIENT") != std::string::npos) ? "MARGIN_VETO: " : "RISK_VETO: ";
-                        db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, "NO_TRADE", final_confidence, 0.0, prefix + veto.veto_reason, "{}");
+                        db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, "NO_TRADE", final_confidence, 0.0, prefix + veto.veto_reason, "{}");
                     }
                 } else if (total_saved_ticks % 100 == 0) {
                     // Periodically sample evaluated candidate ticks every 100 ticks
                     auto now_ns = std::chrono::high_resolution_clock::now().time_since_epoch().count();
                     std::string uuid = "dj-" + std::to_string(now_ns) + "-" + std::to_string(decision_seq.fetch_add(1));
                     std::string symbol = tick.symbol.empty() ? "NIFTY" : tick.symbol;
-                    db_client->log_decision_journal_record(uuid, "live-session", "f8c24c3", "1.0.0", symbol, "NO_TRADE", 0.0, 0.0, "EVALUATED_NO_ACTION: OFI_BELOW_BREAKOUT_THRESHOLD", "{}");
+                    db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, "NO_TRADE", 0.0, 0.0, "EVALUATED_NO_ACTION: OFI_BELOW_BREAKOUT_THRESHOLD", "{}");
 
                 }
             }
