@@ -1817,7 +1817,8 @@ void run_solid_and_acid_test_suite() {
 
         // SCM-07: Trigger guarantees audit row on standalone UPDATE without manual INSERT
         std::string standalone_update =
-            "UPDATE cpp_strategy_config SET config_value = '0.82', updated_by = 'STANDALONE_TRIGGER_TEST' "
+            "UPDATE " + db_client->strategy_config_table() +
+            " SET config_value = '0.82', updated_by = 'STANDALONE_TRIGGER_TEST' "
             "WHERE config_key = 'ofi_threshold';";
         bool update_executed = db_client->execute_raw_sql(standalone_update);
 

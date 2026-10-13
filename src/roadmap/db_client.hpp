@@ -342,6 +342,16 @@ public:
     // Test Isolation & Production Defense-in-Depth Guard
     void set_test_isolation(bool enable) { is_test_isolation_ = enable; }
     bool is_test_isolation() const { return is_test_isolation_; }
+
+    // Routed table names, for callers that must build raw SQL (e.g. the standalone-UPDATE
+    // trigger test). Keeps table-name knowledge in one place instead of hardcoding the
+    // production name at the call site, which is how a test write reaches live policy.
+    std::string strategy_config_table() const {
+        return is_test_isolation_ ? "cpp_strategy_config_test" : "cpp_strategy_config";
+    }
+    std::string strategy_config_audit_table() const {
+        return is_test_isolation_ ? "cpp_strategy_config_audit_test" : "cpp_strategy_config_audit";
+    }
     bool ensure_test_schema();
     void cleanup_test_schema();
 

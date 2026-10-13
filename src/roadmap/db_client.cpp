@@ -909,8 +909,50 @@ bool RoadmapDbClient::ensure_test_schema() {
     int r1 = mysql_query(conn, q.c_str());
     std::string q2 = "CREATE TABLE IF NOT EXISTS cpp_post_session_analysis_test LIKE cpp_post_session_analysis;";
     int r2 = mysql_query(conn, q2.c_str());
+
+    // Strategy config is policy, not data: a test run that writes the production row can be
+    // read by the live engine (which reloads config every 60s) and change real trading
+    // behaviour. Give it the same isolation the journal has.
+    int r3 = mysql_query(conn, "CREATE TABLE IF NOT EXISTS cpp_strategy_config_test LIKE cpp_strategy_config;");
+    int r4 = mysql_query(conn, "CREATE TABLE IF NOT EXISTS cpp_strategy_config_audit_test LIKE cpp_strategy_config_audit;");
+
+    // Seed the isolated table so tests start from the documented baseline rather than
+    // inheriting whatever the operator last set in production.
+    //
+    // This must RESET, not merely INSERT IGNORE: SCM-07's standalone UPDATE deliberately
+    // leaves ofi_threshold at 0.82, and INSERT IGNORE cannot overwrite an existing row, so
+    // the next run would inherit the previous run's value and SCM-02 would fail on it.
+    mysql_query(conn, "DELETE FROM cpp_strategy_config_test;");
+    mysql_query(conn,
+        "INSERT INTO cpp_strategy_config_test (config_key, config_value, description, updated_by) VALUES "
+        "('ofi_threshold', '0.85', 'Threshold for Order Flow Imbalance breakout trigger', 'SYSTEM_BASELINE'), "
+        "('min_volume_threshold', '100', 'Minimum option contract tick volume for trade trigger', 'SYSTEM_BASELINE'), "
+        "('per_trade_risk_pct', '0.02', 'Dynamic per-trade risk ceiling percentage (Regime A / Kelly)', 'SYSTEM_BASELINE'), "
+        "('session_drawdown_limit_pct', '0.05', 'Dynamic session drawdown limit percentage', 'SYSTEM_BASELINE'), "
+        "('base_confidence', '0.85', 'Base confidence score for confirmed signals', 'SYSTEM_BASELINE'), "
+        "('parallel_strategy_enabled', 'false', 'Enable parallel predictive multi-leg strategy engine', 'SYSTEM_BASELINE');");
+
+    // CREATE TABLE ... LIKE copies columns and indexes but NOT triggers, so the isolated
+    // table needs its own audit trigger or the standalone-UPDATE assertion has nothing to fire.
+    mysql_query(conn, "DROP TRIGGER IF EXISTS trg_cpp_strategy_config_audit_test;");
+    int r5 = mysql_query(conn,
+        "CREATE TRIGGER trg_cpp_strategy_config_audit_test "
+        "AFTER UPDATE ON cpp_strategy_config_test "
+        "FOR EACH ROW "
+        "BEGIN "
+        "  IF OLD.config_value <> NEW.config_value THEN "
+        "    INSERT INTO cpp_strategy_config_audit_test ("
+        "      config_key, old_value, new_value, approved_by, reason, created_at"
+        "    ) VALUES ("
+        "      NEW.config_key, OLD.config_value, NEW.config_value, NEW.updated_by,"
+        "      CONCAT('Trigger-enforced audit: value updated from ', OLD.config_value, ' to ', NEW.config_value),"
+        "      NOW()"
+        "    ); "
+        "  END IF; "
+        "END;");
+
     pool_->release(conn);
-    return (r1 == 0 && r2 == 0);
+    return (r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0);
 }
 
 void RoadmapDbClient::cleanup_test_schema() {
@@ -918,6 +960,7 @@ void RoadmapDbClient::cleanup_test_schema() {
     if (!conn) return;
     mysql_query(conn, "TRUNCATE TABLE hermes_cpp_decision_journal_test;");
     mysql_query(conn, "TRUNCATE TABLE cpp_post_session_analysis_test;");
+    mysql_query(conn, "TRUNCATE TABLE cpp_strategy_config_audit_test;");
     pool_->release(conn);
 }
 
@@ -2347,22 +2390,28 @@ bool RoadmapDbClient::ensure_strategy_config_schema() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
 
-    const char* schema_sql =
-        "CREATE TABLE IF NOT EXISTS cpp_strategy_config ("
+    // Route to the isolated pair when the caller is a test harness, mirroring the decision
+    // journal. Production and test share this code path; only the table names differ.
+    const std::string cfg_table   = is_test_isolation_ ? "cpp_strategy_config_test"        : "cpp_strategy_config";
+    const std::string audit_table = is_test_isolation_ ? "cpp_strategy_config_audit_test"  : "cpp_strategy_config_audit";
+    const std::string trg_name    = is_test_isolation_ ? "trg_cpp_strategy_config_audit_test" : "trg_cpp_strategy_config_audit";
+
+    std::string schema_sql =
+        "CREATE TABLE IF NOT EXISTS " + cfg_table + " ("
         "  config_key VARCHAR(64) PRIMARY KEY,"
         "  config_value VARCHAR(64) NOT NULL,"
         "  description VARCHAR(255),"
         "  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,"
         "  updated_by VARCHAR(64) DEFAULT 'SYSTEM'"
         ");";
-    if (mysql_query(conn, schema_sql) != 0) {
-        std::cerr << "❌ [RoadmapDbClient] Failed to ensure cpp_strategy_config: " << mysql_error(conn) << "\n";
+    if (mysql_query(conn, schema_sql.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] Failed to ensure " << cfg_table << ": " << mysql_error(conn) << "\n";
         pool_->release(conn);
         return false;
     }
 
-    const char* audit_sql =
-        "CREATE TABLE IF NOT EXISTS cpp_strategy_config_audit ("
+    std::string audit_sql =
+        "CREATE TABLE IF NOT EXISTS " + audit_table + " ("
         "  id BIGINT AUTO_INCREMENT PRIMARY KEY,"
         "  config_key VARCHAR(64) NOT NULL,"
         "  old_value VARCHAR(64),"
@@ -2371,33 +2420,33 @@ bool RoadmapDbClient::ensure_strategy_config_schema() {
         "  reason TEXT,"
         "  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
         ");";
-    if (mysql_query(conn, audit_sql) != 0) {
-        std::cerr << "❌ [RoadmapDbClient] Failed to ensure cpp_strategy_config_audit: " << mysql_error(conn) << "\n";
+    if (mysql_query(conn, audit_sql.c_str()) != 0) {
+        std::cerr << "❌ [RoadmapDbClient] Failed to ensure " << audit_table << ": " << mysql_error(conn) << "\n";
         pool_->release(conn);
         return false;
     }
 
-    const char* seed_sql =
-        "INSERT IGNORE INTO cpp_strategy_config (config_key, config_value, description, updated_by) VALUES "
+    std::string seed_sql =
+        "INSERT IGNORE INTO " + cfg_table + " (config_key, config_value, description, updated_by) VALUES "
         "('ofi_threshold', '0.85', 'Threshold for Order Flow Imbalance breakout trigger', 'SYSTEM_BASELINE'), "
         "('min_volume_threshold', '100', 'Minimum option contract tick volume for trade trigger', 'SYSTEM_BASELINE'), "
         "('per_trade_risk_pct', '0.02', 'Dynamic per-trade risk ceiling percentage (Regime A / Kelly)', 'SYSTEM_BASELINE'), "
         "('session_drawdown_limit_pct', '0.05', 'Dynamic session drawdown limit percentage', 'SYSTEM_BASELINE'), "
         "('base_confidence', '0.85', 'Base confidence score for confirmed signals', 'SYSTEM_BASELINE'), "
         "('parallel_strategy_enabled', 'false', 'Enable parallel predictive multi-leg strategy engine', 'SYSTEM_BASELINE');";
-    mysql_query(conn, seed_sql);
+    mysql_query(conn, seed_sql.c_str());
 
     // Ensure database trigger exists for immutable, autonomous auditing of all parameter updates
-    const char* drop_trg_sql = "DROP TRIGGER IF EXISTS trg_cpp_strategy_config_audit;";
-    mysql_query(conn, drop_trg_sql);
+    std::string drop_trg_sql = "DROP TRIGGER IF EXISTS " + trg_name + ";";
+    mysql_query(conn, drop_trg_sql.c_str());
 
-    const char* trigger_sql =
-        "CREATE TRIGGER trg_cpp_strategy_config_audit "
-        "AFTER UPDATE ON cpp_strategy_config "
+    std::string trigger_sql =
+        "CREATE TRIGGER " + trg_name + " "
+        "AFTER UPDATE ON " + cfg_table + " "
         "FOR EACH ROW "
         "BEGIN "
         "  IF OLD.config_value <> NEW.config_value THEN "
-        "    INSERT INTO cpp_strategy_config_audit ("
+        "    INSERT INTO " + audit_table + " ("
         "      config_key, old_value, new_value, approved_by, reason, created_at"
         "    ) VALUES ("
         "      NEW.config_key, OLD.config_value, NEW.config_value, NEW.updated_by,"
@@ -2406,8 +2455,8 @@ bool RoadmapDbClient::ensure_strategy_config_schema() {
         "    ); "
         "  END IF; "
         "END;";
-    if (mysql_query(conn, trigger_sql) != 0) {
-        std::cerr << "⚠️ [RoadmapDbClient] Failed to install trg_cpp_strategy_config_audit trigger: " << mysql_error(conn) << "\n";
+    if (mysql_query(conn, trigger_sql.c_str()) != 0) {
+        std::cerr << "⚠️ [RoadmapDbClient] Failed to install " << trg_name << " trigger: " << mysql_error(conn) << "\n";
     }
 
     pool_->release(conn);
@@ -2419,8 +2468,9 @@ std::map<std::string, std::string> RoadmapDbClient::fetch_strategy_config() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return configs;
 
-    const char* q = "SELECT config_key, config_value FROM cpp_strategy_config;";
-    if (mysql_query(conn, q) == 0) {
+    const std::string cfg_table = is_test_isolation_ ? "cpp_strategy_config_test" : "cpp_strategy_config";
+    std::string q = "SELECT config_key, config_value FROM " + cfg_table + ";";
+    if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
             MYSQL_ROW row;
@@ -2450,11 +2500,24 @@ bool RoadmapDbClient::update_strategy_config_param(
     TransactionGuard tx(conn);
     std::string safe_key = escape_string(conn, key);
     std::string safe_val = escape_string(conn, new_value);
-    std::string safe_by  = escape_string(conn, approved_by.empty() ? "OPERATOR" : approved_by);
+    std::string resolved_by = approved_by.empty() ? "OPERATOR" : approved_by;
 
-    // Upsert config. The MySQL AFTER UPDATE trigger (trg_cpp_strategy_config_audit) guarantees
-    // an audit row is autonomously inserted into cpp_strategy_config_audit whenever config_value changes.
-    std::string upsert = "INSERT INTO cpp_strategy_config (config_key, config_value, updated_by) VALUES ('"
+    // Defense-in-depth, mirroring the decision journal's guard: a caller that is NOT in test
+    // isolation must not be able to write a test-attributed value into live policy, even if it
+    // reaches here by a path that forgot to route the table name.
+    if (!is_test_isolation_ && resolved_by.find("_TEST") != std::string::npos) {
+        std::cerr << "🛡️ [RoadmapDbClient] Invariant Violation Blocked: test-attributed config write rejected "
+                  << "from production table (approved_by=" << resolved_by << ", key=" << safe_key << ")\n";
+        pool_->release(conn);
+        return false;
+    }
+    std::string safe_by  = escape_string(conn, resolved_by);
+
+    const std::string cfg_table = is_test_isolation_ ? "cpp_strategy_config_test" : "cpp_strategy_config";
+
+    // Upsert config. The MySQL AFTER UPDATE trigger guarantees an audit row is autonomously
+    // inserted into the matching audit table whenever config_value changes.
+    std::string upsert = "INSERT INTO " + cfg_table + " (config_key, config_value, updated_by) VALUES ('"
                        + safe_key + "', '" + safe_val + "', '" + safe_by + "') "
                        + "ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), updated_by = VALUES(updated_by);";
     if (mysql_query(conn, upsert.c_str()) != 0) {
@@ -2473,8 +2536,9 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_strategy_
     MYSQL* conn = pool_->acquire();
     if (!conn) return records;
 
+    std::string audit_table = is_test_isolation_ ? "cpp_strategy_config_audit_test" : "cpp_strategy_config_audit";
     std::string q = "SELECT id, config_key, IFNULL(old_value, ''), new_value, approved_by, IFNULL(reason, ''), DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') "
-                    "FROM cpp_strategy_config_audit ORDER BY id DESC LIMIT " + std::to_string(limit) + ";";
+                    "FROM " + audit_table + " ORDER BY id DESC LIMIT " + std::to_string(limit) + ";";
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
