@@ -2117,42 +2117,76 @@ void run_solid_and_acid_test_suite() {
              sunday_stale_utc && sunday_stale_ist && monday_fresh_utc && monday_fresh_ist && epoch_stale && epoch_fresh);
     }
 
-    // Item PMRA-05: PreMarketReadinessAnalyzer fail-closed report and alert dispatch on stale token
+    // Item PMRA-05: pre-market readiness gate, tested hermetically.
+    //
+    // This block previously hardcoded calendar dates that were "tomorrow" when it was
+    // written (session 2026-10-13 vs a token issued 2026-10-12), which made it pass
+    // only while the live provider_tokens table still held a token predating the
+    // 2026-10-13 03:30 IST cutoff. It began failing the moment the operator
+    // legitimately regenerated the token after that cutoff -- i.e. it was asserting
+    // live DB state, not code correctness. The gate itself is a pure static function,
+    // so it is tested as one, with fixed inputs.
+    //
+    // The broad UTC / IST / epoch cases are already covered by PMRA-04 above. What was
+    // never covered is the exact cutoff boundary, the malformed-input paths, and the
+    // end-to-end gate -- those are what this block adds.
     {
+        typedef hermes::PreMarketReadinessAnalyzer PMRA;
+
+        // Boundary: one second before the cutoff is still before it.
+        TEST("PMRA-05a: cutoff gate rejects at one second before 03:30 IST",
+             PMRA::is_token_issued_before_cutoff("2026-10-13", "2026-10-13 03:29:59 IST", 0) == true);
+
+        // Boundary: exactly 03:30:00 IST is not before the cutoff.
+        TEST("PMRA-05b: cutoff gate accepts at exactly 03:30:00 IST",
+             PMRA::is_token_issued_before_cutoff("2026-10-13", "2026-10-13 03:30:00 IST", 0) == false);
+
+        // Fail-closed paths: bad inputs must reject, never accept.
+        TEST("PMRA-05c: cutoff gate fails closed on an empty session date",
+             PMRA::is_token_issued_before_cutoff("", "2026-10-13 11:29:00 IST", 0) == true);
+        TEST("PMRA-05d: cutoff gate fails closed on a malformed issue timestamp",
+             PMRA::is_token_issued_before_cutoff("2026-10-13", "not-a-timestamp", 0) == true);
+
+        // End-to-end, stated so it holds for ANY live token state: an un-reachable
+        // session date cannot be satisfied by any token that exists today, and with no
+        // token at all the check also fails closed. The assertion deliberately does not
+        // name which blocker fired, so it stays honest whether the cause is staleness
+        // or absence. (This call does not dispatch alerts -- sending lives in the
+        // separate send_alert_if_blocked(), which is not invoked here.)
         PreMarketReadinessAnalyzer analyzer(db_client);
-        // Evaluating session 2026-10-13 against 2026-10-12 tokens (which pre-date the 2026-10-13 03:30 IST cutoff)
-        PreMarketReadinessReport report = analyzer.run_pre_market_readiness_check("2026-10-13");
-
+        PreMarketReadinessReport report = analyzer.run_pre_market_readiness_check("2099-01-01");
         bool fail_closed = (report.overall_readiness_passed == false);
-        bool token_invalid = (report.token_valid == false);
-        bool stale_flag = report.token_stale_before_cutoff;
-        bool blocker_found = false;
-        for (const auto& blk : report.critical_blockers) {
-            if (blk.find("03:30 IST cutoff") != std::string::npos) {
-                blocker_found = true;
-                break;
-            }
-        }
-
-        TEST("PMRA-05: PreMarketReadinessAnalyzer fails closed (passed=false) and triggers alert on stale broker token",
-             fail_closed && token_invalid && stale_flag && blocker_found);
+        bool token_not_valid = (report.token_valid == false);
+        bool explained = !report.critical_blockers.empty();
+        TEST("PMRA-05e: readiness check fails closed and names a blocker for an un-reachable session date",
+             fail_closed && token_not_valid && explained);
     }
 
-    // Item BFS-01: BrokerFeedSupervisor::is_token_usable fail-closed 03:30 cutoff enforcement
+    // Item BFS-01: BrokerFeedSupervisor::is_token_usable fail-closed behaviour.
+    //
+    // Also previously date-hardcoded ("evaluating against tomorrow 2026-10-13"), so it
+    // asserted live DB state rather than code correctness and broke the first time the
+    // token was legitimately regenerated after a cutoff.
+    //
+    // is_token_usable reads live DB state and deliberately rejects test_/mock_ client_ids
+    // and tokens, so an "accepts a good token" assertion cannot be made hermetic -- by
+    // design, and that guard should not be weakened to make a test easier. The
+    // fail-closed direction is the safety property, and it IS hermetically assertable.
+    // The accept-side decision logic is covered by the pure-function tests above
+    // (PMRA-04, PMRA-05a/05b).
     {
         OptionTickReceiver receiver;
         std::vector<std::string> symbols = {"NSE_INDEX|Nifty 50"};
         BrokerFeedSupervisor supervisor(db_client, receiver, symbols);
         BrokerCredentials creds;
 
-        // Evaluating against tomorrow (2026-10-13): active token issued today at ~11:29 predates tomorrow's 03:30 cutoff -> MUST fail
-        bool tomorrow_stale_rejected = !supervisor.is_token_usable("upstox", creds, "2026-10-13");
+        // A provider with no token record must fail closed.
+        TEST("BFS-01a: is_token_usable fails closed for a provider with no token record",
+             supervisor.is_token_usable("no_such_provider_xyz", creds, "2026-10-13") == false);
 
-        // Evaluating against today (2026-10-12): active token issued today at 11:29 IST is post-cutoff -> passes cutoff check
-        bool today_usable = supervisor.is_token_usable("upstox", creds, "2026-10-12");
-
-        TEST("BFS-01: BrokerFeedSupervisor::is_token_usable strictly enforces 03:30 IST daily cutoff (fails closed on stale)",
-             tomorrow_stale_rejected && today_usable);
+        // A session date no existing token could ever satisfy must fail closed.
+        TEST("BFS-01b: is_token_usable fails closed for an un-reachable session date",
+             supervisor.is_token_usable("upstox", creds, "2099-01-01") == false);
     }
 
     // Item NAF-01: NseArchiveFetcher parse_participant_oi_csv verification
