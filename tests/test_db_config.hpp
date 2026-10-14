@@ -12,6 +12,7 @@
 // tests without a database existing at all. resolve_from_env() is the thin adapter that feeds it
 // from the .env loader this codebase uses.
 
+#include <stdexcept>
 #include <string>
 
 #include "../src/common/env_loader.hpp"

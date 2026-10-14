@@ -1,4 +1,7 @@
 #include "../src/common/env_loader.hpp"
+#include <cstdio>
+#include "test_db_config.hpp"
+#include <atomic>
 #include "../src/analytics/visitor_tracker.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include <iostream>
@@ -187,6 +190,138 @@ static void test_device_deduplication(std::shared_ptr<RoadmapDbClient> db_client
     std::cout << "  ✅ Device Deduplication Passed (same signature increments seen_count; distinct signature creates new row).\n";
 }
 
+// Reproducible stress test for the visitor-identity race (item 1 of the release-readiness review).
+//
+// The failure mode is a check-then-act race. NUM_THREADS threads share one canonical_ip and one
+// device_signature, so they all resolve to the same active_lookup_hash. record_analytics_event
+// does SELECT-then-INSERT inside a transaction; the loser gets a 1062 duplicate and retries - but
+// a retry only helps if its re-read is a CURRENT read. At the server's default REPEATABLE READ it
+// is a snapshot read, taken at the transaction's first statement, so it cannot see the row the
+// winner just committed no matter how long it waits.
+//
+// The pre-existing test ran this once, which passed often enough to look healthy. This one:
+//   - parks every thread on a spin barrier and releases them together, so they collide rather
+//     than trickling in (a trickle never competes)
+//   - repeats the scenario across rounds, cleaning between, because a race is probabilistic
+//   - asserts the invariants that matter: every call succeeds, and exactly ONE visitor row exists
+static void test_concurrency_stress_barrier(std::shared_ptr<RoadmapDbClient> db_client) {
+    std::cout << "  [1b/9] Stress: Visitor Identity Under Simultaneous Collision...\n";
+    if (!db_client || !db_client->test_connection()) {
+        std::cout << "  \u26a0\ufe0f DB not connected; skipping live DB test.\n";
+        return;
+    }
+
+    const int NUM_THREADS = 16;
+    const int ROUNDS = 10;
+    const std::string ip = "203.0.113.77";
+    const std::string secret = "stress_secret_key_v1";
+    const std::string device_sig = "sig_barrier_stress";
+
+    int failed_records = 0;
+    int wrong_visitor_rows = 0;
+    int rounds_with_failure = 0;
+
+    for (int round = 0; round < ROUNDS; ++round) {
+        std::vector<bool> results(NUM_THREADS, false);
+
+        std::atomic<int> ready{0};
+        std::atomic<bool> go{false};
+        std::vector<std::thread> threads;
+        threads.reserve(NUM_THREADS);
+
+        for (int i = 0; i < NUM_THREADS; ++i) {
+            threads.emplace_back([&, i]() {
+                AnalyticsEvent ev;
+                ev.request_id = "stress_" + std::to_string(round) + "_" + std::to_string(i);
+                ev.captured_timestamp = std::chrono::system_clock::now();
+                ev.canonical_ip = ip;
+                ev.ip_version = "IPv4";
+                ev.http_method = "GET";
+                ev.path = "/stress_" + std::to_string(i);
+                ev.user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36";
+                ev.accept_language = "en-US";
+                ev.browser_name = "Chrome";
+                ev.os_name = "Linux";
+                ev.device_type = "desktop";
+                ev.device_signature = device_sig;
+
+                GeoLocationResult geo;
+                geo.country = "India";
+                geo.country_code = "IN";
+                geo.city = "Mumbai";
+
+                ++ready;
+                while (!go.load(std::memory_order_acquire)) {}   // release together
+                results[i] = db_client->record_analytics_event(ev, geo, secret);
+            });
+        }
+
+        // Clear dependent rows first (FKs point at analytics_visitors), so this round starts from
+        // a known empty state and the count below is unambiguous.
+        {
+            MYSQL* cc = mysql_init(nullptr);
+            const auto cc_cfg = hermes::testcfg::resolve_from_env();
+            if (cc && mysql_real_connect(cc, cc_cfg.host.c_str(), cc_cfg.user.c_str(),
+                                         cc_cfg.password.c_str(), cc_cfg.schema.c_str(),
+                                         cc_cfg.port, nullptr, 0)) {
+                for (const char* t : {"analytics_page_visits", "analytics_sessions",
+                                      "analytics_devices", "analytics_locations",
+                                      "analytics_visitors"}) {
+                    std::string q = std::string("DELETE FROM ") + t + ";";
+                    mysql_query(cc, q.c_str());
+                }
+                mysql_close(cc);
+            }
+        }
+
+        while (ready.load() < NUM_THREADS) {}
+        go.store(true, std::memory_order_release);
+        for (auto& t : threads) if (t.joinable()) t.join();
+
+        int round_failures = 0;
+        for (int i = 0; i < NUM_THREADS; ++i) if (!results[i]) ++round_failures;
+        failed_records += round_failures;
+        if (round_failures > 0) ++rounds_with_failure;
+
+        // The identity invariant: one ip+device must produce exactly one visitor, however many
+        // concurrent requests arrive.
+        {
+            // The identity invariant is read from the schema rather than from the client under
+            // test. Counting rows for this identity is not possible directly - the stored value is
+            // a keyed hash and the raw IP is redacted - so the visitors table is cleared at the
+            // start of each round and the total is then exactly the identity's count. My first
+            // version counted every row in the table, which included other tests' visitors, and so
+            // "failed" in all ten rounds for a reason that had nothing to do with concurrency.
+            MYSQL* rc = mysql_init(nullptr);
+            const auto rc_cfg = hermes::testcfg::resolve_from_env();
+            if (rc && mysql_real_connect(rc, rc_cfg.host.c_str(), rc_cfg.user.c_str(),
+                                         rc_cfg.password.c_str(), rc_cfg.schema.c_str(),
+                                         rc_cfg.port, nullptr, 0)) {
+                std::string q = "SELECT COUNT(*) FROM analytics_visitors";
+                if (mysql_query(rc, q.c_str()) == 0) {
+                    MYSQL_RES* res = mysql_store_result(rc);
+                    if (res) {
+                        MYSQL_ROW row = mysql_fetch_row(res);
+                        long n = (row && row[0]) ? std::strtol(row[0], nullptr, 10) : -1;
+                        if (n != 1) ++wrong_visitor_rows;
+                        mysql_free_result(res);
+                    }
+                }
+                mysql_close(rc);
+            }
+        }
+    }
+
+    std::cout << "      threads=" << NUM_THREADS << " rounds=" << ROUNDS
+              << " failed_records=" << failed_records
+              << " rounds_with_failure=" << rounds_with_failure
+              << " rounds_with_wrong_visitor_count=" << wrong_visitor_rows << "\n";
+    assert(failed_records == 0 && "Concurrent event failed to record (check-then-act race)");
+    assert(wrong_visitor_rows == 0 && "Duplicate visitor rows created under concurrency");
+    std::cout << "  \u2705 Barrier Concurrency Stress Passed (all " << NUM_THREADS
+              << " simultaneous requests recorded, exactly one visitor per identity).\n";
+}
+
 static void test_concurrency_stress_same_ip(std::shared_ptr<RoadmapDbClient> db_client) {
     std::cout << "  [6/9] Testing Concurrency Stress (10 Simultaneous First Requests from Same IP)...\n";
     if (!db_client || !db_client->test_connection()) {
@@ -361,16 +496,26 @@ static void test_persistence_gated_lifetime_counters(std::shared_ptr<RoadmapDbCl
 }
 
 int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);   // survive abort()
     std::cout << "===================================================================\n";
     std::cout << "🧪 [TEST SUITE] RUNNING VISITOR TRACKING & ANALYTICS TEST SUITE\n";
     std::cout << "===================================================================\n";
 
     EnvLoader::load(".env");
-    std::string db_host = EnvLoader::get("MYSQL_HOST", "127.0.0.1");
-    int db_port = EnvLoader::get_int("MYSQL_PORT", 3307);
-    std::string db_user = EnvLoader::get("MYSQL_USER", "mylife");
-    std::string db_pass = EnvLoader::get("MYSQL_PASSWORD", "");
-    std::string db_name = EnvLoader::get("DATABASE_NAME", "myjob_agent");
+    // Same rule as the main suite: no defaults, because the defaults that used to be here -
+    // 127.0.0.1:3307, mylife, myjob_agent - are the production tunnel's. This harness had them
+    // too; fixing only the other suite left the same hole open.
+    const hermes::testcfg::TestDbConfig tcfg = hermes::testcfg::resolve_from_env();
+    if (!tcfg.ok) {
+        std::cout << "\n\u274c [VISITOR SUITE] DATABASE-BACKED TESTING TERMINATED BEFORE CONNECTING\n"
+                  << "    reason: " << tcfg.problem << "\n";
+        std::exit(2);
+    }
+    std::string db_host = tcfg.host;
+    int db_port = tcfg.port;
+    std::string db_user = tcfg.user;
+    std::string db_pass = tcfg.password;
+    std::string db_name = tcfg.schema;
 
     std::shared_ptr<RoadmapDbClient> db_client;
     try {
@@ -385,6 +530,7 @@ int main() {
     test_bounded_queue_overflow_protection();
     test_device_deduplication(db_client);
     test_concurrency_stress_same_ip(db_client);
+    test_concurrency_stress_barrier(db_client);
     test_raw_ip_redaction_and_cryptographic_unlinkability(db_client);
     test_session_inactivity_boundary(db_client);
     test_persistence_gated_lifetime_counters(db_client);
