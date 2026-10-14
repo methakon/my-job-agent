@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "c776d0c590ff1beafb04412a9cecf42f3807ad44": {
+        "short": "c776d0c",
+        "reason": "Trading Agent workstream — docs: deployment and rollback plan for operator review",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (read-only release-readiness review, item 5: prepare a rollback and deployment-validation plan for later operator review)",
+        "recorded": "2026-10-15",
+        "evidence": "document only, nothing executed; no deployment authorization granted"
+      },
       "ec94a658fd6f22ed105dc0a835a92f85658eb661": {
         "short": "ec94a65",
         "reason": "Trading Agent workstream — fix(ci): allow trigger creation in the disposable MySQL container",
