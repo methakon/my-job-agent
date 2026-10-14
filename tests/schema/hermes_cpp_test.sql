@@ -1,31 +1,14 @@
 -- Minimal, version-controlled schema for database-backed tests.
 --
--- Structure only: no rows, no production data. Nine tables, which is exactly what the
--- suite touches - the six ensure_test_schema() derives its _test copies from, plus the
--- three the fixtures write to directly. Loaded into a disposable CI MySQL service.
+-- Structure only: no rows, no production data. Nine tables - exactly what the suite
+-- touches: the six ensure_test_schema() derives its _test copies from, plus the three the
+-- fixtures write to directly. Loaded into a disposable CI MySQL service.
 --
--- Not a substitute for the real schema: the CI database is synthetic by design.
+-- Deliberately pure DDL: no SET statements and no /*!...*/ directives. Those carry the
+-- dumping session's state (sql_mode, time_zone, GTID), and an earlier version of this file
+-- failed to load with "Variable 'sql_mode' can't be set to the value of 'NULL'" because a
+-- matched pair of them was split by the filter.
 
--- MySQL dump 10.13  Distrib 8.0.46, for Linux (x86_64)
---
--- ------------------------------------------------------
-
-/*!50503 SET NAMES utf8mb4 */;
-SET @MYSQLDUMP_TEMP_LOG_BIN = @@SESSION.SQL_LOG_BIN;
-SET @@SESSION.SQL_LOG_BIN= 0;
-
---
--- GTID state at the beginning of the backup 
---
-
-SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ 'c554a174-a77b-11f1-a3cc-02001700ef1b:1-20110851';
-
---
--- Table structure for table `cpp_trade_reports`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `cpp_trade_reports` (
   `id` varchar(64) NOT NULL,
   `tradeUuid` varchar(64) NOT NULL,
@@ -49,14 +32,7 @@ CREATE TABLE `cpp_trade_reports` (
   UNIQUE KEY `tradeUuid` (`tradeUuid`),
   UNIQUE KEY `idx_signal_idempotency` (`executionMode`,`algoSource`,`instrument`(32),`side`,`signal_timestamp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `cpp_portfolios`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `cpp_portfolios` (
   `id` varchar(64) NOT NULL,
   `label` varchar(64) NOT NULL,
@@ -70,14 +46,7 @@ CREATE TABLE `cpp_portfolios` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `label` (`label`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `cpp_post_session_analysis`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `cpp_post_session_analysis` (
   `id` varchar(64) NOT NULL,
   `session_date` date NOT NULL,
@@ -97,14 +66,7 @@ CREATE TABLE `cpp_post_session_analysis` (
   PRIMARY KEY (`id`),
   KEY `idx_session_date` (`session_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `cpp_strategy_config`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `cpp_strategy_config` (
   `config_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
   `config_value` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -113,14 +75,7 @@ CREATE TABLE `cpp_strategy_config` (
   `updated_by` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT 'SYSTEM',
   PRIMARY KEY (`config_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `cpp_strategy_config_audit`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `cpp_strategy_config_audit` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `config_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -131,14 +86,7 @@ CREATE TABLE `cpp_strategy_config_audit` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=146 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `hermes_cpp_decision_journal`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `hermes_cpp_decision_journal` (
   `journal_id` bigint NOT NULL AUTO_INCREMENT,
   `decision_uuid` varchar(64) NOT NULL,
@@ -158,14 +106,7 @@ CREATE TABLE `hermes_cpp_decision_journal` (
   KEY `idx_symbol` (`symbol`),
   KEY `idx_created` (`created_at`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1179905 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `fnf_market_snapshots`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `fnf_market_snapshots` (
   `id` varchar(36) NOT NULL,
   `instrument` varchar(64) NOT NULL,
@@ -181,14 +122,7 @@ CREATE TABLE `fnf_market_snapshots` (
   PRIMARY KEY (`id`),
   KEY `IDX_ec63068f0abd87fa861f7489d2` (`instrument`,`ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `fnf_market_snapshots_history`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `fnf_market_snapshots_history` (
   `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
   `instrument` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -205,14 +139,7 @@ CREATE TABLE `fnf_market_snapshots_history` (
   PRIMARY KEY (`id`),
   KEY `IDX_519b7ba256f0822de9fbd4381b` (`instrument`,`ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
 
---
--- Table structure for table `upstox_live_paper_option_quotes`
---
-
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `upstox_live_paper_option_quotes` (
   `id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
   `contractSymbol` varchar(96) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -249,15 +176,3 @@ CREATE TABLE `upstox_live_paper_option_quotes` (
   KEY `idx_ulpoq_chain_ts` (`underlying`,`expiry`,`optionType`,`ts`),
   KEY `idx_ulpoq_contract_ts` (`contractSymbol`,`ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-SET @@SESSION.SQL_LOG_BIN = @MYSQLDUMP_TEMP_LOG_BIN;
-
-/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
-/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
-/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
-/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
-/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
-/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
-
--- Dump completed on 2026-10-15  2:31:13
