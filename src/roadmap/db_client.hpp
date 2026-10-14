@@ -233,6 +233,11 @@ public:
 private:
     MYSQL* create_connection();
 
+    // Applies MYSQL_SESSION_TIME_ZONE to a freshly created connection. Returns false when the
+    // value is malformed or the statement fails, so the caller can refuse the connection: a
+    // connection whose clock is unknown is not usable for risk or accounting work.
+    bool apply_session_time_zone(MYSQL* conn);
+
     std::string host_;
     int port_;
     std::string user_;

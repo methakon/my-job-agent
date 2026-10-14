@@ -1,3 +1,5 @@
+#include <cstdlib>
+#include <cctype>
 #include "db_client.hpp"
 #include "../engine/tick_receiver.hpp"
 #include "../engine/upstox_historical_backfill.hpp"
@@ -41,6 +43,29 @@ MySQLConnectionPool::~MySQLConnectionPool() {
     }
 }
 
+bool MySQLConnectionPool::apply_session_time_zone(MYSQL* conn) {
+    const char* tz = std::getenv("MYSQL_SESSION_TIME_ZONE");
+    if (!tz || !*tz) return true;   // unset: keep the server default (production behaviour)
+
+    // The value is interpolated into SQL, so its shape is checked rather than trusted.
+    std::string z(tz);
+    bool shaped = z.size() == 6 && (z[0] == '+' || z[0] == '-') &&
+                  std::isdigit(static_cast<unsigned char>(z[1])) &&
+                  std::isdigit(static_cast<unsigned char>(z[2])) && z[3] == ':' &&
+                  std::isdigit(static_cast<unsigned char>(z[4])) &&
+                  std::isdigit(static_cast<unsigned char>(z[5]));
+    if (!shaped) {
+        std::cerr << "\u274c [MySQLPool] MYSQL_SESSION_TIME_ZONE must look like +05:30, refusing \"" << z << "\"\n";
+        return false;
+    }
+    std::string sql = "SET SESSION time_zone = '" + z + "'";
+    if (mysql_query(conn, sql.c_str()) != 0) {
+        std::cerr << "\u274c [MySQLPool] could not set session time_zone to " << z << " - " << mysql_error(conn) << "\n";
+        return false;
+    }
+    return true;
+}
+
 MYSQL* MySQLConnectionPool::create_connection() {
     MYSQL* conn = mysql_init(nullptr);
     if (!conn) {
@@ -57,6 +82,16 @@ MYSQL* MySQLConnectionPool::create_connection() {
         std::cerr << "❌ [MySQLPool] Connection failed to " << host_ << ":" << port_ << " (" << user_ << ") - " << mysql_error(conn) << "\n";
         mysql_close(conn);
         return nullptr;
+    }
+
+    // The session time zone is per-connection state, so it must be set on every pooled
+    // connection. The server converts TIMESTAMP columns to and from this zone automatically in
+    // both directions; DATETIME columns are never converted, which is why the UTC-valued ones
+    // (closedAt, signal_timestamp, fnf_market_snapshots.ts) are written with UTC_TIMESTAMP()
+    // and read with an explicit + INTERVAL 330 MINUTE shift.
+    if (!apply_session_time_zone(conn)) {
+        mysql_close(conn);
+        return nullptr;   // fail closed: never trade or account on an unknown clock
     }
 
     all_created_connections_.insert(conn);
@@ -232,7 +267,7 @@ static std::unordered_map<std::string, double> fetch_latest_quotes_map(MYSQL* co
     std::unordered_map<std::string, double> quote_map;
     if (!conn) return quote_map;
 
-    std::string q = "SELECT contractSymbol, IFNULL(instrumentToken,''), ltp FROM upstox_live_paper_option_quotes WHERE ts >= DATE_SUB(NOW(), INTERVAL 24 HOUR) ORDER BY ts ASC LIMIT 50000;";
+    std::string q = "SELECT contractSymbol, IFNULL(instrumentToken,''), ltp FROM upstox_live_paper_option_quotes WHERE ts >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR) ORDER BY ts ASC LIMIT 50000;";
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
@@ -1630,7 +1665,7 @@ bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit
                         + ", grossPnl = " + std::to_string(gross_pnl)
                         + ", cost = " + std::to_string(cost)
                         + ", netPnl = " + std::to_string(net_pnl)
-                        + ", status = 'CLOSED', closedAt = NOW() WHERE id = '" + safe_id + "';";
+                        + ", status = 'CLOSED', closedAt = UTC_TIMESTAMP() WHERE id = '" + safe_id + "';";
 
     if (mysql_query(conn, query.c_str()) != 0) {
         std::cerr << "❌ [RoadmapDbClient] close_paper_trade error: " << mysql_error(conn) << "\n";
@@ -1825,7 +1860,7 @@ int RoadmapDbClient::settle_expired_positions() {
                           + ", grossPnl = " + std::to_string(gross_pnl)
                           + ", cost = " + std::to_string(charges)
                           + ", netPnl = " + std::to_string(net_pnl)
-                          + ", status = 'CLOSED', closedAt = NOW() WHERE id = '" + escape_string(conn, tr.id) + "';";
+                          + ", status = 'CLOSED', closedAt = UTC_TIMESTAMP() WHERE id = '" + escape_string(conn, tr.id) + "';";
         if (mysql_query(conn, u_sql.c_str()) == 0) {
             settled_count++;
         }
@@ -1854,7 +1889,7 @@ void RoadmapDbClient::update_external_case_study_ltps() {
         "JOIN ( "
         "  SELECT contractSymbol, ltp "
         "  FROM upstox_live_paper_option_quotes "
-        "  WHERE ts >= DATE_SUB(NOW(), INTERVAL 24 HOUR) "
+        "  WHERE ts >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR) "
         "  ORDER BY ts ASC "
         ") q ON cs.contract_symbol = CONVERT(q.contractSymbol USING utf8mb4) "
         "SET "
@@ -1924,7 +1959,7 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_archived_
                         "IFNULL(DATEDIFF(expiry, ts), 0) AS dte, "
                         "DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') AS ts "
                         "FROM upstox_live_paper_option_quotes "
-                        "WHERE ts >= DATE_SUB(NOW(), INTERVAL 1 DAY) "
+                        "WHERE ts >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY) "
                         "ORDER BY id DESC LIMIT 5000;";
 
     if (mysql_query(conn, query.c_str()) == 0) {
@@ -2367,10 +2402,10 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
         "  SUBSTRING_INDEX(t.instrument, '|', -1) AS symbol, "
         "  'day' AS interval_name, "
         "  DATE_FORMAT(MIN(t.ts), '%Y-%m-%d 00:00:00') AS timestamp, "
-        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts) = " + safe_date + " AND price > 0 ORDER BY ts ASC LIMIT 1) AS open, "
+        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts + INTERVAL 330 MINUTE) = " + safe_date + " AND price > 0 ORDER BY ts ASC LIMIT 1) AS open, "
         "  MAX(t.price) AS high, "
         "  MIN(t.price) AS low, "
-        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts) = " + safe_date + " AND price > 0 ORDER BY ts DESC LIMIT 1) AS close, "
+        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts + INTERVAL 330 MINUTE) = " + safe_date + " AND price > 0 ORDER BY ts DESC LIMIT 1) AS close, "
         "  0 AS volume, "
         "  0 AS open_interest, "
         "  NOW(6) AS ingested_at "
@@ -2405,7 +2440,7 @@ uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& bou
         "(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt) "
         "SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, NOW() "
         "FROM fnf_market_snapshots "
-        "WHERE DATE(ts) < " + safe_date + ";";
+        "WHERE DATE(ts + INTERVAL 330 MINUTE) < " + safe_date + ";";
 
     uint64_t copied = 0;
     if (mysql_query(conn, copy_sql.c_str()) == 0) {
@@ -2417,7 +2452,7 @@ uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& bou
         return 0;
     }
 
-    std::string delete_sql = "DELETE FROM fnf_market_snapshots WHERE DATE(ts) < " + safe_date + ";";
+    std::string delete_sql = "DELETE FROM fnf_market_snapshots WHERE DATE(ts + INTERVAL 330 MINUTE) < " + safe_date + ";";
     if (mysql_query(conn, delete_sql.c_str()) == 0) {
         out_deleted = mysql_affected_rows(conn);
         std::cout << "✅ [RoadmapDbClient] Cleaned live snapshots: " << out_deleted << " row(s) purged from live table.\n";
@@ -3387,7 +3422,7 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_closed_tr
 
     // Defaulting to CURRENT_DATE() would take the UTC date, which between 00:00 and 05:30 IST
     // is still the previous session. The fallback is the IST day; callers pass one explicitly.
-    std::string safe_date = session_date.empty() ? "DATE(NOW() + INTERVAL 330 MINUTE)" : ("'" + escape_string(conn, session_date) + "'");
+    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
     std::string q = "SELECT instrument, side, quantity, entryPrice, exitPrice, netPnl, "
                     "DATE_FORMAT(orderedAt, '%H:%i:%s'), DATE_FORMAT(closedAt, '%H:%i:%s') "
                     "FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED') "
@@ -3494,7 +3529,7 @@ double RoadmapDbClient::fetch_today_session_realized_pnl(const std::string& sess
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0.0;
 
-    std::string safe_date = session_date.empty() ? "DATE(NOW() + INTERVAL 330 MINUTE)" : ("'" + escape_string(conn, session_date) + "'");
+    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
     // closedAt is a UTC DATETIME (raw wall clock), so it must be shifted into IST before a date
     // is taken, and the predicate must cover both finalized states.
     std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED') AND DATE(closedAt + INTERVAL 330 MINUTE) = " + safe_date + ";";

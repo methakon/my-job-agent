@@ -2637,7 +2637,7 @@ void run_solid_and_acid_test_suite() {
         // 3. Isolation cannot fall back to production. With isolation ON every routed name is
         //    a _test name; with it OFF the production names are used. The switch is the only
         //    difference between the two, so a test run cannot silently address live tables.
-        auto iso_on = std::make_shared<RoadmapDbClient>("127.0.0.1", 3316, "u", "p", "isolated");
+        auto iso_on = std::make_shared<RoadmapDbClient>("127.0.0.1", 3306, "u", "p", "isolated");
         iso_on->set_test_isolation(true);
         TEST("ISO-01: with isolation ON every routed table is an isolated _test table",
              iso_on->trade_reports_table() == "cpp_trade_reports_test" &&
@@ -2645,7 +2645,7 @@ void run_solid_and_acid_test_suite() {
              iso_on->strategy_config_table() == "cpp_strategy_config_test" &&
              iso_on->strategy_config_audit_table() == "cpp_strategy_config_audit_test");
 
-        auto iso_off = std::make_shared<RoadmapDbClient>("127.0.0.1", 3316, "u", "p", "isolated");
+        auto iso_off = std::make_shared<RoadmapDbClient>("127.0.0.1", 3306, "u", "p", "isolated");
         iso_off->set_test_isolation(false);
         TEST("ISO-02: with isolation OFF the production names are used, so the switch is the only difference",
              iso_off->trade_reports_table() == "cpp_trade_reports" &&
@@ -2843,6 +2843,92 @@ void run_solid_and_acid_test_suite() {
             } else {
                 TEST("F5 setup: raw connection available", false);
             }
+        }
+    }
+
+
+    // IST standardization regression tests (requirements 6, 7, 9).
+    //
+    // The session runs +05:30. TIMESTAMP columns are converted by the server in both
+    // directions; DATETIME columns are never converted, so the UTC-valued ones must be shifted
+    // explicitly. These tests pin both halves, because getting one right and the other wrong
+    // produces plausible-looking but wrong session boundaries.
+    {
+        MYSQL* raw_db = mysql_init(nullptr);
+        if (raw_db && mysql_real_connect(raw_db, db_host.c_str(), db_user.c_str(), db_pass.c_str(),
+                                         db_name.c_str(), db_port, nullptr, 0)) {
+            // the fixture connection is put on the same zone the application uses, so nothing
+            // here depends on the server's own default
+            mysql_query(raw_db, "SET SESSION time_zone = '+05:30'");
+            std::string s_tz = "?";
+            if (mysql_query(raw_db, "SELECT @@session.time_zone") == 0) {
+                MYSQL_RES* r = mysql_store_result(raw_db);
+                if (r) { MYSQL_ROW row = mysql_fetch_row(r);
+                         if (row && row[0]) s_tz = row[0];
+                         mysql_free_result(r); }
+            }
+            TEST("IST-01: the session time zone is +05:30, not the server default",
+                 s_tz == "+05:30");
+
+            auto scalar_s = [&](const std::string& sql) -> std::string {
+                if (mysql_query(raw_db, sql.c_str()) != 0) return "ERR:" + std::string(mysql_error(raw_db));
+                MYSQL_RES* r = mysql_store_result(raw_db);
+                if (!r) return "ERR";
+                MYSQL_ROW row = mysql_fetch_row(r);
+                std::string v = (row && row[0]) ? row[0] : "NULL";
+                mysql_free_result(r);
+                return v;
+            };
+            auto exec = [&](const std::string& sql) { return mysql_query(raw_db, sql.c_str()) == 0; };
+
+            // --- requirement 6/7: the two column families behave differently, by design -------
+            exec("DROP TABLE IF EXISTS tz_family_probe");
+            exec("CREATE TABLE tz_family_probe (d DATETIME, t TIMESTAMP NULL)");
+            // One instant, written as an explicit UTC wall clock.
+            exec("INSERT INTO tz_family_probe VALUES ('2026-10-14 19:30:00','2026-10-14 19:30:00')");
+            // A literal written into a TIMESTAMP is interpreted in the SESSION zone, so on its
+            // own it round-trips and proves nothing. Reading the SAME row under two zones does:
+            // the DATETIME must not move, the TIMESTAMP must.
+            std::string dt_ist = scalar_s("SELECT d FROM tz_family_probe");
+            std::string ts_ist = scalar_s("SELECT t FROM tz_family_probe");
+            scalar_s("SET SESSION time_zone = '+00:00'");
+            std::string dt_utc = scalar_s("SELECT d FROM tz_family_probe");
+            std::string ts_utc = scalar_s("SELECT t FROM tz_family_probe");
+            scalar_s("SET SESSION time_zone = '+05:30'");
+            TEST("IST-02: a DATETIME is NOT converted by the session zone (identical under both)",
+                 dt_ist == dt_utc && dt_ist == "2026-10-14 19:30:00");
+            TEST("IST-03: a TIMESTAMP IS converted by the session zone (moves 19:30 -> 14:00)",
+                 ts_ist == "2026-10-14 19:30:00" && ts_utc == "2026-10-14 14:00:00");
+            TEST("IST-04: so a UTC-valued DATETIME must be shifted explicitly to be read in IST",
+                 scalar_s("SELECT DATE(d + INTERVAL 330 MINUTE) FROM tz_family_probe") == "2026-10-15");
+            TEST("IST-05: 18:29 UTC is still the PREVIOUS IST day",
+                 scalar_s("SELECT DATE(CAST('2026-10-14 18:29:00' AS DATETIME) + INTERVAL 330 MINUTE)") == "2026-10-14");
+            TEST("IST-06: 18:30 UTC is exactly midnight IST and starts the NEXT session",
+                 scalar_s("SELECT DATE(CAST('2026-10-14 18:30:00' AS DATETIME) + INTERVAL 330 MINUTE)") == "2026-10-15");
+            exec("DELETE FROM cpp_trade_reports_test;");
+            exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                 "exitPrice, grossPnl, cost, netPnl, status, orderedAt, closedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                 "('TEST-IST-HIST','uh1','NIFTY5026102722850CE (NSE_FO|90001)','BUY',25,100.0,110.0,"
+                 "10.0,0.0,10.0,'CLOSED','2026-10-14 09:30:00','2026-10-14 04:00:00',"
+                 "'2026-10-14 03:59:00.000000','OFI_Microstructure_Breakout','PAPER');");
+            TEST("IST-07: the historical UTC DATETIME reads back with its stored meaning intact",
+                 scalar_s("SELECT closedAt FROM cpp_trade_reports_test WHERE id='TEST-IST-HIST'") == "2026-10-14 04:00:00");
+            TEST("IST-08: its IST interpretation is 09:30, the same instant re-expressed",
+                 scalar_s("SELECT CAST(closedAt + INTERVAL 330 MINUTE AS DATETIME) FROM cpp_trade_reports_test "
+                          "WHERE id='TEST-IST-HIST'") == "2026-10-14 09:30:00");
+            TEST("IST-09: both columns denote the same instant once each is read per its family",
+                 scalar_s("SELECT CAST(closedAt + INTERVAL 330 MINUTE AS DATETIME) FROM cpp_trade_reports_test "
+                          "WHERE id='TEST-IST-HIST'") ==
+                 scalar_s("SELECT orderedAt FROM cpp_trade_reports_test WHERE id='TEST-IST-HIST'"));
+            TEST("IST-10: and it is attributed to the 2026-10-14 IST session, not another day",
+                 scalar_s("SELECT DATE(closedAt + INTERVAL 330 MINUTE) FROM cpp_trade_reports_test "
+                          "WHERE id='TEST-IST-HIST'") == "2026-10-14");
+
+            exec("DROP TABLE IF EXISTS tz_family_probe");
+            exec("DELETE FROM cpp_trade_reports_test;");
+            mysql_close(raw_db);
+        } else {
+            TEST("IST setup: raw connection available", false);
         }
     }
 
