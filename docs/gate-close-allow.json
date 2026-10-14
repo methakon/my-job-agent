@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "8785932c7674c48143a4a3973ea87b9e88167767": {
+        "short": "8785932",
+        "reason": "Trading Agent workstream — fix(tests,ci): require explicit test-database configuration; use the clang++-17 driver",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (CI audit: P0 database isolation, no production defaults, fail-closed test configuration, and the clang++-17 driver correction)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 253/0 and ctest 2/2 locally; TESTCFG-01..09 prove the refusals without a database; CI still needs its own MySQL service before the DB-backed tests run there"
+      },
       "f6a88e81634f3e3402a1a89749e696fc7535a316": {
         "short": "f6a88e8",
         "reason": "Trading Agent workstream — fix(static-analysis): reviewed suppressions for three provably-safe container bounds",
