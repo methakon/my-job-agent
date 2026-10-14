@@ -1,5 +1,53 @@
 {
   "exemptions": {
+      "ec121f079b506221a6d495b1480c2748434bdbbe": {
+        "short": "ec121f0",
+        "reason": "Trading Agent workstream — test(isolation): route trade and portfolio tables to isolated test tables",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: local MySQL consolidation and IST standardization provisionally accepted; item 30.5 built out under eight conditions including fail-closed risk authorization and ceiling preservation as mandatory release invariants)",
+        "recorded": "2026-10-15",
+        "evidence": "echoes the cpp_strategy_config pattern already exempted at d425ed6, extended to the trade and portfolio tables so the 30.5 tests cannot address production rows"
+      },
+      "56de2d66b45a339592fd007ddd4747a811738845": {
+        "short": "56de2d6",
+        "reason": "Trading Agent workstream — fix(risk): the daily-loss control fails closed at the order-authorization boundary",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: local MySQL consolidation and IST standardization provisionally accepted; item 30.5 built out under eight conditions including fail-closed risk authorization and ceiling preservation as mandatory release invariants)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 204/0 isolated; a failed connection, a SQL error and an empty result all return unknown and unknown blocks entries at the final authorization point"
+      },
+      "8195ac4646ea389ca70dee6ccdd11fb92cdd4abb": {
+        "short": "8195ac4",
+        "reason": "Trading Agent workstream — fix(risk): preserve the operator ceiling and stop valuing unpriced positions at entry",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: local MySQL consolidation and IST standardization provisionally accepted; item 30.5 built out under eight conditions including fail-closed risk authorization and ceiling preservation as mandatory release invariants)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 204/0 isolated; CEIL-01..04 hold the ceiling at exactly 1,00,000 through settlement and reconcile netPnl to SUM over finalized rows; MTM-02..04 mark an incomplete book as partial"
+      },
+      "666da1a77a6666c74997708e3cacd0c698b795bd": {
+        "short": "666da1a",
+        "reason": "Trading Agent workstream — fix(accounting): finalized predicates and IST session boundaries; isolate the test clock",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: local MySQL consolidation and IST standardization provisionally accepted; item 30.5 built out under eight conditions including fail-closed risk authorization and ceiling preservation as mandatory release invariants)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 212/0 isolated; DLG-05 (query fails on a reachable database), CEIL-05 (repeated settlement cannot move the ceiling) and F5-B (19:30 UTC close lands on the next IST day)"
+      },
+      "ce2192b8cc5593dcad0be1cf0b20f76c25b2380b": {
+        "short": "ce2192b",
+        "reason": "Trading Agent workstream — feat(time): standardize trading-agent sessions on IST and correct every affected query",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: local MySQL consolidation and IST standardization provisionally accepted; item 30.5 built out under eight conditions including fail-closed risk authorization and ceiling preservation as mandatory release invariants)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 222/0 isolated; IST-01..10 pin the TIMESTAMP/DATETIME split, the midnight boundary and the preservation of historical values. Session-scoped; the shared server global zone is unchanged."
+      },
+      "aafc0726a2f5e34de777d5211f6c5ea13635bc95": {
+        "short": "aafc072",
+        "reason": "Trading Agent workstream — fix(time,docs): sargable UTC range predicates, archival preview, re-entry tests",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: local MySQL consolidation and IST standardization provisionally accepted; item 30.5 built out under eight conditions including fail-closed risk authorization and ceiling preservation as mandatory release invariants)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 235/0 isolated; SET-01..03 (direct close path), REENTRY-01..05 (corrected records cannot re-enter, and the idempotency index refuses a replay) and ARCH-01..05 (archival boundary exact)"
+      },
     "21cb0bff88a3132af2cb9069c265818bd57f0a20": {
       "short": "21cb0bf",
       "reason": "Trading Agent workstream — fix(feed): remove the fail-open stale-data fallback",
