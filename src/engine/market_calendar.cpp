@@ -77,10 +77,25 @@ bool MarketCalendar::is_contract_expired(const std::string& symbol, uint64_t epo
                 break;
             }
         }
-        if (six_digits) {
-            pos = i;
-            break;
-        }
+        if (!six_digits) continue;
+
+        // A six-digit window only counts if it is a real calendar date. Anything else is the
+        // underlying's own digits or the strike, so keep scanning rather than giving up on the
+        // first run. This is the NIFTY50 bug: "NIFTY50" + "261006" merges into "502610", which
+        // reads as month 26 and is not a date, so bailing there made every NIFTY50-prefixed
+        // contract report as not-expired. On 2026-10-14 that let 23 expired contracts through
+        // into the trade table.
+        const int cand_yy = std::stoi(symbol.substr(i, 2)) + 2000;
+        const int cand_mm = std::stoi(symbol.substr(i + 2, 2));
+        const int cand_dd = std::stoi(symbol.substr(i + 4, 2));
+        if (cand_mm < 1 || cand_mm > 12) continue;
+        static const int month_days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+        const bool leap_year = (cand_yy % 4 == 0 && (cand_yy % 100 != 0 || cand_yy % 400 == 0));
+        const int day_max = (cand_mm == 2 && leap_year) ? 29 : month_days[cand_mm - 1];
+        if (cand_dd < 1 || cand_dd > day_max) continue;
+
+        pos = i;
+        break;
     }
 
     // No readable expiry: not expired. Fail "open" here on purpose -- the insert-time

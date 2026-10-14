@@ -2230,6 +2230,41 @@ void run_solid_and_acid_test_suite() {
         // Out-of-range month/day are unreadable, not a date that happens to be in the past.
         TEST("EXP-01i: an out-of-range month is NOT treated as an expiry date",
              hermes::MarketCalendar::is_contract_expired("SENSEX26999972400CE", ref) == false);
+
+        // NIFTY50-shaped symbols: the underlying's own digits merge with the expiry. This is the
+        // shape EXP-01 originally failed to cover. Every case above uses SENSEX, where the digits
+        // begin cleanly after the name and the collision cannot occur, so the suite stayed green
+        // while every NIFTY50-prefixed contract was read as not-expired.
+        TEST("EXP-01j: an expired NIFTY50 contract IS expired (underlying digits must not mask the date)",
+             hermes::MarketCalendar::is_contract_expired("NIFTY5026100622850CE", ref) == true);
+        TEST("EXP-01k: a live NIFTY50 contract is NOT reported expired",
+             hermes::MarketCalendar::is_contract_expired("NIFTY5026102722850CE", ref) == false);
+        TEST("EXP-01l: a NIFTY50 contract expiring today is NOT reported expired",
+             hermes::MarketCalendar::is_contract_expired("NIFTY5026101422850CE", ref) == false);
+        TEST("EXP-01m: a NIFTYBANK contract is unaffected by the NIFTY50 correction",
+             hermes::MarketCalendar::is_contract_expired("NIFTYBANK26102754100PE", ref) == false);
+
+        // Every one of the 23 expired NIFTY50 instruments that reached the trade table on
+        // 2026-10-14 must read as expired. These are the production symbols themselves, not
+        // invented ones - this is exactly the population the old implementation could not parse.
+        {
+            const char* stale_contracts[] = {
+                "NIFTY5026100622850CE", "NIFTY5026100622800CE", "NIFTY5026100623050CE",
+                "NIFTY5026100622700PE", "NIFTY5026100622250PE", "NIFTY5026100622400PE",
+                "NIFTY5026100623000CE", "NIFTY5026100622300PE", "NIFTY5026100623100CE",
+                "NIFTY5026100622650PE", "NIFTY5026100622450PE", "NIFTY5026100622600PE",
+                "NIFTY5026100623200CE", "NIFTY5026100623150CE", "NIFTY5026100622900CE",
+                "NIFTY5026100622750PE", "NIFTY5026100623250CE", "NIFTY5026100622950CE",
+                "NIFTY5026100622500PE", "NIFTY5026100622350PE", "NIFTY5026100622550PE",
+                "NIFTY5026100622850PE", "NIFTY5026100622800PE",
+            };
+            int unreadable = 0;
+            for (const char* sym : stale_contracts) {
+                if (!hermes::MarketCalendar::is_contract_expired(sym, ref)) ++unreadable;
+            }
+            TEST("EXP-01n: all 23 production NIFTY50 stale contracts are now read as expired",
+                 unreadable == 0);
+        }
     }
 
     // Item NAF-01: NseArchiveFetcher parse_participant_oi_csv verification
