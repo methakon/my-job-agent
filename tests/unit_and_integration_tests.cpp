@@ -41,6 +41,8 @@
 #include "../src/engine/nse_archive_fetcher.hpp"
 #include "../src/engine/spread_position.hpp"
 #include "../src/engine/predictive_kelly_sizer.hpp"
+#include <cstdlib>
+#include "test_db_config.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
 
@@ -57,18 +59,70 @@ void run_solid_and_acid_test_suite() {
     std::cout << "===================================================================\n";
 
     EnvLoader::load(".env");
-    std::string db_host = EnvLoader::get("MYSQL_HOST", "127.0.0.1");
-    int db_port = EnvLoader::get_int("MYSQL_PORT", 3307);
-    std::string db_user = EnvLoader::get("MYSQL_USER", "mylife");
-    std::string db_pass = EnvLoader::get("MYSQL_PASSWORD", "");
-    std::string db_name = EnvLoader::get("DATABASE_NAME", "myjob_agent");
+
+    int passed = 0;
+    int failed = 0;
+
+    // Config negative tests first, before anything can open a socket. These run even when the
+    // database configuration is missing or refused, because they are the check that says so.
+    {
+        auto CHECK = [&](const std::string& name, bool condition) {
+            if (condition) { std::cout << "  \u2705 PASS: " << name << "\n"; ++passed; }
+            else { std::cout << "  \u274c FAIL: " << name << "\n"; ++failed; }
+        };
+
+        // validate() is pure, so these drive it directly: no environment manipulation and no
+        // database required. That is the point - the refusal must not depend on a connection.
+        auto V = [](const std::string& ack, const std::string& host, const std::string& port,
+                    const std::string& user, const std::string& schema) {
+            return hermes::testcfg::validate(ack, host, port, user, "", schema);
+        };
+
+        CHECK("TESTCFG-01: with no opt-in, database-backed testing is refused",
+              V("", "127.0.0.1", "3306", "cpp_test_rw", "hermes_cpp_test").ok == false);
+        CHECK("TESTCFG-02: opting in without the values present is refused, not defaulted",
+              V("1", "", "", "", "").ok == false);
+        CHECK("TESTCFG-03: port 3307 (the production tunnel) is refused",
+              V("1", "127.0.0.1", "3307", "cpp_test_rw", "hermes_cpp_test").ok == false);
+        CHECK("TESTCFG-04: the production schema name is refused",
+              V("1", "127.0.0.1", "3306", "cpp_test_rw", "myjob_agent").ok == false);
+        CHECK("TESTCFG-05: the production account name is refused",
+              V("1", "127.0.0.1", "3306", "mylife", "hermes_cpp_test").ok == false);
+        CHECK("TESTCFG-06: a non-loopback host is refused",
+              V("1", "10.0.0.99", "3306", "cpp_test_rw", "hermes_cpp_test").ok == false);
+        CHECK("TESTCFG-07: a schema not named as a test schema is refused",
+              V("1", "127.0.0.1", "3306", "cpp_test_rw", "some_production_db").ok == false);
+        CHECK("TESTCFG-08: a non-numeric port is refused",
+              V("1", "127.0.0.1", "three-thousand", "cpp_test_rw", "hermes_cpp_test").ok == false);
+        CHECK("TESTCFG-09: a well-formed test configuration is accepted",
+              V("1", "127.0.0.1", "3306", "cpp_test_rw", "hermes_cpp_test").ok == true);
+    }
+
+    const hermes::testcfg::TestDbConfig tcfg = hermes::testcfg::resolve_from_env();
+    std::string db_host = tcfg.host;
+    int db_port = tcfg.port;
+    std::string db_user = tcfg.user;
+    std::string db_pass = tcfg.password;
+    std::string db_name = tcfg.schema;
+
+    if (!tcfg.ok) {
+        // No connection is opened. This is a hard stop rather than a silent skip: a run that
+        // cannot exercise the database-backed tests must not look like a passing one.
+        std::cout << "\n\u274c [TEST SUITE] DATABASE-BACKED TESTING TERMINATED BEFORE CONNECTING\n"
+                  << "    reason: " << tcfg.problem << "\n"
+                  << "    set CPP_TEST_DB=1 plus MYSQL_HOST/MYSQL_PORT/MYSQL_USER/DATABASE_NAME\n"
+                  << "    (see tests/test_db_config.hpp for the values that are refused)\n";
+        std::cout << "\n[TEST SUITE SUMMARY] Passed: " << passed << " | Failed: " << failed
+                  << " | database-backed: NOT RUN\n";
+        std::exit(2);   // terminate: no connection was opened, and this must not look like a pass
+    }
+
+    std::cout << "\u2705 [TEST SUITE] Test database: " << tcfg.user << "@" << tcfg.host << ":"
+              << tcfg.port << "/" << tcfg.schema << "  (no production credentials, no tunnel)\n";
 
     auto db_client = std::make_shared<RoadmapDbClient>(db_host, db_port, db_user, db_pass, db_name);
     db_client->set_test_isolation(true);
     db_client->ensure_test_schema();
-
-    int passed = 0;
-    int failed = 0;
 
     auto TEST = [&](const std::string& name, bool condition) {
         if (condition) {

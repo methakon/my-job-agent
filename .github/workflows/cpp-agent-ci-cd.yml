@@ -21,7 +21,10 @@ jobs:
       # A failure on one compiler must not cancel the other: both configurations have to report.
       fail-fast: false
       matrix:
-        compiler: [ g++-13, clang-17 ]
+        # clang-17 is the C driver; CMAKE_CXX_COMPILER needs clang++-17. Selecting clang-17
+        # made CMake treat the C driver as a C++ compiler, which compiles nothing and then
+        # fails at link with "no such file or directory" from the compiler launcher.
+        compiler: [ g++-13, clang++-17 ]
         build_type: [ Release ]
 
     steps:
@@ -39,7 +42,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build build-essential cppcheck \
+            cmake ninja-build build-essential cppcheck g++-13 clang-17 \
             libssl-dev libcurl4-openssl-dev libmysqlclient-dev
 
       - name: Configure CMake
