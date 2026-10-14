@@ -1,5 +1,85 @@
 {
   "exemptions": {
+    "06d33a8582c2b3fea1bce97c22673dc18c0560d1": {
+      "short": "06d33a8",
+      "reason": "Trading Agent workstream — fix(broker-feed): enforce 03:30 IST token fail-closed cutoff and FYERS WebSocket handshake auth_token",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "suite 178 passed/0 failed; PMRA-05/BFS-01 boundary + fail-closed cases hermetic"
+    },
+    "e9e4eec70a13889816c757b881aad555e2ad7c6c": {
+      "short": "e9e4eec",
+      "reason": "Trading Agent workstream — feat(paper-trading): add live session status panel and verify BFS token cutoff test and alert path",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "/api/market/session-status returns JSON, verified live against the running engine"
+    },
+    "6d63f901a6745b31212cd61ff44337b8edf33a05": {
+      "short": "6d63f90",
+      "reason": "Trading Agent workstream — fix(candles): add calendar trading-day and range gate to daily candle rollup, add PKS-04b corrupted bug guard and PKS-06 strategy tag separation tests",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "rollup gate + PKS-04b/PKS-06 tests green in the hermetic suite"
+    },
+    "810034bdd95b7934794d4204c870e5a9027734cd": {
+      "short": "810034b",
+      "reason": "Trading Agent workstream — fix(provenance): stamp decisions with the real build revision",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "/health reports the deployed revision; cmake reconfigure proved the stamp is current"
+    },
+    "f2ca385bbdb92d534d3571be4200eab793a1b988": {
+      "short": "f2ca385",
+      "reason": "Trading Agent workstream — fix(reporting): stop post-session report and dashboard asserting unmeasured figures",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "psa-2026-10-09 corrected 12,239 -> 1,944 evaluated, vetoes 9,172 -> 0; audit row count verified"
+    },
+    "d425ed6816d288dd0635df02e2867aa3a71cab6d": {
+      "short": "d425ed6",
+      "reason": "Trading Agent workstream — fix(test-isolation): route cpp_strategy_config test writes to isolated tables",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "ensure_test_schema() + _test tables; audit table 145 -> 145 rows across a suite run"
+    },
+    "65726328e68ceb8de9095c562e076514791ad2eb": {
+      "short": "6572632",
+      "reason": "Trading Agent workstream — fix(expiry): check contract expiry in the decision path, on an IST basis",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "EXP-01 tests with explicit epochs; suite 178 passed/0 failed"
+    },
+    "0b118e4aca04a57bdb46ca39d7b39a0c769083b5": {
+      "short": "0b118e4",
+      "reason": "Trading Agent workstream — feat(health): expose the deployed build revision as a deploy marker",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "deployed binary reports its own revision; verified by fetching /health"
+    },
+    "b2e8d00c47c94f549a4ffc60031a458e824c47e6": {
+      "short": "b2e8d00",
+      "reason": "Trading Agent workstream — fix(session-panel): stop reporting a fabricated index move",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "change_pct verified live as 0.0% from real prev_close, was +144.17% fabricated"
+    },
+    "1ffb8bb180686c46b748abc54d829c83518fe731": {
+      "short": "1ffb8bb",
+      "reason": "Trading Agent workstream — fix(session-panel): count \"today's ticks\" by the IST trading day",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-13/14 (session review log: items 15/19/25/26/27 fixes specced, approved and deployed; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "/health Today=0 verified against a real session boundary"
+    },
     "45499561f65e1160e3e75e55de32e0f1f2ea1962": {
       "short": "4549956",
       "reason": "Trading Agent workstream — feat(telemetry): include all historical option quote and snapshot tables in total tick count",
