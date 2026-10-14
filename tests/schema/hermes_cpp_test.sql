@@ -1,13 +1,16 @@
 -- Minimal, version-controlled schema for database-backed tests.
 --
--- Structure only: no rows, no production data. Nine tables - exactly what the suite
--- touches: the six ensure_test_schema() derives its _test copies from, plus the three the
--- fixtures write to directly. Loaded into a disposable CI MySQL service.
+-- Structure only: no rows, no production data. The tables the two test binaries actually
+-- touch: the six ensure_test_schema() derives its _test copies from, the three the fixtures
+-- write to directly, and the checklist/portal/analytics tables the audit and visitor suites
+-- exercise. Loaded into a disposable CI MySQL service.
 --
--- Deliberately pure DDL: no SET statements and no /*!...*/ directives. Those carry the
--- dumping session's state (sql_mode, time_zone, GTID), and an earlier version of this file
--- failed to load with "Variable 'sql_mode' can't be set to the value of 'NULL'" because a
--- matched pair of them was split by the filter.
+-- Pure DDL by design: no SET statements, no /*!...*/ directives and no DEFINER clauses.
+-- Those carry the dumping session's state; an earlier version failed with
+-- "Variable 'sql_mode' can't be set to the value of 'NULL'", and a DEFINER clause cannot
+-- be created by a restricted account.
+
+SET FOREIGN_KEY_CHECKS=0;
 
 CREATE TABLE `cpp_trade_reports` (
   `id` varchar(64) NOT NULL,
@@ -176,3 +179,188 @@ CREATE TABLE `upstox_live_paper_option_quotes` (
   KEY `idx_ulpoq_chain_ts` (`underlying`,`expiry`,`optionType`,`ts`),
   KEY `idx_ulpoq_contract_ts` (`contractSymbol`,`ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `project_checklist_items` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `grp` varchar(160) NOT NULL,
+  `grp_order` int NOT NULL,
+  `goal` varchar(300) NOT NULL DEFAULT '',
+  `item_order` int NOT NULL,
+  `item` varchar(600) NOT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'pending',
+  `note` varchar(500) NOT NULL DEFAULT '',
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  `instr` text,
+  `doneWhen` text,
+  `edition` varchar(8) NOT NULL DEFAULT 'v4',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=921 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `portal_users` (
+  `id` varchar(36) NOT NULL,
+  `email` varchar(190) NOT NULL,
+  `name` varchar(120) NOT NULL,
+  `role` varchar(24) NOT NULL DEFAULT 'operator',
+  `passwordEnc` text,
+  `profileEnc` text,
+  `credentialsEnc` text,
+  `createdAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  `updatedAt` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `IDX_097304fca6aaf020c7c75b0857` (`email`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE `analytics_visitors` (
+  `id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `active_lookup_hash` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ip_address` varchar(45) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ip_version` enum('IPv4','IPv6') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'IPv4',
+  `identity_generation` int unsigned NOT NULL DEFAULT '1',
+  `is_redacted` tinyint(1) NOT NULL DEFAULT '0',
+  `first_seen_at` datetime NOT NULL,
+  `last_seen_at` datetime NOT NULL,
+  `total_visits` int unsigned NOT NULL DEFAULT '1',
+  `total_page_views` int unsigned NOT NULL DEFAULT '1',
+  `first_user_agent` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `latest_user_agent` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `browser_name` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `browser_version` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `operating_system` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `os_version` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `device_type` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `device_family` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `referrer_first` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `referrer_latest` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `is_bot` tinyint(1) NOT NULL DEFAULT '0',
+  `bot_name` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `identity_confidence` enum('HIGH','MEDIUM','LOW') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'MEDIUM',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_active_lookup_hash` (`active_lookup_hash`),
+  KEY `idx_visitors_lookup` (`active_lookup_hash`,`is_redacted`),
+  KEY `idx_visitors_ip` (`ip_address`),
+  KEY `idx_visitors_last_seen` (`last_seen_at`),
+  KEY `idx_visitors_is_bot` (`is_bot`),
+  KEY `idx_visitors_is_redacted` (`is_redacted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `analytics_devices` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `visitor_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `device_signature` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `device_type` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `device_family` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `operating_system` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `operating_system_version` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `browser` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `browser_version` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `user_agent` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `language` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `accepted_languages` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `first_seen_at` datetime NOT NULL,
+  `last_seen_at` datetime NOT NULL,
+  `seen_count` int unsigned NOT NULL DEFAULT '1',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_visitor_device_sig` (`visitor_id`,`device_signature`),
+  KEY `idx_dev_visitor` (`visitor_id`),
+  KEY `idx_dev_browser` (`browser`),
+  KEY `idx_dev_os` (`operating_system`),
+  KEY `idx_dev_type` (`device_type`),
+  CONSTRAINT `fk_dev_visitor` FOREIGN KEY (`visitor_id`) REFERENCES `analytics_visitors` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=27568 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `analytics_sessions` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `visitor_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `session_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `first_seen_at` datetime NOT NULL,
+  `last_seen_at` datetime NOT NULL,
+  `page_count` int unsigned NOT NULL DEFAULT '1',
+  `duration_seconds` int unsigned NOT NULL DEFAULT '0',
+  `entry_page` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `exit_page` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `referrer` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `device_id` bigint DEFAULT NULL,
+  `location_id` bigint DEFAULT NULL,
+  `is_bot` tinyint(1) NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `session_key` (`session_key`),
+  UNIQUE KEY `uq_visitor_active_session` (`visitor_id`,`is_active`),
+  KEY `idx_sess_visitor` (`visitor_id`),
+  KEY `idx_sess_key` (`session_key`),
+  KEY `idx_sess_last_seen` (`last_seen_at`),
+  KEY `idx_sess_device` (`device_id`),
+  KEY `idx_sess_location` (`location_id`),
+  CONSTRAINT `fk_sess_device` FOREIGN KEY (`device_id`) REFERENCES `analytics_devices` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_sess_location` FOREIGN KEY (`location_id`) REFERENCES `analytics_locations` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_sess_visitor` FOREIGN KEY (`visitor_id`) REFERENCES `analytics_visitors` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=87 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `analytics_locations` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `visitor_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `country` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT 'Unknown',
+  `country_code` varchar(8) COLLATE utf8mb4_unicode_ci DEFAULT 'XX',
+  `region` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT 'Unknown',
+  `city` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT 'Unknown',
+  `postal_code` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `latitude` double DEFAULT NULL,
+  `longitude` double DEFAULT NULL,
+  `timezone` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `continent` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `isp` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `asn` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `source` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT 'Local GeoIP Database (MaxMind)',
+  `disclaimer` varchar(128) COLLATE utf8mb4_unicode_ci DEFAULT 'Approximate location derived from IP',
+  `looked_up_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `visitor_id` (`visitor_id`),
+  KEY `idx_loc_country` (`country`),
+  KEY `idx_loc_city` (`city`),
+  KEY `idx_loc_code` (`country_code`),
+  CONSTRAINT `fk_loc_visitor` FOREIGN KEY (`visitor_id`) REFERENCES `analytics_visitors` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=27568 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `analytics_page_visits` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `visitor_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `session_id` bigint NOT NULL,
+  `request_id` varchar(36) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `page_url` varchar(1024) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `path` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `query_string` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `page_title` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `referrer_url` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `http_method` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'GET',
+  `status_code` int NOT NULL DEFAULT '200',
+  `visited_at` datetime NOT NULL,
+  `response_time_ms` double NOT NULL DEFAULT '0',
+  `user_agent` varchar(512) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `browser_name` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `os_name` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `device_type` varchar(32) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `is_bot` tinyint(1) NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_pv_visitor` (`visitor_id`),
+  KEY `idx_pv_session` (`session_id`),
+  KEY `idx_pv_visited_at` (`visited_at`),
+  KEY `idx_pv_path` (`path`),
+  KEY `idx_pv_is_bot` (`is_bot`),
+  CONSTRAINT `fk_pv_session` FOREIGN KEY (`session_id`) REFERENCES `analytics_sessions` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_pv_visitor` FOREIGN KEY (`visitor_id`) REFERENCES `analytics_visitors` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=27568 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE `portal_user_sessions` (
+  `session_token` varchar(128) NOT NULL,
+  `user_id` varchar(36) NOT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` datetime NOT NULL,
+  PRIMARY KEY (`session_token`),
+  KEY `idx_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+SET FOREIGN_KEY_CHECKS=1;
