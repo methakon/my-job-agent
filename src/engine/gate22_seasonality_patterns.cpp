@@ -162,7 +162,11 @@ std::vector<SeasonalityPatternRecord> SeasonalityPatternEngine::analyze_archived
         size_t is_count = static_cast<size_t>(sorted_dates.size() * 0.80);
         if (is_count == 0 && !sorted_dates.empty()) is_count = 1;
 
+        // cppcheck-suppress containerOutOfBounds -- is_count is derived from sorted_dates.size()
+        // (80% of it) and is only raised to 1 when the vector is non-empty, so begin() + is_count
+        // is always within [begin(), end()]. cppcheck cannot bound the float multiply.
         std::set<std::string> is_dates(sorted_dates.begin(), sorted_dates.begin() + is_count);
+        // cppcheck-suppress containerOutOfBounds -- same expression, same bound as above.
         std::set<std::string> oos_dates(sorted_dates.begin() + is_count, sorted_dates.end());
 
         std::vector<double> all_returns;

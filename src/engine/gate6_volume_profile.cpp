@@ -76,6 +76,8 @@ VolumeProfileMetrics VolumeProfileEngine::compute_profile(
     size_t dn_idx = poc_idx;
 
     while (accumulated_va_vol < target_va_vol && (up_idx + 1 < sorted_bins.size() || dn_idx > 0)) {
+        // cppcheck-suppress containerOutOfBounds -- the ternary guard on this line bounds
+        // up_idx + 1 by sorted_bins.size() before the index is used.
         double up_vol = (up_idx + 1 < sorted_bins.size()) ? sorted_bins[up_idx + 1].second : 0.0;
         double dn_vol = (dn_idx > 0) ? sorted_bins[dn_idx - 1].second : 0.0;
 
