@@ -102,9 +102,16 @@ jobs:
       - name: Initialise the isolated test schema
         run: |
           mysql -h 127.0.0.1 -P 3306 -uroot -pci-root-pw hermes_cpp_test < tests/schema/hermes_cpp_test.sql
-          echo "tables loaded:"
+          # The suite creates the audit trigger its SCM tests depend on. With binary logging on -
+          # the container default - a non-SUPER account cannot create a trigger, so that would fail
+          # silently at the point of use. This is a throwaway database with no production data and
+          # no network exposure, so relaxing this one setting is the proportionate fix; granting
+          # the test account SUPER would defeat the point of a restricted account.
+          mysql -h 127.0.0.1 -P 3306 -uroot -pci-root-pw -e \
+            "SET GLOBAL log_bin_trust_function_creators = 1;"
+          echo "schema loaded, trigger creation enabled:"
           mysql -h 127.0.0.1 -P 3306 -uroot -pci-root-pw -N -e \
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hermes_cpp_test';"
+            "SELECT CONCAT(COUNT(*), ' tables') FROM information_schema.tables WHERE table_schema='hermes_cpp_test';"
 
       - name: Build Binary, Unit Tests and Regression Tests
         run: cmake --build build -j $(nproc)
