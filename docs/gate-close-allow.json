@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "c3857b1424c10dc47e97e915276284446aeb2b8a": {
+        "short": "c3857b1",
+        "reason": "Trading Agent workstream — fix(ci): make the test schema pure DDL so it loads in a fresh container",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (CI audit: version-controlled minimal test schema, verified before committing)",
+        "recorded": "2026-10-15",
+        "evidence": "verified by loading into a throwaway schema: exit 0 and 9/9 tables created"
+      },
       "5f6d325742cd3d58dc5438631e1b37155118d124": {
         "short": "5f6d325",
         "reason": "Trading Agent workstream — ci: provision the isolated MySQL service for database-backed tests",
