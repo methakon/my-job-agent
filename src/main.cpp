@@ -242,7 +242,8 @@ int main(int argc, char* argv[]) {
         // In-memory hot-path cache for open trades and portfolio state to eliminate DB queries from tick loop
         std::vector<UserTradeData> cached_open_trades;
         UserPortfolioData cached_portfolio = db_client->fetch_user_portfolio("cpp-portfolio-v1");
-        double cached_today_drawdown = db_client->fetch_today_session_drawdown();
+        // A reading that can say "I do not know". Never assume zero on failure.
+        auto cached_today_drawdown = db_client->fetch_today_session_drawdown();
         uint64_t last_cache_update_ticks = 0;
 
         auto refresh_trade_cache = [&]() {
@@ -432,7 +433,7 @@ int main(int argc, char* argv[]) {
 
                     double capital_in_hand = cached_portfolio.capital + cached_portfolio.netPnl;
                     std::string current_date_str = tick.raw_timestamp.length() >= 10 ? tick.raw_timestamp.substr(0, 10) : "";
-                    risk_engine.update_daily_risk_base(capital_in_hand, current_date_str, cached_today_drawdown);
+                    risk_engine.update_daily_risk_base(capital_in_hand, current_date_str, cached_today_drawdown.realized_loss_inr);
 
                     auto kelly_result = hermes::IndependentRiskEngine::calculate_kelly_lot_size("OFI_Microstructure_Breakout", symbol, side, entry_px, spot_px, capital_in_hand);
 
@@ -443,7 +444,7 @@ int main(int argc, char* argv[]) {
                         }
                     }
 
-                    double current_session_drawdown = std::max(cached_today_drawdown, risk_engine.get_cumulative_daily_loss());
+                    double current_session_drawdown = std::max(cached_today_drawdown.realized_loss_inr, risk_engine.get_cumulative_daily_loss());
 
                     auto veto = risk_engine.verify_order_proposal_with_margin(
                         symbol,
@@ -478,6 +479,17 @@ int main(int argc, char* argv[]) {
 
                     auto now_ns = std::chrono::high_resolution_clock::now().time_since_epoch().count();
                     std::string uuid = "dj-" + std::to_string(now_ns) + "-" + std::to_string(decision_seq.fetch_add(1));
+
+                    // Fail-closed daily-loss gate, enforced AT the order-authorization boundary.
+                    //
+                    // An unknown reading means the risk state could not be established: a failed
+                    // connection, a SQL error, an unreadable session. "I do not know" is not
+                    // permission to trade, and the old bare-double read could not express it -
+                    // every failure collapsed into 0.0, i.e. into authorization.
+                    if (hermes::IndependentRiskEngine::daily_loss_state_blocks_entries(cached_today_drawdown.known)) {
+                        veto.risk_approved = false;
+                        veto.veto_reason = "RISK_VETO_DAILY_LOSS_STATE_UNKNOWN (" + cached_today_drawdown.failure_reason + ")";
+                    }
 
                     if (veto.risk_approved) {
                         db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, side + "_" + option_kind, final_confidence, 0.05, "OFI_BULLISH_BREAKOUT_CONFIRMED", "{}");

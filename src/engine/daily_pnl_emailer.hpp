@@ -28,6 +28,11 @@ struct DailyPnLSummaryData {
     double final_capital_in_hand{100000.0};
     double today_realized_pnl{0.0};
     double today_realized_drawdown{0.0};
+    // Whether the figure above is a MEASURED value. When false the number is not evidence
+    // of zero loss - it means the reading could not be established, and the report must say
+    // so rather than printing a reassuring zero.
+    bool drawdown_reading_known{false};
+    std::string drawdown_failure_reason;
     double drawdown_limit_inr{5000.0}; // 5% of starting capital
     int trades_closed_today{0};
     std::vector<std::map<std::string, std::string>> closed_trades;

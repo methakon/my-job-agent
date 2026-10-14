@@ -1867,6 +1867,7 @@ void run_solid_and_acid_test_suite() {
         zero_trade_data.final_capital_in_hand = 100000.0;
         zero_trade_data.today_realized_pnl = 0.0;
         zero_trade_data.today_realized_drawdown = 0.0;
+        zero_trade_data.drawdown_reading_known = true;  // measured value, not an unknown reading
         zero_trade_data.drawdown_limit_inr = 5000.0;
         zero_trade_data.trades_closed_today = 0;
         zero_trade_data.open_positions_count = 35;
@@ -1906,6 +1907,7 @@ void run_solid_and_acid_test_suite() {
         trade_data.final_capital_in_hand = 101250.0;
         trade_data.today_realized_pnl = 1250.0;
         trade_data.today_realized_drawdown = 0.0;
+        trade_data.drawdown_reading_known = true;  // measured value, not an unknown reading
         trade_data.drawdown_limit_inr = 5000.0;
         trade_data.trades_closed_today = 1;
         trade_data.open_positions_count = 35;
@@ -2001,6 +2003,7 @@ void run_solid_and_acid_test_suite() {
         open_pos_data.final_capital_in_hand = 100000.0;
         open_pos_data.today_realized_pnl = 0.0;
         open_pos_data.today_realized_drawdown = 0.0;
+        open_pos_data.drawdown_reading_known = true;  // measured value, not an unknown reading
         open_pos_data.drawdown_limit_inr = 5000.0;
         open_pos_data.trades_closed_today = 0;
         open_pos_data.open_positions_count = 1;
@@ -2027,6 +2030,20 @@ void run_solid_and_acid_test_suite() {
 
         TEST("DPNL-06: DailyPnLEmailer renders open position exit progress and mandatory MTM drawdown caveat",
              text_ok && html_ok);
+
+        // The unknown state must render as unavailable, never as a reassuring zero. A silent
+        // ₹0.00 in this report is what let the broken control look healthy for as long as it did.
+        {
+            DailyPnLSummaryData unknown_dd = open_pos_data;
+            unknown_dd.drawdown_reading_known = false;
+            unknown_dd.drawdown_failure_reason = "DB_CONNECTION_UNAVAILABLE";
+            std::string u_text = DailyPnLEmailer::format_email_body(unknown_dd, false);
+            std::string u_html = DailyPnLEmailer::format_email_body(unknown_dd, true);
+            TEST("DPNL-07: an UNKNOWN daily-loss reading renders as UNAVAILABLE, never as a reassuring zero",
+                 u_text.find("UNAVAILABLE") != std::string::npos &&
+                 u_text.find("UNKNOWN") != std::string::npos &&
+                 u_html.find("UNKNOWN - NOT EVALUATED") != std::string::npos);
+        }
     }
 
     // Item DPNL-07: RoadmapDbClient::fetch_open_positions_with_exit_evaluation database query execution
@@ -2595,6 +2612,45 @@ void run_solid_and_acid_test_suite() {
 
         TEST("LSS-01: RoadmapDbClient::compute_live_session_status_telemetry computes real metrics and auditable one-liner",
              valid_phase && valid_rule && non_negative_metrics);
+    }
+
+    // Item 30.5: the daily-loss control must fail CLOSED, and isolation must not be
+    // defeatable by configuration. These are the two invariants whose absence let a broken
+    // gate read as a working one for as long as it did.
+    {
+        // 1. An unreachable database must yield UNKNOWN, never zero. Port 3399 is closed.
+        auto unreachable = std::make_shared<RoadmapDbClient>("127.0.0.1", 3399, "nobody", "wrong", "nonexistent");
+        auto bad_reading = unreachable->fetch_today_session_drawdown();
+        TEST("DLG-01: an unreachable database yields an UNKNOWN daily-loss reading, never a zero",
+             bad_reading.known == false && !bad_reading.failure_reason.empty());
+        TEST("DLG-02: a failed database connection cannot authorize paper entries (fail-closed)",
+             hermes::IndependentRiskEngine::daily_loss_state_blocks_entries(bad_reading.known) == true);
+        TEST("DLG-03: a known reading is not blocked by state alone (the gate is not stuck shut)",
+             hermes::IndependentRiskEngine::daily_loss_state_blocks_entries(true) == false);
+
+        // 2. Against a reachable database the reading must be KNOWN, or the gate above would
+        //    block everything forever and the "fail-closed" property would be untestable.
+        auto good_reading = db_client->fetch_today_session_drawdown();
+        TEST("DLG-04: against a reachable database the reading is KNOWN",
+             good_reading.known == true);
+
+        // 3. Isolation cannot fall back to production. With isolation ON every routed name is
+        //    a _test name; with it OFF the production names are used. The switch is the only
+        //    difference between the two, so a test run cannot silently address live tables.
+        auto iso_on = std::make_shared<RoadmapDbClient>("127.0.0.1", 3316, "u", "p", "isolated");
+        iso_on->set_test_isolation(true);
+        TEST("ISO-01: with isolation ON every routed table is an isolated _test table",
+             iso_on->trade_reports_table() == "cpp_trade_reports_test" &&
+             iso_on->portfolios_table() == "cpp_portfolios_test" &&
+             iso_on->strategy_config_table() == "cpp_strategy_config_test" &&
+             iso_on->strategy_config_audit_table() == "cpp_strategy_config_audit_test");
+
+        auto iso_off = std::make_shared<RoadmapDbClient>("127.0.0.1", 3316, "u", "p", "isolated");
+        iso_off->set_test_isolation(false);
+        TEST("ISO-02: with isolation OFF the production names are used, so the switch is the only difference",
+             iso_off->trade_reports_table() == "cpp_trade_reports" &&
+             iso_off->portfolios_table() == "cpp_portfolios" &&
+             iso_off->strategy_config_table() == "cpp_strategy_config");
     }
 
     db_client->cleanup_test_schema();

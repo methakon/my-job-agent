@@ -117,6 +117,14 @@ public:
         double current_capital_in_hand = 0.0
     );
 
+    // Fail-closed daily-loss gate.
+    //
+    // Returns true when new paper entries MUST be blocked. An UNKNOWN reading blocks: a
+    // failed connection, a SQL error or an unreadable session is not evidence of no loss,
+    // and treating it as such is how a risk control silently stops existing. Checked at the
+    // order-authorization boundary, immediately before a position can be created.
+    static bool daily_loss_state_blocks_entries(bool reading_known) { return !reading_known; }
+
     // G16-06: Feed Staleness Verification (STALE_FEED_VETO)
     static IndependentRiskVeto verify_feed_freshness(
         uint64_t tick_timestamp_ms,

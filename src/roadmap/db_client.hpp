@@ -111,6 +111,18 @@ struct UserPortfolioData {
     std::string executionMode;
 };
 
+// A daily-loss reading that can say "I do not know".
+//
+// The previous form returned a bare double whose failure value was 0.0, so a failed
+// connection, a SQL error and an empty result were indistinguishable from "no losses
+// today" - and all three authorized new entries. A risk input that fails open is worse
+// than a missing one, because nothing downstream can tell the difference.
+struct SessionDrawdownReading {
+    bool known = false;              // false => the reading could not be established
+    double realized_loss_inr = 0.0;  // meaningful ONLY when known is true
+    std::string failure_reason;      // why it is unknown; for the log and the journal
+};
+
 struct UserTradeData {
     std::string id;
     std::string instrument;
@@ -287,7 +299,9 @@ public:
     bool delete_trade_report_by_id(const std::string& trade_id);
     std::map<std::string, int> fetch_trade_counts_by_algo_source();
     size_t count_open_trades_for_symbol(const std::string& instrument);
-    double fetch_today_session_drawdown();
+    // Returns known=false on every failure path. Callers that authorize trading must
+    // treat unknown as BLOCKED, never as zero loss.
+    SessionDrawdownReading fetch_today_session_drawdown();
     int settle_expired_positions();
     void update_external_case_study_ltps();
 

@@ -133,11 +133,18 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
             }
         }
 
-        ss << "--- RISK & CIRCUIT BREAKER STATUS ---\n"
-           << "• Today Realized Loss : ₹" << std::fixed << std::setprecision(2) << data.today_realized_drawdown 
-           << " / ₹" << std::fixed << std::setprecision(2) << data.drawdown_limit_inr << " (5% Max Drawdown Ceiling)\n"
-           << "• Circuit Breaker     : " << (data.today_realized_drawdown >= data.drawdown_limit_inr ? "⚠️ TRIGGERED" : "✅ NORMAL (Within Limits)") << "\n"
-           << "• Active Open Positions: " << data.open_positions_count << "\n"
+        ss << "--- RISK & CIRCUIT BREAKER STATUS ---\n";
+        if (data.drawdown_reading_known) {
+            ss << "• Today Realized Loss : ₹" << std::fixed << std::setprecision(2) << data.today_realized_drawdown 
+               << " / ₹" << std::fixed << std::setprecision(2) << data.drawdown_limit_inr << " (5% Max Drawdown Ceiling)\n"
+               << "• Circuit Breaker     : " << (data.today_realized_drawdown >= data.drawdown_limit_inr ? "⚠️ TRIGGERED" : "✅ NORMAL (Within Limits)") << "\n";
+        } else {
+            // An unknown reading is not a passing one. Saying so is the whole point of the
+            // known/unknown split - a silent ₹0.00 here is what let the control stop existing.
+            ss << "• Today Realized Loss : UNAVAILABLE (" << data.drawdown_failure_reason << ")\n"
+               << "• Circuit Breaker     : UNKNOWN — daily-loss control could not be evaluated\n";
+        }
+        ss << "• Active Open Positions: " << data.open_positions_count << "\n"
            << "• Standing Risk Caveat : Note that unrealized mark-to-market P&L on legacy open positions\n"
            << "                         is NOT included in the daily realized drawdown calculation.\n\n"
            << "Security Notice: All credentials and OAuth tokens strictly excluded.\n"
@@ -255,8 +262,8 @@ std::string DailyPnLEmailer::format_email_body(const DailyPnLSummaryData& data, 
            << "    <p style=\"font-size:13.5px;margin:6px 0;\">"
            << "      • Today Realized Loss: <b>₹" << std::fixed << std::setprecision(2) << data.today_realized_drawdown << "</b> "
            << "      (Ceiling: ₹" << std::fixed << std::setprecision(2) << data.drawdown_limit_inr << " — 5% of ₹100,000)<br/>"
-           << "      • Circuit Breaker Status: <b style=\"color:" << (data.today_realized_drawdown >= data.drawdown_limit_inr ? "#cf222e" : "#1a7f37") << ";\">"
-           << (data.today_realized_drawdown >= data.drawdown_limit_inr ? "TRIGGERED" : "WITHIN LIMITS") << "</b><br/>"
+           << "      • Circuit Breaker Status: <b style=\"color:" << (!data.drawdown_reading_known ? "#e0a83c" : (data.today_realized_drawdown >= data.drawdown_limit_inr ? "#cf222e" : "#1a7f37")) << ";\">"
+           << (!data.drawdown_reading_known ? "UNKNOWN - NOT EVALUATED" : (data.today_realized_drawdown >= data.drawdown_limit_inr ? "TRIGGERED" : "WITHIN LIMITS")) << "</b><br/>"
            << "      • Active Open Positions: <b>" << data.open_positions_count << "</b>"
            << "    </p>"
            << "    <div class=\"caveat-box\">"
@@ -386,7 +393,10 @@ bool DailyPnLEmailer::send_daily_summary_email(
         data.starting_capital = (pf.capital > 0.0) ? pf.capital : 100000.0;
         data.final_capital_in_hand = data.starting_capital + pf.netPnl;
         data.today_realized_pnl = db_client_->fetch_today_session_realized_pnl(session_date);
-        data.today_realized_drawdown = db_client_->fetch_today_session_drawdown();
+        auto dd_reading = db_client_->fetch_today_session_drawdown();
+        data.today_realized_drawdown = dd_reading.realized_loss_inr;
+        data.drawdown_reading_known = dd_reading.known;
+        data.drawdown_failure_reason = dd_reading.failure_reason;
         data.closed_trades = db_client_->fetch_closed_trades_for_date(session_date);
         data.trades_closed_today = static_cast<int>(data.closed_trades.size());
         data.open_positions = db_client_->fetch_open_positions_with_exit_evaluation();

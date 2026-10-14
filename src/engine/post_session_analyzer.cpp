@@ -47,7 +47,12 @@ PostSessionAnalysisReport PostSessionAnalyzer::run_post_session_analysis(const s
     report.near_miss_count = dec_stats.near_miss_count;
 
     // Fetch closed trades and drawdown
-    report.realized_drawdown_inr = db_client_->fetch_today_session_drawdown();
+    auto dd_reading = db_client_->fetch_today_session_drawdown();
+    report.realized_drawdown_inr = dd_reading.realized_loss_inr;
+    if (!dd_reading.known) {
+        std::cerr << "\u26a0\ufe0f [PostSessionAnalyzer] Daily-loss reading UNKNOWN ("
+                  << dd_reading.failure_reason << ") - recorded drawdown is not a measured value.\n";
+    }
     report.trades_executed_count = 0; // Derived from today closed trades count
 
     // Generate analytical recommendations (STRICTLY ADVISORY - NEVER MUTATES LIVE PARAMETERS).

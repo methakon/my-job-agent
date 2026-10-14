@@ -1702,26 +1702,60 @@ size_t RoadmapDbClient::count_open_trades_for_symbol(const std::string& instrume
     return count;
 }
 
-double RoadmapDbClient::fetch_today_session_drawdown() {
+SessionDrawdownReading RoadmapDbClient::fetch_today_session_drawdown() {
+    // `known` starts false, so every failure path below returns without claiming a value.
+    // The old signature returned a bare double whose failure value was 0.0, which made a
+    // dead connection, a SQL error and an empty result all read as "no losses today".
+    SessionDrawdownReading reading;
+
     MYSQL* conn = pool_->acquire();
-    if (!conn) return 0.0;
-
-    double today_loss = 0.0;
-    std::string query = "SELECT IFNULL(SUM(CASE WHEN netPnl < 0 THEN ABS(netPnl) ELSE 0.0 END), 0.0) "
-                        "FROM " + trade_reports_table() + " WHERE status = 'CLOSED' AND DATE(closedAt) = CURRENT_DATE();";
-
-    if (mysql_query(conn, query.c_str()) == 0) {
-        MYSQL_RES* res = mysql_store_result(conn);
-        if (res) {
-            MYSQL_ROW row = mysql_fetch_row(res);
-            if (row && row[0]) {
-                try { today_loss = std::stod(row[0]); } catch (...) {}
-            }
-            mysql_free_result(res);
-        }
+    if (!conn) {
+        reading.failure_reason = "DB_CONNECTION_UNAVAILABLE";
+        return reading;
     }
+
+    // The session day is an IST day, and closedAt holds a UTC wall clock (@@global.time_zone
+    // is UTC): between 00:00 and 05:30 IST the UTC date is still the previous day, so a naive
+    // CURRENT_DATE() reads the wrong session. Same class as the tick-count and panel defects.
+    auto ist = hermes::MarketCalendar::get_ist_time();
+    char ist_day[16];
+    snprintf(ist_day, sizeof(ist_day), "%04d-%02d-%02d", ist.year, ist.month, ist.day);
+
+    // Finalized trades are CLOSED or ARCHIVED. Filtering on CLOSED alone matched zero rows on
+    // every call, so the loss gate read an empty set and could never fire.
+    std::string query = std::string("SELECT IFNULL(SUM(CASE WHEN netPnl < 0 THEN ABS(netPnl) ELSE 0.0 END), 0.0) ")
+                        + "FROM " + trade_reports_table() + " "
+                        + "WHERE status IN ('CLOSED','ARCHIVED') "
+                        + "AND DATE(closedAt + INTERVAL 330 MINUTE) = '" + std::string(ist_day) + "';";
+
+    if (mysql_query(conn, query.c_str()) != 0) {
+        reading.failure_reason = std::string("SQL_ERROR: ") + mysql_error(conn);
+        pool_->release(conn);
+        return reading;
+    }
+
+    MYSQL_RES* res = mysql_store_result(conn);
+    if (!res) {
+        reading.failure_reason = "NO_RESULT_SET";
+        pool_->release(conn);
+        return reading;
+    }
+
+    MYSQL_ROW row = mysql_fetch_row(res);
+    if (row && row[0]) {
+        try {
+            reading.realized_loss_inr = std::stod(row[0]);
+            reading.known = true;
+        } catch (...) {
+            reading.failure_reason = "UNPARSEABLE_VALUE";
+        }
+    } else {
+        reading.failure_reason = "EMPTY_RESULT_ROW";
+    }
+
+    mysql_free_result(res);
     pool_->release(conn);
-    return today_loss;
+    return reading;
 }
 
 int RoadmapDbClient::settle_expired_positions() {
