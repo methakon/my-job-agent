@@ -1777,7 +1777,8 @@ SessionDrawdownReading RoadmapDbClient::fetch_today_session_drawdown() {
     std::string query = std::string("SELECT IFNULL(SUM(CASE WHEN netPnl < 0 THEN ABS(netPnl) ELSE 0.0 END), 0.0) ")
                         + "FROM " + trade_reports_table() + " "
                         + "WHERE status IN ('CLOSED','ARCHIVED') "
-                        + "AND DATE(closedAt + INTERVAL 330 MINUTE) = '" + std::string(ist_day) + "';";
+                        + "AND closedAt >= ('" + std::string(ist_day) + "' - INTERVAL 330 MINUTE) "
+                        + "AND closedAt < ('" + std::string(ist_day) + "' - INTERVAL 330 MINUTE + INTERVAL 1 DAY);";
 
     if (mysql_query(conn, query.c_str()) != 0) {
         reading.failure_reason = std::string("SQL_ERROR: ") + mysql_error(conn);
@@ -1925,7 +1926,8 @@ std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     snprintf(ist_day, sizeof(ist_day), "%04d-%02d-%02d", ist.year, ist.month, ist.day);
 
     std::string query = std::string("SELECT ")
-        + "(SELECT COUNT(*) FROM fnf_market_snapshots WHERE DATE(createdAt + INTERVAL 330 MINUTE) = '" + ist_day + "') AS today_ticks, "
+        + "(SELECT COUNT(*) FROM fnf_market_snapshots WHERE createdAt >= ('" + ist_day + "' - INTERVAL 330 MINUTE) "
+          "AND createdAt < ('" + ist_day + "' - INTERVAL 330 MINUTE + INTERVAL 1 DAY)) AS today_ticks, "
         + "(SELECT IFNULL(SUM(table_rows), 0) FROM information_schema.tables WHERE table_schema = DATABASE() AND (table_name LIKE '%option_quotes%' OR table_name LIKE '%market_snapshots%')) AS total_ticks;";
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -2401,20 +2403,21 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
         "  t.instrument AS instrument_key, "
         "  SUBSTRING_INDEX(t.instrument, '|', -1) AS symbol, "
         "  'day' AS interval_name, "
-        "  DATE_FORMAT(MIN(t.ts), '%Y-%m-%d 00:00:00') AS timestamp, "
-        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts + INTERVAL 330 MINUTE) = " + safe_date + " AND price > 0 ORDER BY ts ASC LIMIT 1) AS open, "
+        "  DATE_FORMAT(MIN(t.ts) + INTERVAL 330 MINUTE, '%Y-%m-%d 00:00:00') AS timestamp, "
+        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND ts >= (" + safe_date + " - INTERVAL 330 MINUTE) AND ts < (" + safe_date + " - INTERVAL 330 MINUTE + INTERVAL 1 DAY) AND price > 0 ORDER BY ts ASC LIMIT 1) AS open, "
         "  MAX(t.price) AS high, "
         "  MIN(t.price) AS low, "
-        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND DATE(ts + INTERVAL 330 MINUTE) = " + safe_date + " AND price > 0 ORDER BY ts DESC LIMIT 1) AS close, "
+        "  (SELECT price FROM fnf_market_snapshots WHERE instrument = t.instrument AND ts >= (" + safe_date + " - INTERVAL 330 MINUTE) AND ts < (" + safe_date + " - INTERVAL 330 MINUTE + INTERVAL 1 DAY) AND price > 0 ORDER BY ts DESC LIMIT 1) AS close, "
         "  0 AS volume, "
         "  0 AS open_interest, "
-        "  NOW(6) AS ingested_at "
+        "  UTC_TIMESTAMP(6) AS ingested_at "
         "FROM fnf_market_snapshots t "
-        "WHERE DATE(t.ts) = " + safe_date + " AND t.price > 0 "
+        "WHERE t.ts >= (" + safe_date + " - INTERVAL 330 MINUTE) "
+        "AND t.ts < (" + safe_date + " - INTERVAL 330 MINUTE + INTERVAL 1 DAY) AND t.price > 0 "
         "GROUP BY t.instrument "
         "HAVING MAX(t.price) > MIN(t.price) "
         "ON DUPLICATE KEY UPDATE "
-        "  open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), ingested_at=NOW(6);";
+        "  open=VALUES(open), high=VALUES(high), low=VALUES(low), close=VALUES(close), ingested_at=UTC_TIMESTAMP(6);";
 
     uint64_t affected = 0;
     if (mysql_query(conn, rollup_sql.c_str()) == 0) {
@@ -2438,9 +2441,37 @@ uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& bou
     std::string copy_sql = 
         "INSERT IGNORE INTO fnf_market_snapshots_history "
         "(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt) "
-        "SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, NOW() "
+        "SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, UTC_TIMESTAMP() "
         "FROM fnf_market_snapshots "
-        "WHERE DATE(ts + INTERVAL 330 MINUTE) < " + safe_date + ";";
+        // Preview and DELETE share one predicate so the count always describes the delete.
+        // DATE(ts + 330m) < D is exactly ts < (D - 330m): the column stays bare, so an index on
+        // ts can be used, and the boundary is computed once instead of per row.
+        "WHERE ts < (" + safe_date + " - INTERVAL 330 MINUTE);";
+
+    // Item 3: a read-only preview of exactly what the DELETE will remove, evaluated with the
+    // SAME predicate, before anything is copied or deleted. It fails closed: a delete whose size
+    // cannot be established does not run, because an unmeasured destructive statement on a shared
+    // table is the class of defect this review exists to remove.
+    uint64_t preview_count = 0;
+    {
+        std::string count_sql = "SELECT COUNT(*) FROM fnf_market_snapshots "
+                                "WHERE ts < (" + safe_date + " - INTERVAL 330 MINUTE);";
+        if (mysql_query(conn, count_sql.c_str()) != 0) {
+            std::cerr << "❌ [RoadmapDbClient] archive preview failed, refusing to delete: "
+                      << mysql_error(conn) << "\n";
+            pool_->release(conn);
+            return 0;
+        }
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) preview_count = std::strtoull(row[0], nullptr, 10);
+            mysql_free_result(res);
+        }
+    }
+    std::cout << "🔎 [RoadmapDbClient] Archival preview: " << preview_count
+              << " row(s) fall before " << safe_date << " 00:00 IST"
+              << "  (equivalent to ts < " << safe_date << " - 330 minutes)\n";
 
     uint64_t copied = 0;
     if (mysql_query(conn, copy_sql.c_str()) == 0) {
@@ -2452,10 +2483,14 @@ uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& bou
         return 0;
     }
 
-    std::string delete_sql = "DELETE FROM fnf_market_snapshots WHERE DATE(ts + INTERVAL 330 MINUTE) < " + safe_date + ";";
+    std::string delete_sql = "DELETE FROM fnf_market_snapshots WHERE ts < (" + safe_date + " - INTERVAL 330 MINUTE);";
     if (mysql_query(conn, delete_sql.c_str()) == 0) {
         out_deleted = mysql_affected_rows(conn);
         std::cout << "✅ [RoadmapDbClient] Cleaned live snapshots: " << out_deleted << " row(s) purged from live table.\n";
+        if (out_deleted != preview_count) {
+            std::cerr << "⚠️ [RoadmapDbClient] archival mismatch: previewed " << preview_count
+                      << " but removed " << out_deleted << " - rows changed between preview and delete\n";
+        }
     } else {
         std::cerr << "❌ [RoadmapDbClient] archive purge error: " << mysql_error(conn) << "\n";
     }
@@ -3426,7 +3461,8 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_closed_tr
     std::string q = "SELECT instrument, side, quantity, entryPrice, exitPrice, netPnl, "
                     "DATE_FORMAT(orderedAt, '%H:%i:%s'), DATE_FORMAT(closedAt, '%H:%i:%s') "
                     "FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED') "
-                    "AND DATE(closedAt + INTERVAL 330 MINUTE) = " + safe_date + " "
+                    "AND closedAt >= (" + safe_date + " - INTERVAL 330 MINUTE) "
+                    "AND closedAt < (" + safe_date + " - INTERVAL 330 MINUTE + INTERVAL 1 DAY) "
                     "ORDER BY closedAt ASC;";
 
     if (mysql_query(conn, q.c_str()) == 0) {
@@ -3532,7 +3568,11 @@ double RoadmapDbClient::fetch_today_session_realized_pnl(const std::string& sess
     std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
     // closedAt is a UTC DATETIME (raw wall clock), so it must be shifted into IST before a date
     // is taken, and the predicate must cover both finalized states.
-    std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED') AND DATE(closedAt + INTERVAL 330 MINUTE) = " + safe_date + ";";
+    // Closed on an IST calendar day = closed within that day's half-open UTC interval.
+    std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " "
+                    "WHERE status IN ('CLOSED','ARCHIVED') "
+                    "AND closedAt >= (" + safe_date + " - INTERVAL 330 MINUTE) "
+                    "AND closedAt < (" + safe_date + " - INTERVAL 330 MINUTE + INTERVAL 1 DAY);";
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {

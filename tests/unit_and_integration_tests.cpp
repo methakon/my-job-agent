@@ -2932,6 +2932,111 @@ void run_solid_and_acid_test_suite() {
         }
     }
 
+
+    // Items 3 and 5: the direct settlement path, re-entry containment for corrected records, and
+    // the archival boundary. Synthetic rows, isolated database only.
+    {
+        MYSQL* raw_db = mysql_init(nullptr);
+        if (raw_db && mysql_real_connect(raw_db, db_host.c_str(), db_user.c_str(), db_pass.c_str(),
+                                         db_name.c_str(), db_port, nullptr, 0)) {
+            mysql_query(raw_db, "SET SESSION time_zone = '+05:30'");
+            auto exec = [&](const std::string& sql) { return mysql_query(raw_db, sql.c_str()) == 0; };
+            auto scalar = [&](const std::string& sql) -> double {
+                if (mysql_query(raw_db, sql.c_str()) != 0) return -1.0;
+                MYSQL_RES* r = mysql_store_result(raw_db); if (!r) return -1.0;
+                MYSQL_ROW row = mysql_fetch_row(r); double v = -1.0;
+                if (row && row[0]) { try { v = std::stod(row[0]); } catch (...) {} }
+                mysql_free_result(r); return v;
+            };
+            auto text = [&](const std::string& sql) -> std::string {
+                if (mysql_query(raw_db, sql.c_str()) != 0) return "ERR";
+                MYSQL_RES* r = mysql_store_result(raw_db); if (!r) return "ERR";
+                MYSQL_ROW row = mysql_fetch_row(r);
+                std::string v = (row && row[0]) ? row[0] : "NULL";
+                mysql_free_result(r); return v;
+            };
+
+            // ---- item 5a: the DIRECT settlement path (close_paper_trade), not the settle path ---
+            exec("DELETE FROM cpp_trade_reports_test;");
+            exec("DELETE FROM cpp_portfolios_test;");
+            exec("INSERT INTO cpp_portfolios_test (id,label,capital,deployed,netPnl,autoTradeEnabled,executionMode) "
+                 "VALUES ('cpp-portfolio-v1','direct-close-path',100000.00,0.00,0.00,1,'PAPER');");
+            bool seeded = exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                 "exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                 "('TEST-SET-1','us1','SENSEX26100172700CE (BSE_FO|4)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                 "'OPEN','2026-10-01 09:30:00','2026-10-01 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+            bool closed_ok = db_client->close_paper_trade("TEST-SET-1", 110.0, 12345.0);
+            TEST("SET-01: close_paper_trade() closes the trade through the direct path",
+                 seeded && closed_ok &&
+                 text("SELECT status FROM cpp_trade_reports_test WHERE id='TEST-SET-1'") == "CLOSED");
+            TEST("SET-02: the direct close path does NOT move the operator ceiling",
+                 std::abs(scalar("SELECT ceiling FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1'") - 100000.00) < 0.001);
+            double finalized = scalar("SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports_test "
+                                      "WHERE status IN ('CLOSED','ARCHIVED')");
+            TEST("SET-03: it refreshes netPnl from finalized rows, exactly once",
+                 std::abs(scalar("SELECT netPnl FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1'") - finalized) < 0.01);
+
+            // ---- item 5b: corrected records cannot re-enter ------------------------------------
+            // The 23 corrected rows are ARCHIVED_STALE_SOURCED. They must be invisible to the
+            // open-position, exit-evaluation and order-eligibility paths - and, one layer lower,
+            // their idempotency key must still be occupied so the same signal cannot be replayed.
+            exec("DELETE FROM cpp_trade_reports_test;");
+            exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                 "exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                 "('TEST-RE-1','ur1','SENSEX26100172800CE (BSE_FO|5)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                 "'ARCHIVED_STALE_SOURCED','2026-09-30 12:44:42','2026-09-30 12:44:42.000000','OFI_Microstructure_Breakout','PAPER');");
+            TEST("REENTRY-01: a corrected record is not counted as an open position",
+                 db_client->fetch_open_positions_count() == 0);
+            TEST("REENTRY-02: it is absent from the exit-evaluation set",
+                 db_client->fetch_open_positions_with_exit_evaluation().empty());
+            TEST("REENTRY-03: it does not block a new entry for its own instrument",
+                 db_client->count_open_trades_for_symbol("SENSEX26100172800CE (BSE_FO|5)") == 0);
+            bool duplicate_refused = !exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, "
+                 "entryPrice, exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                 "('TEST-RE-2','ur2','SENSEX26100172800CE (BSE_FO|5)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                 "'OPEN','2026-09-30 12:44:42','2026-09-30 12:44:42.000000','OFI_Microstructure_Breakout','PAPER');");
+            TEST("REENTRY-04: replaying its signal is refused by the idempotency index",
+                 duplicate_refused);
+            TEST("REENTRY-05: the refusal is the constraint, not a filter - the row is genuinely there",
+                 scalar("SELECT COUNT(*) FROM cpp_trade_reports_test") == 1);
+
+            // ---- item 3: the archival boundary --------------------------------------------------
+            // For an IST day D the UTC cut is (D - 330m). A row exactly AT the cut is NOT before it,
+            // so it stays; one second earlier goes. Both forms of the predicate must agree.
+            exec("DELETE FROM fnf_market_snapshots;");
+            // id is a required varchar(36) uuid on this table, not an auto-increment.
+            bool snap_seeded = exec("INSERT INTO fnf_market_snapshots (id, instrument, price, volume, ts, createdAt) VALUES "
+                 "('archtest-0001','ARCHTEST|1',10.0,1,('2026-10-15' - INTERVAL 330 MINUTE) - INTERVAL 1 SECOND, UTC_TIMESTAMP()),"
+                 "('archtest-0002','ARCHTEST|2',10.0,1,('2026-10-15' - INTERVAL 330 MINUTE), UTC_TIMESTAMP()),"
+                 "('archtest-0003','ARCHTEST|3',10.0,1,('2026-10-15' - INTERVAL 330 MINUTE) + INTERVAL 1 SECOND, UTC_TIMESTAMP());");
+            double range_form = scalar("SELECT COUNT(*) FROM fnf_market_snapshots "
+                                       "WHERE ts < ('2026-10-15' - INTERVAL 330 MINUTE)");
+            double date_form  = scalar("SELECT COUNT(*) FROM fnf_market_snapshots "
+                                       "WHERE DATE(ts + INTERVAL 330 MINUTE) < '2026-10-15'");
+            TEST("ARCH-01: the sargable range and the DATE() form select an identical set",
+                 snap_seeded && range_form == date_form && range_form == 1.0);
+            TEST("ARCH-02: the boundary is exact - the row AT the cut is retained",
+                 scalar("SELECT COUNT(*) FROM fnf_market_snapshots WHERE ts = ('2026-10-15' - INTERVAL 330 MINUTE)") == 1.0);
+            TEST("ARCH-03: and the row one second earlier is the one selected for removal",
+                 text("SELECT instrument FROM fnf_market_snapshots "
+                      "WHERE ts < ('2026-10-15' - INTERVAL 330 MINUTE)") == "ARCHTEST|1");
+            // the real function, on isolated rows only - never against production
+            uint64_t removed = 0;
+            db_client->archive_market_snapshots_before("2026-10-15", removed);
+            TEST("ARCH-04: the archival removes exactly what its preview counted",
+                 removed == 1);
+            TEST("ARCH-05: rows at or after the boundary survive",
+                 scalar("SELECT COUNT(*) FROM fnf_market_snapshots") == 2.0);
+
+            exec("DELETE FROM fnf_market_snapshots;");
+            exec("DELETE FROM fnf_market_snapshots_history WHERE instrument LIKE 'ARCHTEST|%';");
+            exec("DELETE FROM cpp_trade_reports_test;");
+            mysql_close(raw_db);
+        } else {
+            TEST("SET/REENTRY/ARCH setup: raw connection available", false);
+        }
+    }
+
     db_client->cleanup_test_schema();
 
     std::cout << "===================================================================\n";
