@@ -1,5 +1,29 @@
 {
   "exemptions": {
+    "21cb0bff88a3132af2cb9069c265818bd57f0a20": {
+      "short": "21cb0bf",
+      "reason": "Trading Agent workstream — fix(feed): remove the fail-open stale-data fallback",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-14 (session review log, item 30: fail-open stale-data fallback removal, NIFTY50 expiry parsing correction and honest no-quote MTM specced, approved and verified; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "suite 178/0; the stale reader and its caller deleted, so no path can replay upstox_live_paper_option_quotes into the decision pipeline"
+    },
+    "fade840597f8bcafa62f04ca662695eefd0c6c25": {
+      "short": "fade840",
+      "reason": "Trading Agent workstream — fix(expiry): read the expiry from a valid date window, not the first digit run",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-14 (session review log, item 30: fail-open stale-data fallback removal, NIFTY50 expiry parsing correction and honest no-quote MTM specced, approved and verified; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "suite 183/0; EXP-01j..n cover NIFTY50-shaped symbols, 2 of the 5 fail against the old parser; EXP-01n asserts all 23 production symbols"
+    },
+    "7e36d8650d25ebc5881719ffe5da3bffc8074281": {
+      "short": "7e36d86",
+      "reason": "Trading Agent workstream — fix(mtm): show \"no live quote\" instead of substituting entry price",
+      "workstream": "trading-agent-roadmap",
+      "authority": "operator directive 2026-10-14 (session review log, item 30: fail-open stale-data fallback removal, NIFTY50 expiry parsing correction and honest no-quote MTM specced, approved and verified; operator confirmed go on 2026-10-14)",
+      "recorded": "2026-10-14",
+      "evidence": "suite 188/0; MTM-01a..e pin the quote-presence semantics without a database; lookup_ltp_from_map delegates so its three other call sites are unchanged"
+    },
     "06d33a8582c2b3fea1bce97c22673dc18c0560d1": {
       "short": "06d33a8",
       "reason": "Trading Agent workstream — fix(broker-feed): enforce 03:30 IST token fail-closed cutoff and FYERS WebSocket handshake auth_token",
