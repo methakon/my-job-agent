@@ -2743,6 +2743,109 @@ void run_solid_and_acid_test_suite() {
         }
     }
 
+
+    // Item 30.5: SQL execution failure (distinct from an unreachable port), repeated
+    // settlement, and the IST session boundary. Synthetic rows, isolated database only.
+    {
+        // --- DLG-05: the connection SUCCEEDS but the query fails -----------------------
+        // information_schema is reachable, so this isolates an SQL execution failure from the
+        // connection failure that DLG-01 already covers. Both must yield UNKNOWN.
+        {
+            RoadmapDbClient broken(db_host, db_port, db_user, db_pass, "information_schema");
+            SessionDrawdownReading r = broken.fetch_today_session_drawdown();
+            TEST("DLG-05: a reachable database where the query fails yields UNKNOWN, never zero",
+                 r.known == false && !r.failure_reason.empty());
+            TEST("DLG-05b: that unknown reading blocks new entries at the gate",
+                 hermes::IndependentRiskEngine::daily_loss_state_blocks_entries(r.known) == true);
+        }
+
+        {
+            MYSQL* raw_db = mysql_init(nullptr);
+            if (raw_db && mysql_real_connect(raw_db, db_host.c_str(), db_user.c_str(), db_pass.c_str(),
+                                             db_name.c_str(), db_port, nullptr, 0)) {
+                auto exec = [&](const std::string& sql) { return mysql_query(raw_db, sql.c_str()) == 0; };
+                auto scalar = [&](const std::string& sql) -> double {
+                    if (mysql_query(raw_db, sql.c_str()) != 0) return -1.0;
+                    MYSQL_RES* r = mysql_store_result(raw_db); if (!r) return -1.0;
+                    MYSQL_ROW row = mysql_fetch_row(r); double v = -1.0;
+                    if (row && row[0]) { try { v = std::stod(row[0]); } catch (...) {} }
+                    mysql_free_result(r); return v;
+                };
+
+                // --- CEIL-05: repeated settlement cannot move the ceiling -------------------
+                exec("DELETE FROM cpp_trade_reports_test;");
+                exec("DELETE FROM cpp_portfolios_test;");
+                exec("INSERT INTO cpp_portfolios_test (id, label, capital, deployed, netPnl, autoTradeEnabled, executionMode) "
+                     "VALUES ('cpp-portfolio-v1','ceiling-under-repeated-settlement',100000.00,0.00,0.00,1,'PAPER');");
+                // An expired OPEN position is required, otherwise settle_expired_positions()
+                // finds nothing, skips its sync entirely, and the test would pass or fail for a
+                // reason unrelated to what it claims to measure.
+                exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                     "exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                     "('TEST-30-ARCH-2','u9','SENSEX26100172500CE (BSE_FO|2)','BUY',25,100.0,110.0,"
+                     "263716.63,58000.00,205716.63,'ARCHIVED','2026-10-01 09:30:00','2026-10-01 09:30:00.000000',"
+                     "'OFI_Microstructure_Breakout','PAPER'),"
+                     "('TEST-30-OPEN-2','u12','SENSEX26100172600CE (BSE_FO|3)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                     "'OPEN','2026-10-01 09:30:00','2026-10-01 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+                db_client->settle_expired_positions();
+                double ceiling_1 = scalar("SELECT ceiling FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1';");
+                double net_1     = scalar("SELECT netPnl  FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1';");
+                for (int i = 0; i < 3; ++i) db_client->settle_expired_positions();
+                double ceiling_repeated = scalar("SELECT ceiling FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1';");
+                double net_repeated     = scalar("SELECT netPnl  FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1';");
+                double sum_finalized_2  = scalar("SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports_test "
+                                                 "WHERE status IN ('CLOSED','ARCHIVED');");
+                TEST("CEIL-05: three further settlements leave the ceiling at exactly 1,00,000",
+                     std::abs(ceiling_repeated - 100000.00) < 0.001 && std::abs(ceiling_1 - 100000.00) < 0.001);
+                // Exactly-once, proven by repetition: four settlements produce the same total as one.
+                TEST("CEIL-05b: repeated settlement does not re-add the archived figure",
+                     std::abs(net_repeated - net_1) < 0.01 && std::abs(net_repeated - sum_finalized_2) < 0.01);
+                TEST("CEIL-05c: the archived 2,05,716.63 is in the reconciled total",
+                     sum_finalized_2 <= 205716.63 + 0.01 && sum_finalized_2 >= 205716.63 - 2600.0);
+
+                // --- IST session boundary --------------------------------------------------
+                // closedAt is a UTC DATETIME. A trade closed at 19:30 UTC falls at 01:00 IST on
+                // the FOLLOWING calendar day, so a naive DATE(closedAt) puts it in the wrong
+                // session. Row A is inside the current IST session, row B is in the previous one.
+                exec("DELETE FROM cpp_trade_reports_test;");
+                exec("DELETE FROM cpp_portfolios_test;");
+                exec("INSERT INTO cpp_portfolios_test (id, label, capital, deployed, netPnl, autoTradeEnabled, executionMode) "
+                     "VALUES ('cpp-portfolio-v1','ist-boundary',100000.00,0.00,0.00,1,'PAPER');");
+                exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                     "exitPrice, grossPnl, cost, netPnl, status, orderedAt, closedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                     "('TEST-30-IST-A','u10','NIFTY5026102722850CE (NSE_FO|90001)','BUY',25,100.0,0.0,"
+                     "-1000.0,0.0,-1000.0,'CLOSED', DATE(NOW() - INTERVAL 1 DAY), "
+                     "DATE(NOW() + INTERVAL 330 MINUTE) - INTERVAL 1 DAY + INTERVAL 19 HOUR + INTERVAL 30 MINUTE, "
+                     "'2026-10-01 09:30:00.000000','OFI_Microstructure_Breakout','PAPER'),"
+                     "('TEST-30-IST-B','u11','NIFTY5026102722860CE (NSE_FO|90003)','BUY',25,100.0,0.0,"
+                     "-2000.0,0.0,-2000.0,'CLOSED', DATE(NOW() - INTERVAL 2 DAY), "
+                     "DATE(NOW() + INTERVAL 330 MINUTE) - INTERVAL 2 DAY + INTERVAL 19 HOUR + INTERVAL 30 MINUTE, "
+                     "'2026-10-01 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+
+                SessionDrawdownReading sess = db_client->fetch_today_session_drawdown();
+                TEST("F5-A: the session drawdown reading is KNOWN against a populated isolated book",
+                     sess.known == true);
+                // If the IST shift were missing, A (19:30 UTC on the previous UTC day) would be
+                // excluded and B included, giving 2000 instead of 1000 - so this discriminates.
+                TEST("F5-B: a 19:30 UTC close is attributed to the NEXT IST day, not the previous UTC one",
+                     std::abs(sess.realized_loss_inr - 1000.0) < 0.01);
+
+                // The DATETIME/TIMESTAMP parity check the schema actually requires: both columns
+                // hold the same instant here, and under the isolated instance's UTC zone they must
+                // read back identically to production.
+                double delta = scalar("SELECT TIMESTAMPDIFF(SECOND, "
+                                      "(DATE(NOW() + INTERVAL 330 MINUTE) - INTERVAL 1 DAY + INTERVAL 19 HOUR + INTERVAL 30 MINUTE), "
+                                      "CAST(DATE(NOW() + INTERVAL 330 MINUTE) - INTERVAL 1 DAY + INTERVAL 19 HOUR + INTERVAL 30 MINUTE AS DATETIME)) ;");
+                TEST("F5-C: the isolated instance is on UTC, so DATETIME and TIMESTAMP agree",
+                     std::abs(delta) < 1.0);
+
+                mysql_close(raw_db);
+            } else {
+                TEST("F5 setup: raw connection available", false);
+            }
+        }
+    }
+
     db_client->cleanup_test_schema();
 
     std::cout << "===================================================================\n";

@@ -538,7 +538,9 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
         }
     }
 
-    std::string closed_q = "SELECT IFNULL(SUM(grossPnl), 0.0), IFNULL(SUM(cost), 0.0), IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED';";
+    // Finalized = CLOSED or ARCHIVED. Filtering on CLOSED alone matched zero rows, so this
+    // summed an empty set and the panel reported ₹0.00 against a book with real P&L.
+    std::string closed_q = "SELECT IFNULL(SUM(grossPnl), 0.0), IFNULL(SUM(cost), 0.0), IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED');";
     if (mysql_query(conn, closed_q.c_str()) == 0) {
         MYSQL_RES* res_c = mysql_store_result(conn);
         if (res_c) {
@@ -3383,10 +3385,13 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_closed_tr
     MYSQL* conn = pool_->acquire();
     if (!conn) return trades;
 
-    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
+    // Defaulting to CURRENT_DATE() would take the UTC date, which between 00:00 and 05:30 IST
+    // is still the previous session. The fallback is the IST day; callers pass one explicitly.
+    std::string safe_date = session_date.empty() ? "DATE(NOW() + INTERVAL 330 MINUTE)" : ("'" + escape_string(conn, session_date) + "'");
     std::string q = "SELECT instrument, side, quantity, entryPrice, exitPrice, netPnl, "
                     "DATE_FORMAT(orderedAt, '%H:%i:%s'), DATE_FORMAT(closedAt, '%H:%i:%s') "
-                    "FROM " + trade_reports_table() + " WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + " "
+                    "FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED') "
+                    "AND DATE(closedAt + INTERVAL 330 MINUTE) = " + safe_date + " "
                     "ORDER BY closedAt ASC;";
 
     if (mysql_query(conn, q.c_str()) == 0) {
@@ -3489,8 +3494,10 @@ double RoadmapDbClient::fetch_today_session_realized_pnl(const std::string& sess
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0.0;
 
-    std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
-    std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + ";";
+    std::string safe_date = session_date.empty() ? "DATE(NOW() + INTERVAL 330 MINUTE)" : ("'" + escape_string(conn, session_date) + "'");
+    // closedAt is a UTC DATETIME (raw wall clock), so it must be shifted into IST before a date
+    // is taken, and the predicate must cover both finalized states.
+    std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED') AND DATE(closedAt + INTERVAL 330 MINUTE) = " + safe_date + ";";
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
