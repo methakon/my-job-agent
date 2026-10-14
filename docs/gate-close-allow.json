@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "6e62b68f0c56d4eddf88779202f3e23656828a60": {
+        "short": "6e62b68",
+        "reason": "Trading Agent workstream — fix(ci): complete the test schema, 17 tables, clean load",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (CI audit: version-controlled minimal test schema for the disposable CI database)",
+        "recorded": "2026-10-15",
+        "evidence": "verified by loading into a throwaway database as root and as the restricted account: 17/17 tables, zero errors"
+      },
       "c3857b1424c10dc47e97e915276284446aeb2b8a": {
         "short": "c3857b1",
         "reason": "Trading Agent workstream — fix(ci): make the test schema pure DDL so it loads in a fresh container",
