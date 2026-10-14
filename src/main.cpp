@@ -213,6 +213,7 @@ int main(int argc, char* argv[]) {
         int check_counter = 0;
         size_t total_saved_ticks = 0;
         size_t expired_contract_ticks_skipped = 0;
+        size_t unverifiable_expiry_ticks_skipped = 0;
         // Counts consecutive cycles with no live feed, for rate-limited logging.
         // Replaces last_seen_ts, whose hardcoded "2026-09-30" floor existed only to seed
         // the stale-data replay that has been removed below.

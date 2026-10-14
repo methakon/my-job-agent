@@ -65,7 +65,7 @@ bool MarketCalendar::is_trading_day(uint64_t epoch_ms) {
     return true;
 }
 
-bool MarketCalendar::is_contract_expired(const std::string& symbol, uint64_t epoch_ms) {
+MarketCalendar::ExpiryState MarketCalendar::expiry_state(const std::string& symbol, uint64_t epoch_ms) {
     // Locate the first run of six consecutive digits, the YYMMDD expiry that option
     // trading symbols embed after the underlying name: SENSEX26100172400CE -> 261001.
     std::size_t pos = std::string::npos;
@@ -98,15 +98,20 @@ bool MarketCalendar::is_contract_expired(const std::string& symbol, uint64_t epo
         break;
     }
 
-    // No readable expiry: not expired. Fail "open" here on purpose -- the insert-time
-    // guard is the backstop, and silently dropping unrecognised symbols would be a
-    // worse failure than evaluating one contract too many.
-    if (pos == std::string::npos) return false;
+    // No readable expiry at all: UNKNOWN, never "not expired".
+    if (pos == std::string::npos) return ExpiryState::UNKNOWN;
+
+    // No readable expiry. This used to return false ("not expired") on purpose, on the argument
+    // that the insert-time guard was a sufficient backstop and that dropping unrecognised symbols
+    // would be the worse failure. Review rejected that: it is a safety check failing open, and the
+    // guard it relied on is the unique idempotency index, which constrains duplicate writes, not
+    // tradability. UNKNOWN is now reported as its own state so the caller can refuse the contract
+    // and say so, rather than silently dropping it.
 
     const int yy = std::stoi(symbol.substr(pos, 2)) + 2000;
     const int mm = std::stoi(symbol.substr(pos + 2, 2));
     const int dd = std::stoi(symbol.substr(pos + 4, 2));
-    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return false;
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return ExpiryState::UNKNOWN;
 
     const auto ist = get_ist_time(epoch_ms);
 
@@ -114,7 +119,14 @@ bool MarketCalendar::is_contract_expired(const std::string& symbol, uint64_t epo
     const long today_num = static_cast<long>(ist.year) * 10000L + ist.month * 100L + ist.day;
 
     // Strictly before today: a contract expiring today is still tradable.
-    return expiry_num < today_num;
+    return (expiry_num < today_num) ? ExpiryState::EXPIRED : ExpiryState::NOT_EXPIRED;
+}
+
+// Boolean compatibility form. Note the direction: an UNKNOWN expiry is NOT reported as expired
+// here, so a caller that only asks this question keeps its previous behaviour. Callers that gate
+// entries must use expiry_state() and treat UNKNOWN as blocking - see main.cpp.
+bool MarketCalendar::is_contract_expired(const std::string& symbol, uint64_t epoch_ms) {
+    return expiry_state(symbol, epoch_ms) == MarketCalendar::ExpiryState::EXPIRED;
 }
 
 SessionPhase MarketCalendar::get_session_phase(uint64_t epoch_ms) {

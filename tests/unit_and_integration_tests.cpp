@@ -3037,6 +3037,51 @@ void run_solid_and_acid_test_suite() {
         }
     }
 
+
+    // Item 7: expiry eligibility must hold on its own, independently of the unique idempotency
+    // index. That index constrains duplicate WRITES; it says nothing about whether a contract is
+    // still tradable. These tests touch no database at all, which is the point - eligibility is a
+    // property of the symbol, so the predicate is exercised with distinct symbols and distinct
+    // keys, where no constraint could possibly be doing the work.
+    {
+        using MC = hermes::MarketCalendar;
+        using ES = hermes::MarketCalendar::ExpiryState;
+
+        // Recognisable expiries. 2026-10-01 is before today (2026-10-15).
+        TEST("EXP-01: a recognisable past expiry reports EXPIRED",
+             MC::expiry_state("SENSEX26100172400CE") == ES::EXPIRED);
+        TEST("EXP-02: a recognisable future expiry reports NOT_EXPIRED",
+             MC::expiry_state("SENSEX26123172400CE") == ES::NOT_EXPIRED);
+        TEST("EXP-03: expiring today is still tradable - NOT_EXPIRED",
+             MC::expiry_state("SENSEX26101572400CE") == ES::NOT_EXPIRED);
+
+        // The three ways a symbol can be unreadable.
+        TEST("EXP-04: a symbol with no date run reports UNKNOWN, not NOT_EXPIRED",
+             MC::expiry_state("SOMEINDEX") == ES::UNKNOWN);
+        TEST("EXP-05: the month-name form (NIFTY26OCT24500CE) reports UNKNOWN",
+             MC::expiry_state("NIFTY26OCT24500CE") == ES::UNKNOWN);
+        TEST("EXP-06: the bare index does not read as a live contract",
+             MC::expiry_state("NIFTY50") == ES::UNKNOWN);
+
+        // The core of item 7: the decision does not depend on any database constraint.
+        TEST("EXP-07: eligibility is decided from the symbol alone, with no index involved",
+             MC::expiry_state("SENSEX26100172400CE") == ES::EXPIRED &&
+             MC::expiry_state("SENSEX26123172400CE") == ES::NOT_EXPIRED &&
+             MC::expiry_state("SENSEX26100172400CE") != MC::expiry_state("SENSEX26123172400CE"));
+
+        // And the refusal is not silent: UNKNOWN is a distinct state, so a caller can count and
+        // report it instead of folding it into the expired total.
+        TEST("EXP-08: UNKNOWN is distinct from EXPIRED, so it can be reported separately",
+             MC::expiry_state("SOMEINDEX") != ES::EXPIRED && MC::expiry_state("SOMEINDEX") != ES::NOT_EXPIRED);
+
+        // The boolean compatibility form keeps its previous surface for callers that only ask
+        // "is it expired", and deliberately does not answer for UNKNOWN.
+        TEST("EXP-09: the boolean form still answers only for readable expiries",
+             MC::is_contract_expired("SENSEX26100172400CE") == true &&
+             MC::is_contract_expired("SENSEX26172400CE") == false &&
+             MC::is_contract_expired("SOMEINDEX") == false);
+    }
+
     db_client->cleanup_test_schema();
 
     std::cout << "===================================================================\n";

@@ -225,7 +225,11 @@ std::vector<UpstoxCandleRecord> UpstoxHistoricalBackfillEngine::fetch_historical
                 candles.push_back(c);
             }
 
-            if (response[pos] == ']') break;
+            // end_arr pointed at the closing ']' of the array just consumed, so pos now sits one
+            // past it. When that ']' was the final byte, pos == response.length() and indexing here
+            // reads past the end of the buffer. Short-circuit instead: it was undefined behaviour,
+            // and it was found by the CI static-analysis gate rather than by a crash.
+            if (pos < response.length() && response[pos] == ']') break;
         }
     }
 

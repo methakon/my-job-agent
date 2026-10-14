@@ -52,6 +52,19 @@ public:
     // The comparison is date-granular and uses "strictly before today": a contract
     // expiring today is still tradable and is NOT reported expired.
     static bool is_contract_expired(const std::string& symbol, uint64_t epoch_ms = 0);
+
+    // Expiry is validated independently of any database constraint. The unique idempotency index
+    // stops the same signal being written twice, but it says nothing about whether a contract is
+    // still tradable, so eligibility has to stand on its own.
+    enum class ExpiryState {
+        EXPIRED,        // a readable expiry strictly before today
+        NOT_EXPIRED,    // a readable expiry today or later
+        UNKNOWN         // no readable expiry - the symbol cannot be validated
+    };
+
+    // Tri-state form. UNKNOWN must not be treated as NOT_EXPIRED: a contract whose expiry cannot
+    // be read is one whose expiry cannot be shown to be valid.
+    static ExpiryState expiry_state(const std::string& symbol, uint64_t epoch_ms = 0);
     static SessionPhase get_session_phase(uint64_t epoch_ms = 0);
     static bool is_market_open(uint64_t epoch_ms = 0);
     static std::string session_phase_to_string(SessionPhase phase);
