@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "c77915319f12a46daef8b7ce48cdadecf33c4267": {
+        "short": "c779153",
+        "reason": "Trading Agent workstream — fix(expiry,memory): explicit unknown-expiry state, and the out-of-bounds read CI found",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: CI repair and release-candidate preparation; item 7 requires expiry eligibility to hold independently of the idempotency index)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 244/0; EXP-01..09 prove the tri-state with no database involved; the out-of-bounds read was found by the corrected CI gate and fixed"
+      },
       "ec121f079b506221a6d495b1480c2748434bdbbe": {
         "short": "ec121f0",
         "reason": "Trading Agent workstream — test(isolation): route trade and portfolio tables to isolated test tables",
