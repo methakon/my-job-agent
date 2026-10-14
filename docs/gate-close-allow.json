@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "4f1d28cd87cd708c3098eb4f88215313e216abdc": {
+        "short": "4f1d28c",
+        "reason": "Trading Agent workstream — fix(archival,invariants): stable-ID-set deletion; write the release invariants down and gate them",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (CI audit: archival concurrency safeguard with bounded transactional batches, and the release invariants documented and tested)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 258/0 and ctest 2/2; INVARIANT-1..5 assert the ceiling, fail-closed risk, expiry refusal, MTM completeness and test isolation"
+      },
       "8785932c7674c48143a4a3973ea87b9e88167767": {
         "short": "8785932",
         "reason": "Trading Agent workstream — fix(tests,ci): require explicit test-database configuration; use the clang++-17 driver",
