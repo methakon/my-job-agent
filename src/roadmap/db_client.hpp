@@ -364,6 +364,15 @@ public:
     std::string strategy_config_audit_table() const {
         return is_test_isolation_ ? "cpp_strategy_config_audit_test" : "cpp_strategy_config_audit";
     }
+    // Trade rows are the audit trail of what the engine did: a test run that writes or
+    // deletes here corrupts real history and can move real accounting. Same isolation as
+    // the policy table, for the same reason.
+    std::string trade_reports_table() const {
+        return is_test_isolation_ ? "cpp_trade_reports_test" : "cpp_trade_reports";
+    }
+    std::string portfolios_table() const {
+        return is_test_isolation_ ? "cpp_portfolios_test" : "cpp_portfolios";
+    }
     bool ensure_test_schema();
     void cleanup_test_schema();
 

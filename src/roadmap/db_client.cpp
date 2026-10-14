@@ -482,7 +482,7 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
     if (!conn) return p;
 
     std::string safe_uid = escape_string(conn, user_id);
-    std::string query = "SELECT id, id as userId, capital, deployed, netPnl, autoTradeEnabled, 'UPSTOX_PAPER' as executionProvider, executionMode FROM cpp_portfolios LIMIT 1;";
+    std::string query = "SELECT id, id as userId, capital, deployed, netPnl, autoTradeEnabled, 'UPSTOX_PAPER' as executionProvider, executionMode FROM " + portfolios_table() + " LIMIT 1;";
 
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -506,7 +506,7 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
         std::cerr << "❌ [RoadmapDbClient] fetch_portfolio error: " << mysql_error(conn) << "\n";
     }
 
-    std::string open_q = "SELECT quantity, entryPrice, side, instrument FROM cpp_trade_reports WHERE status = 'OPEN';";
+    std::string open_q = "SELECT quantity, entryPrice, side, instrument FROM " + trade_reports_table() + " WHERE status = 'OPEN';";
     if (mysql_query(conn, open_q.c_str()) == 0) {
         MYSQL_RES* res2 = mysql_store_result(conn);
         if (res2) {
@@ -529,7 +529,7 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
         }
     }
 
-    std::string closed_q = "SELECT IFNULL(SUM(grossPnl), 0.0), IFNULL(SUM(cost), 0.0), IFNULL(SUM(netPnl), 0.0) FROM cpp_trade_reports WHERE status = 'CLOSED';";
+    std::string closed_q = "SELECT IFNULL(SUM(grossPnl), 0.0), IFNULL(SUM(cost), 0.0), IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED';";
     if (mysql_query(conn, closed_q.c_str()) == 0) {
         MYSQL_RES* res_c = mysql_store_result(conn);
         if (res_c) {
@@ -556,7 +556,7 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
 
     std::string safe_uid = escape_string(conn, user_id);
     std::string query = "SELECT id, instrument, side, quantity, entryPrice, IFNULL(exitPrice, 0.0), netPnl, status, IFNULL(orderedAt,''), IFNULL(closedAt,''), IFNULL(cost, 0.0), IFNULL(grossPnl, 0.0) "
-                        "FROM cpp_trade_reports "
+                        "FROM " + trade_reports_table() + " "
                         "ORDER BY orderedAt DESC LIMIT " + std::to_string(limit) + " OFFSET " + std::to_string(offset) + ";";
 
     if (mysql_query(conn, query.c_str()) == 0) {
@@ -613,8 +613,8 @@ int RoadmapDbClient::fetch_user_trade_count(const std::string& user_id) {
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;
     int count = 0;
-    const char* query = "SELECT COUNT(*) FROM cpp_trade_reports;";
-    if (mysql_query(conn, query) == 0) {
+    std::string query = "SELECT COUNT(*) FROM " + trade_reports_table() + ";";
+    if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
             MYSQL_ROW row = mysql_fetch_row(res);
@@ -940,6 +940,16 @@ bool RoadmapDbClient::ensure_test_schema() {
     // This must RESET, not merely INSERT IGNORE: SCM-07's standalone UPDATE deliberately
     // leaves ofi_threshold at 0.82, and INSERT IGNORE cannot overwrite an existing row, so
     // the next run would inherit the previous run's value and SCM-02 would fail on it.
+    // Trade rows and portfolio state get the same isolation: the suite creates and closes
+    // trades, and those writes must never land on the live audit trail or move live
+    // accounting (ceiling/netPnl).
+    int r6 = mysql_query(conn, "CREATE TABLE IF NOT EXISTS cpp_trade_reports_test LIKE cpp_trade_reports;");
+    int r7 = mysql_query(conn, "CREATE TABLE IF NOT EXISTS cpp_portfolios_test LIKE cpp_portfolios;");
+    // Reset, never INSERT IGNORE: each run must start from a known empty book, or a
+    // previous run's rows are read back as if they were this run's.
+    mysql_query(conn, "DELETE FROM cpp_trade_reports_test;");
+    mysql_query(conn, "DELETE FROM cpp_portfolios_test;");
+
     mysql_query(conn, "DELETE FROM cpp_strategy_config_test;");
     mysql_query(conn,
         "INSERT INTO cpp_strategy_config_test (config_key, config_value, description, updated_by) VALUES "
@@ -979,6 +989,8 @@ void RoadmapDbClient::cleanup_test_schema() {
     mysql_query(conn, "TRUNCATE TABLE hermes_cpp_decision_journal_test;");
     mysql_query(conn, "TRUNCATE TABLE cpp_post_session_analysis_test;");
     mysql_query(conn, "TRUNCATE TABLE cpp_strategy_config_audit_test;");
+    mysql_query(conn, "TRUNCATE TABLE cpp_trade_reports_test;");
+    mysql_query(conn, "TRUNCATE TABLE cpp_portfolios_test;");
     pool_->release(conn);
 }
 
@@ -1524,7 +1536,7 @@ bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {
     std::string safe_signal_ts = escape_string(conn, trade.signal_timestamp);
 
     // Pre-insert idempotency guard: prevent duplicate persistent trade records based on signal_timestamp
-    std::string dup_check = "SELECT id FROM cpp_trade_reports WHERE executionMode = '" + safe_mode
+    std::string dup_check = "SELECT id FROM " + trade_reports_table() + " WHERE executionMode = '" + safe_mode
         + "' AND algoSource = '" + safe_algo
         + "' AND instrument = '" + safe_inst 
         + "' AND side = '" + safe_side 
@@ -1543,7 +1555,7 @@ bool RoadmapDbClient::create_paper_trade(const UserTradeData& trade) {
         }
     }
 
-    std::string query = "INSERT INTO cpp_trade_reports (id, tradeUuid, instrument, side, quantity, entryPrice, exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES ('"
+    std::string query = "INSERT INTO " + trade_reports_table() + " (id, tradeUuid, instrument, side, quantity, entryPrice, exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES ('"
         + safe_id + "', '"
         + safe_id + "', '"
         + safe_inst + "', '"
@@ -1603,7 +1615,7 @@ bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit
     std::string safe_id = escape_string(conn, trade_id);
 
     double gross_pnl = net_pnl + cost;
-    std::string query = "UPDATE cpp_trade_reports SET exitPrice = " + std::to_string(exit_price)
+    std::string query = "UPDATE " + trade_reports_table() + " SET exitPrice = " + std::to_string(exit_price)
                         + ", grossPnl = " + std::to_string(gross_pnl)
                         + ", cost = " + std::to_string(cost)
                         + ", netPnl = " + std::to_string(net_pnl)
@@ -1615,8 +1627,8 @@ bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit
         return false;
     }
 
-    // Automate cpp_portfolios sync: keep netPnl and ceiling aligned with live cpp_trade_reports SUM(netPnl)
-    std::string sync_sql = "UPDATE cpp_portfolios SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
+    // Automate " + portfolios_table() + " sync: keep netPnl and ceiling aligned with live " + trade_reports_table() + " SUM(netPnl)
+    std::string sync_sql = "UPDATE " + portfolios_table() + " SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
     mysql_query(conn, sync_sql.c_str());
 
     bool ok = tx.commit();
@@ -1627,7 +1639,7 @@ bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit
 bool RoadmapDbClient::delete_trade_report_by_id(const std::string& trade_id) {
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
-    std::string q = "DELETE FROM cpp_trade_reports WHERE id = '" + escape_string(conn, trade_id) + "';";
+    std::string q = "DELETE FROM " + trade_reports_table() + " WHERE id = '" + escape_string(conn, trade_id) + "';";
     bool ok = (mysql_query(conn, q.c_str()) == 0);
     pool_->release(conn);
     return ok;
@@ -1638,8 +1650,8 @@ std::map<std::string, int> RoadmapDbClient::fetch_trade_counts_by_algo_source() 
     MYSQL* conn = pool_->acquire();
     if (!conn) return counts;
 
-    const char* q = "SELECT algoSource, COUNT(*) FROM cpp_trade_reports GROUP BY algoSource;";
-    if (mysql_query(conn, q) == 0) {
+    std::string q = "SELECT algoSource, COUNT(*) FROM " + trade_reports_table() + " GROUP BY algoSource;";
+    if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
             MYSQL_ROW row;
@@ -1669,7 +1681,7 @@ size_t RoadmapDbClient::count_open_trades_for_symbol(const std::string& instrume
         return 0;
     }
 
-    std::string query = "SELECT COUNT(*) FROM cpp_trade_reports WHERE status = 'OPEN' AND (instrument LIKE '" + safe_sym + "%'";
+    std::string query = "SELECT COUNT(*) FROM " + trade_reports_table() + " WHERE status = 'OPEN' AND (instrument LIKE '" + safe_sym + "%'";
     if (!safe_tok.empty()) {
         query += " OR instrument LIKE '%" + safe_tok + "%'";
     }
@@ -1696,7 +1708,7 @@ double RoadmapDbClient::fetch_today_session_drawdown() {
 
     double today_loss = 0.0;
     std::string query = "SELECT IFNULL(SUM(CASE WHEN netPnl < 0 THEN ABS(netPnl) ELSE 0.0 END), 0.0) "
-                        "FROM cpp_trade_reports WHERE status = 'CLOSED' AND DATE(closedAt) = CURRENT_DATE();";
+                        "FROM " + trade_reports_table() + " WHERE status = 'CLOSED' AND DATE(closedAt) = CURRENT_DATE();";
 
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -1717,7 +1729,7 @@ int RoadmapDbClient::settle_expired_positions() {
     if (!conn) return 0;
 
     std::vector<UserTradeData> to_settle;
-    std::string query = "SELECT id, instrument, side, quantity, entryPrice FROM cpp_trade_reports WHERE status = 'OPEN';";
+    std::string query = "SELECT id, instrument, side, quantity, entryPrice FROM " + trade_reports_table() + " WHERE status = 'OPEN';";
 
     if (mysql_query(conn, query.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -1759,7 +1771,7 @@ int RoadmapDbClient::settle_expired_positions() {
         double charges = calculate_authentic_fno_charges(tr.entryPrice, exit_px, tr.quantity, tr.side, tr.instrument);
         double net_pnl = gross_pnl - charges;
 
-        std::string u_sql = "UPDATE cpp_trade_reports SET exitPrice = " + std::to_string(exit_px)
+        std::string u_sql = "UPDATE " + trade_reports_table() + " SET exitPrice = " + std::to_string(exit_px)
                           + ", grossPnl = " + std::to_string(gross_pnl)
                           + ", cost = " + std::to_string(charges)
                           + ", netPnl = " + std::to_string(net_pnl)
@@ -1770,7 +1782,7 @@ int RoadmapDbClient::settle_expired_positions() {
     }
 
     if (settled_count > 0) {
-        std::string sync_sql = "UPDATE cpp_portfolios SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
+        std::string sync_sql = "UPDATE " + portfolios_table() + " SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
         mysql_query(conn, sync_sql.c_str());
     }
 
@@ -3321,7 +3333,7 @@ std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_closed_tr
     std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
     std::string q = "SELECT instrument, side, quantity, entryPrice, exitPrice, netPnl, "
                     "DATE_FORMAT(orderedAt, '%H:%i:%s'), DATE_FORMAT(closedAt, '%H:%i:%s') "
-                    "FROM cpp_trade_reports WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + " "
+                    "FROM " + trade_reports_table() + " WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + " "
                     "ORDER BY closedAt ASC;";
 
     if (mysql_query(conn, q.c_str()) == 0) {
@@ -3352,7 +3364,7 @@ int RoadmapDbClient::fetch_open_positions_count() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;
 
-    std::string q = "SELECT COUNT(*) FROM cpp_trade_reports WHERE status = 'OPEN';";
+    std::string q = "SELECT COUNT(*) FROM " + trade_reports_table() + " WHERE status = 'OPEN';";
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
@@ -3373,7 +3385,7 @@ std::vector<hermes::PositionExitEvaluation> RoadmapDbClient::fetch_open_position
     if (!conn) return results;
 
     std::string query = "SELECT id, instrument, side, quantity, entryPrice, DATE_FORMAT(orderedAt, '%Y-%m-%d %H:%i:%s') "
-                        "FROM cpp_trade_reports WHERE status = 'OPEN' ORDER BY orderedAt ASC;";
+                        "FROM " + trade_reports_table() + " WHERE status = 'OPEN' ORDER BY orderedAt ASC;";
 
     struct TempOpenTrade {
         std::string id;
@@ -3425,7 +3437,7 @@ double RoadmapDbClient::fetch_today_session_realized_pnl(const std::string& sess
     if (!conn) return 0.0;
 
     std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
-    std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM cpp_trade_reports WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + ";";
+    std::string q = "SELECT IFNULL(SUM(netPnl), 0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED' AND DATE(closedAt) = " + safe_date + ";";
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {

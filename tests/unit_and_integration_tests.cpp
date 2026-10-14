@@ -2534,10 +2534,30 @@ void run_solid_and_acid_test_suite() {
              def_false && toggled_true && restored_false);
     }
 
-    // Item PKS-06: Distinct Strategy Tagging in cpp_trade_reports (OFI vs PredictiveStrategyV1)
+    // Item PKS-06: Distinct Strategy Tagging in the trade table (OFI vs PredictiveStrategyV1)
+    //
+    // Hermetic: this seeds BOTH strategies itself. The previous form asserted "ofi_count > 0"
+    // against whatever the database happened to hold, which made it a check on production
+    // state rather than on the tagging logic - it passed only because it ran against live
+    // data, and it wrote to the audit table to do so. Under isolation the writes land on the
+    // isolated table and the assertion is about this test's own rows.
     {
+        UserTradeData ofi_trade;
+        ofi_trade.id = "TEST-PKS06-OFI-001";
+        ofi_trade.instrument = "NSE:NIFTY26OCT25000CE";
+        ofi_trade.side = "BUY";
+        ofi_trade.quantity = 25;
+        ofi_trade.entryPrice = 110.0;
+        ofi_trade.exitPrice = 0.0;
+        ofi_trade.netPnl = 0.0;
+        ofi_trade.status = "OPEN";
+        ofi_trade.orderedAt = "2026-10-12 09:30:00";
+        ofi_trade.signal_timestamp = "2026-10-12 09:30:00.000000";
+        ofi_trade.algoSource = "OFI_Microstructure_Breakout";
+        ofi_trade.executionMode = "PAPER";
+
         UserTradeData parallel_trade;
-        parallel_trade.id = "TEST-PREDICTIVE-TRADE-001";
+        parallel_trade.id = "TEST-PKS06-PRED-001";
         parallel_trade.instrument = "NSE:NIFTY26OCT25000CE";
         parallel_trade.side = "SELL";
         parallel_trade.quantity = 50;
@@ -2550,18 +2570,20 @@ void run_solid_and_acid_test_suite() {
         parallel_trade.algoSource = "PredictiveStrategyV1"; // Separate strategy tag
         parallel_trade.executionMode = "PAPER";
 
-        bool inserted = db_client->create_paper_trade(parallel_trade);
+        bool inserted = db_client->create_paper_trade(ofi_trade)
+                     && db_client->create_paper_trade(parallel_trade);
 
         // Verify distinct attribution query returns both strategies coexisting
         auto counts = db_client->fetch_trade_counts_by_algo_source();
         int ofi_count = counts["OFI_Microstructure_Breakout"];
         int predictive_count = counts["PredictiveStrategyV1"];
 
-        // Clean up test trade
+        // Clean up this test's own rows (from the isolated table)
+        db_client->delete_trade_report_by_id(ofi_trade.id);
         db_client->delete_trade_report_by_id(parallel_trade.id);
 
         TEST("PKS-06: Multi-strategy trade reports tag PredictiveStrategyV1 separately from OFI_Microstructure_Breakout",
-             inserted && ofi_count > 0 && predictive_count > 0);
+             inserted && ofi_count >= 1 && predictive_count >= 1);
     }
 
     // Category 33: Live Session Status Telemetry & Deterministic Market Read Panel
