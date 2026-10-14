@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "ec94a658fd6f22ed105dc0a835a92f85658eb661": {
+        "short": "ec94a65",
+        "reason": "Trading Agent workstream — fix(ci): allow trigger creation in the disposable MySQL container",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (CI audit: isolated MySQL service, restricted account, all regression tests passing)",
+        "recorded": "2026-10-15",
+        "evidence": "root cause read from the worker log; the restricted account keeps SUPER withheld"
+      },
       "1d476bd6ab4e64e618535b40da03e75a1cd8b502": {
         "short": "1d476bd",
         "reason": "Trading Agent workstream — fix(ci,tests): self-sufficient test setup, the suite creates the audit trigger it depends on",
