@@ -17,6 +17,26 @@ jobs:
     name: Build, Static Analysis & Regression Tests (${{ matrix.compiler }})
     runs-on: ubuntu-latest
 
+    # An isolated, disposable MySQL for the database-backed tests. Synthetic schema, restricted
+    # account, no production credentials, no SSH tunnel and no live market data - the tests are
+    # pointed at this by CPP_TEST_DB plus explicit values, and the suite refuses to connect
+    # without them (see tests/test_db_config.hpp).
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-pw
+          MYSQL_DATABASE: hermes_cpp_test
+          MYSQL_USER: cpp_test_rw
+          MYSQL_PASSWORD: ci-test-pw
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-pw"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
     strategy:
       # A failure on one compiler must not cancel the other: both configurations have to report.
       fail-fast: false
@@ -43,7 +63,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build build-essential cppcheck g++-13 clang-17 \
-            libssl-dev libcurl4-openssl-dev libmysqlclient-dev
+            libssl-dev libcurl4-openssl-dev libmysqlclient-dev mysql-client
 
       - name: Configure CMake
         # The previous invocation also passed -DENABLE_TESTS=ON and -DENABLE_HARDENING=ON. Neither
@@ -79,10 +99,28 @@ jobs:
           path: cppcheck-advisory.txt
           if-no-files-found: ignore
 
+      - name: Initialise the isolated test schema
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -uroot -pci-root-pw hermes_cpp_test < tests/schema/hermes_cpp_test.sql
+          echo "tables loaded:"
+          mysql -h 127.0.0.1 -P 3306 -uroot -pci-root-pw -N -e \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='hermes_cpp_test';"
+
       - name: Build Binary, Unit Tests and Regression Tests
         run: cmake --build build -j $(nproc)
 
       - name: Run Test Suites (ctest)
+        env:
+          # Explicit opt-in plus explicit values. The suite has no defaults, by design.
+          CPP_TEST_DB: "1"
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: "3306"
+          MYSQL_USER: cpp_test_rw
+          MYSQL_PASSWORD: ci-test-pw
+          DATABASE_NAME: hermes_cpp_test
+          # Same session semantics as the local consolidated setup: IST, session-scoped.
+          MYSQL_SESSION_TIME_ZONE: "+05:30"
+          TZ: Asia/Kolkata
         run: ctest --test-dir build --output-on-failure
 
       # The old workflow ran ./build/bin/latency_benchmark --max-p99-us 15. No such target exists
