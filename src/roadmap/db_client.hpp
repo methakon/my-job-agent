@@ -107,6 +107,12 @@ struct UserPortfolioData {
     double unrealisedPnl = 0.0;
     int autoTradeEnabled = 0;
     int openPositionCount = 0;
+    // A portfolio MTM is a COMPLETE valuation only when every open position has a quote.
+    // Priced-at-entry was the old substitute, and it forced an unpriced position's
+    // contribution to exactly 0.00 - so a partial book rendered as a flat one.
+    int pricedPositionCount = 0;
+    int unpricedPositionCount = 0;
+    bool mtmComplete = true;   // false => unrealisedPnl is a PARTIAL valuation
     std::string executionProvider;
     std::string executionMode;
 };

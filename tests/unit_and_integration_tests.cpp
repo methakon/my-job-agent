@@ -2653,6 +2653,96 @@ void run_solid_and_acid_test_suite() {
              iso_off->strategy_config_table() == "cpp_strategy_config");
     }
 
+    // Item 30.5 items 1-2: ceiling immutability and aggregate-MTM completeness.
+    //
+    // Synthetic rows in the isolated database only. With isolation on, every routed table
+    // name resolves to a _test name, so these seeds cannot address production.
+    {
+        MYSQL* raw_db = mysql_init(nullptr);
+        bool connected = raw_db && mysql_real_connect(raw_db, db_host.c_str(), db_user.c_str(),
+                                                      db_pass.c_str(), db_name.c_str(), db_port, nullptr, 0);
+        TEST("30.5-A: a raw connection to the isolated test database is available", connected);
+        if (connected) {
+            auto exec = [&](const std::string& sql) { return mysql_query(raw_db, sql.c_str()) == 0; };
+
+            exec("DELETE FROM cpp_portfolios_test;");
+            exec("DELETE FROM cpp_trade_reports_test;");
+            exec("DELETE FROM upstox_live_paper_option_quotes;");
+
+            bool seeded =
+                exec("INSERT INTO cpp_portfolios_test (id, label, capital, deployed, netPnl, autoTradeEnabled, executionMode) "
+                     "VALUES ('cpp-portfolio-v1', 'OFI Paper Portfolio (test)', 100000.00, 0.00, 0.00, 1, 'PAPER');") &&
+                // Historical accounting: one archived row carrying the confirmed net figure.
+                exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                     "exitPrice, grossPnl, cost, netPnl, status, orderedAt, closedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                     "('TEST-30-ARCH-1','u1','SENSEX26100172400CE (BSE_FO|1)','BUY',25,100.0,110.0,"
+                     "263716.63,58000.00,205716.63,'ARCHIVED','2026-10-01 09:30:00','2026-10-01 15:20:00',"
+                     "'2026-10-01 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');") &&
+                // An OPEN position on an EXPIRED contract, so settle_expired_positions() has work
+                // to do and therefore runs its portfolio sync.
+                exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                     "exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                     "('TEST-30-OPEN-1','u2','SENSEX26100172500CE (BSE_FO|2)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                     "'OPEN','2026-10-01 09:30:00','2026-10-01 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+            TEST("30.5-B: synthetic seeds for the accounting tests landed in the isolated database", seeded);
+
+            db_client->settle_expired_positions();
+
+            auto scalar = [&](const std::string& sql) -> double {
+                if (mysql_query(raw_db, sql.c_str()) != 0) return -1.0;
+                MYSQL_RES* r = mysql_store_result(raw_db);
+                if (!r) return -1.0;
+                MYSQL_ROW row = mysql_fetch_row(r);
+                double v = -1.0;
+                if (row && row[0]) { try { v = std::stod(row[0]); } catch (...) {} }
+                mysql_free_result(r);
+                return v;
+            };
+
+            double ceiling_after = scalar("SELECT ceiling FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1';");
+            double capital_after = scalar("SELECT capital FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1';");
+            double net_after     = scalar("SELECT netPnl  FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1';");
+
+            TEST("CEIL-01: settlement does NOT move the operator-set ceiling - stays exactly 1,00,000",
+                 std::abs(ceiling_after - 100000.00) < 0.001);
+            TEST("CEIL-02: settlement does NOT change the capital the ceiling sits on",
+                 std::abs(capital_after - 100000.00) < 0.001);
+            // Independent check of the same invariant: the portfolio's netPnl must equal the sum
+            // over finalized rows and nothing else. This also proves the archived 2,05,716.63 is
+            // included while the 23 stale-sourced corrections (ARCHIVED_STALE_SOURCED) are not.
+            double sum_finalized = scalar("SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports_test "
+                                          "WHERE status IN ('CLOSED','ARCHIVED');");
+            double sum_excluded  = scalar("SELECT IFNULL(SUM(netPnl),0.0) FROM cpp_trade_reports_test "
+                                          "WHERE status = 'ARCHIVED_STALE_SOURCED';");
+            TEST("CEIL-03: portfolio netPnl equals SUM(netPnl) over finalized rows, exactly once",
+                 std::abs(net_after - sum_finalized) < 0.01);
+            TEST("CEIL-04: the archived historical figure is inside that sum, and corrected rows are not",
+                 sum_finalized >= 205716.63 - 2500.0 - 100.0 && std::abs(sum_excluded) < 0.01);
+
+            // --- aggregate MTM completeness: one priced position, one unpriced -------------
+            exec("DELETE FROM cpp_trade_reports_test;");
+            exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, exitPrice, "
+                 "grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                 "('TEST-30-PRICED','u3','NIFTY5026102722850CE (NSE_FO|90001)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                 "'OPEN','2026-10-14 09:30:00','2026-10-14 09:30:00.000000','OFI_Microstructure_Breakout','PAPER'),"
+                 "('TEST-30-UNPRICED','u4','NIFTY5026102722999CE (NSE_FO|90002)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                 "'OPEN','2026-10-14 09:30:00','2026-10-14 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+            exec("INSERT INTO upstox_live_paper_option_quotes (id, contractSymbol, instrumentToken, underlying, expiry, "
+                 "strike, optionType, ltp, ts) VALUES (900000001, 'NIFTY5026102722850CE','90001','NIFTY','2026-10-27',22850,"
+                 "'CE',120.0, NOW());");
+
+            auto portfolio = db_client->fetch_user_portfolio("cpp-portfolio-v1");
+            TEST("MTM-02: a mixed portfolio reports 1 priced and 1 unpriced position",
+                 portfolio.pricedPositionCount == 1 && portfolio.unpricedPositionCount == 1);
+            TEST("MTM-03: an incomplete book is NOT presented as a complete valuation",
+                 portfolio.mtmComplete == false);
+            TEST("MTM-04: the priced position still contributes its real P&L (25 x (120 - 100) = +500)",
+                 std::abs(portfolio.unrealisedPnl - 500.0) < 0.01);
+
+            mysql_close(raw_db);
+        }
+    }
+
     db_client->cleanup_test_schema();
 
     std::cout << "===================================================================\n";

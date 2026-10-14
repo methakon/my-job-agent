@@ -521,8 +521,17 @@ UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_
                 std::string side = r[2] ? r[2] : "BUY";
                 std::string inst = r[3] ? r[3] : "";
                 p.deployed += (qty * entry);
-                double cur_ltp = lookup_ltp_from_map(quote_map, inst, entry);
-                p.unrealisedPnl += (side == "BUY") ? (qty * (cur_ltp - entry)) : (qty * (entry - cur_ltp));
+                // No quote means UNPRICED, not "worth exactly its entry price". The old
+                // substitution made an unpriced position contribute exactly 0.00, so a
+                // partially-priced book was indistinguishable from a genuinely flat one.
+                double live_ltp = 0.0;
+                if (lookup_quote_from_map(quote_map, inst, live_ltp)) {
+                    p.unrealisedPnl += (side == "BUY") ? (qty * (live_ltp - entry)) : (qty * (entry - live_ltp));
+                    p.pricedPositionCount++;
+                } else {
+                    p.unpricedPositionCount++;
+                    p.mtmComplete = false;
+                }
                 p.openPositionCount++;
             }
             mysql_free_result(res2);
@@ -1628,7 +1637,12 @@ bool RoadmapDbClient::close_paper_trade(const std::string& trade_id, double exit
     }
 
     // Automate " + portfolios_table() + " sync: keep netPnl and ceiling aligned with live " + trade_reports_table() + " SUM(netPnl)
-    std::string sync_sql = "UPDATE " + portfolios_table() + " SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
+    // netPnl is historical accounting, refreshed from finalized trades (CLOSED or ARCHIVED).
+    // `ceiling` is deliberately NOT written: it is the operator's authorized trading capital
+    // and must not move with realized P&L. Deriving it here would set it to
+    // 100000 + 205716.63 = 305716.63, silently undoing an operator-mandated rebase and
+    // tripling the capital the engine sizes against.
+    std::string sync_sql = "UPDATE " + portfolios_table() + " SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED')) WHERE id = 'cpp-portfolio-v1';";
     mysql_query(conn, sync_sql.c_str());
 
     bool ok = tx.commit();
@@ -1816,7 +1830,12 @@ int RoadmapDbClient::settle_expired_positions() {
     }
 
     if (settled_count > 0) {
-        std::string sync_sql = "UPDATE " + portfolios_table() + " SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED'), ceiling = capital + (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status = 'CLOSED') WHERE id = 'cpp-portfolio-v1';";
+        // netPnl is historical accounting, refreshed from finalized trades (CLOSED or ARCHIVED).
+    // `ceiling` is deliberately NOT written: it is the operator's authorized trading capital
+    // and must not move with realized P&L. Deriving it here would set it to
+    // 100000 + 205716.63 = 305716.63, silently undoing an operator-mandated rebase and
+    // tripling the capital the engine sizes against.
+    std::string sync_sql = "UPDATE " + portfolios_table() + " SET netPnl = (SELECT IFNULL(SUM(netPnl),0.0) FROM " + trade_reports_table() + " WHERE status IN ('CLOSED','ARCHIVED')) WHERE id = 'cpp-portfolio-v1';";
         mysql_query(conn, sync_sql.c_str());
     }
 
