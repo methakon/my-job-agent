@@ -2267,6 +2267,30 @@ void run_solid_and_acid_test_suite() {
         }
     }
 
+    // Item 30.4: a missing quote must be distinguishable from a quote that happens to equal
+    // the fallback. Substituting entryPrice when no quote existed forced unrealizedPnl to
+    // exactly 0.00 while still rendering "Live", so a deeply underwater position looked flat.
+    {
+        std::unordered_map<std::string, double> quotes;
+        quotes["NIFTY5026102722850CE"] = 143.15;   // reachable by symbol
+        quotes["NSE_FO|40715"] = 99.50;            // reachable by exchange token
+        quotes["ZEROPRICE26100124500CE"] = 0.0;    // present but worthless - not a usable quote
+
+        double out = -1.0;
+        TEST("MTM-01a: an instrument with no quote reports NOT found, never a price",
+             RoadmapDbClient::lookup_quote_from_map(quotes, "NIFTY5026102722999CE", out) == false);
+        TEST("MTM-01b: a quote present by symbol is found, with its price",
+             RoadmapDbClient::lookup_quote_from_map(quotes, "NIFTY5026102722850CE", out) == true
+             && out == 143.15);
+        out = -1.0;
+        TEST("MTM-01c: a quote present by exchange token is found",
+             RoadmapDbClient::lookup_quote_from_map(quotes, "NIFTY5026102722850CE (NSE_FO|40715)", out) == true);
+        TEST("MTM-01d: an empty instrument reports NOT found",
+             RoadmapDbClient::lookup_quote_from_map(quotes, "", out) == false);
+        TEST("MTM-01e: a zero-priced row is not a usable quote",
+             RoadmapDbClient::lookup_quote_from_map(quotes, "ZEROPRICE26100124500CE", out) == false);
+    }
+
     // Item NAF-01: NseArchiveFetcher parse_participant_oi_csv verification
     {
         std::string sample_participant_csv =

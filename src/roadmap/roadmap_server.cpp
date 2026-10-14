@@ -738,9 +738,17 @@ std::string RoadmapServer::render_paper_trading_page(bool is_authenticated, cons
                    << "<td style=\"color:var(--warn);font-weight:600;\">₹" << tr.cost << "</td>"
                    << "<td style=\"color:" << (tr.netPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.netPnl << " <span class=\"badge ok\">Realized Net</span></td>";
             } else {
-                ss << "<td><b style=\"color:var(--accent);\">₹" << tr.currentLtp << "</b> <span class=\"badge dim\">Live</span></td>"
-                   << "<td style=\"color:var(--dim);\">—</td>"
-                   << "<td style=\"color:" << (tr.unrealizedPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.unrealizedPnl << " <span class=\"badge warn\">Live MTM</span></td>";
+                if (tr.hasLiveQuote) {
+                    ss << "<td><b style=\"color:var(--accent);\">₹" << tr.currentLtp << "</b> <span class=\"badge dim\">Live</span></td>"
+                       << "<td style=\"color:var(--dim);\">—</td>"
+                       << "<td style=\"color:" << (tr.unrealizedPnl >= 0 ? "var(--ok)" : "var(--bad)") << ";font-weight:bold;\">₹" << tr.unrealizedPnl << " <span class=\"badge warn\">Live MTM</span></td>";
+                } else {
+                    // No quote: say so. Rendering entryPrice under a "Live" badge would assert
+                    // a price that was never fetched.
+                    ss << "<td><b style=\"color:var(--dim);\">—</b> <span class=\"badge warn\">No live quote</span></td>"
+                       << "<td style=\"color:var(--dim);\">—</td>"
+                       << "<td style=\"color:var(--dim);\">n/a <span class=\"badge warn\">No live quote</span></td>";
+                }
             }
 
             ss << "<td><span class=\"badge " << (is_closed ? "ok" : "warn") << "\">" << html_escape(tr.status) << "</span></td>"

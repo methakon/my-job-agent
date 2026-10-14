@@ -254,19 +254,32 @@ static std::unordered_map<std::string, double> fetch_latest_quotes_map(MYSQL* co
     return quote_map;
 }
 
-static double lookup_ltp_from_map(const std::unordered_map<std::string, double>& quote_map, const std::string& inst, double default_fallback) {
-    if (inst.empty()) return default_fallback;
+// Returns true and fills out_ltp only when a real quote exists. The boolean is the point:
+// a caller that renders a price to a user must be able to tell "no quote" apart from
+// "quote happens to equal the fallback", and returning a default cannot express that.
+bool RoadmapDbClient::lookup_quote_from_map(const std::unordered_map<std::string, double>& quote_map,
+                                           const std::string& inst, double& out_ltp) {
+    if (inst.empty()) return false;
     std::string sym = extract_symbol(inst);
     std::string tok = extract_token(inst);
 
     auto it_sym = quote_map.find(sym);
     if (it_sym != quote_map.end() && it_sym->second > 0) {
-        return it_sym->second;
+        out_ltp = it_sym->second;
+        return true;
     }
     auto it_tok = quote_map.find(tok);
     if (it_tok != quote_map.end() && it_tok->second > 0) {
-        return it_tok->second;
+        out_ltp = it_tok->second;
+        return true;
     }
+    return false;
+}
+
+static double lookup_ltp_from_map(const std::unordered_map<std::string, double>& quote_map,
+                                  const std::string& inst, double default_fallback) {
+    double ltp = 0.0;
+    if (RoadmapDbClient::lookup_quote_from_map(quote_map, inst, ltp)) return ltp;
     return default_fallback;
 }
 
@@ -576,8 +589,13 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
         auto quote_map = fetch_latest_quotes_map(conn);
         for (auto& tr : trades) {
             if (tr.status == "OPEN") {
-                tr.currentLtp = lookup_ltp_from_map(quote_map, tr.instrument, tr.entryPrice);
-                tr.unrealizedPnl = (tr.side == "BUY") ? (tr.quantity * (tr.currentLtp - tr.entryPrice)) : (tr.quantity * (tr.entryPrice - tr.currentLtp));
+                double live_ltp = 0.0;
+                tr.hasLiveQuote = lookup_quote_from_map(quote_map, tr.instrument, live_ltp);
+                tr.currentLtp = tr.hasLiveQuote ? live_ltp : 0.0;
+                tr.unrealizedPnl = tr.hasLiveQuote
+                    ? ((tr.side == "BUY") ? (tr.quantity * (tr.currentLtp - tr.entryPrice))
+                                           : (tr.quantity * (tr.entryPrice - tr.currentLtp)))
+                    : 0.0;
             } else {
                 tr.currentLtp = tr.exitPrice;
                 tr.unrealizedPnl = 0.0;

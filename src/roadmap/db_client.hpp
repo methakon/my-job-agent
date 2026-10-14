@@ -10,6 +10,7 @@
 #include <map>
 #include <tuple>
 #include <unordered_set>
+#include <unordered_map>
 #include <mysql/mysql.h>
 
 struct CanonicalOptionTick;
@@ -117,6 +118,11 @@ struct UserTradeData {
     int quantity = 0;
     double entryPrice = 0.0;
     double currentLtp = 0.0;
+    // True ONLY when currentLtp came from an actual quote. False means "no live quote", and
+    // the panel must render it as such rather than showing entryPrice as if it were current:
+    // substituting entry price forces unrealizedPnl to exactly 0.00, so a deeply underwater
+    // position renders identically to a flat one.
+    bool hasLiveQuote = false;
     double exitPrice = 0.0;
     double grossPnl = 0.0;
     double cost = 0.0;
@@ -249,6 +255,13 @@ typedef UpstoxTokenInfo BrokerTokenInfo;
 
 class RoadmapDbClient {
 public:
+    // Quote-presence semantics, exposed so they can be tested without a database:
+    // returns true and fills out_ltp ONLY when a real quote exists for the instrument.
+    // A caller that renders a price must be able to tell "no quote" apart from
+    // "quote equal to the fallback" - returning a default cannot express that, which is
+    // how entryPrice came to be displayed as a live price.
+    static bool lookup_quote_from_map(const std::unordered_map<std::string, double>& quote_map,
+                                      const std::string& inst, double& out_ltp);
     RoadmapDbClient(std::string host, int port, std::string user, std::string password, std::string db_name);
     RoadmapDbClient(std::string remote_host, int remote_port, std::string remote_user, std::string remote_pass, std::string remote_db,
                     std::string local_host, int local_port, std::string local_user, std::string local_pass, std::string local_db);
