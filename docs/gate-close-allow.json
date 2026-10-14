@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "5f6d325742cd3d58dc5438631e1b37155118d124": {
+        "short": "5f6d325",
+        "reason": "Trading Agent workstream — ci: provision the isolated MySQL service for database-backed tests",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (CI audit: provision an isolated MySQL service and a version-controlled test schema; disposable database, restricted account, synthetic fixtures)",
+        "recorded": "2026-10-15",
+        "evidence": "the sandboxed suite load is verified by the run; locals suite 258/0 and ctest 2/2"
+      },
       "4f1d28cd87cd708c3098eb4f88215313e216abdc": {
         "short": "4f1d28c",
         "reason": "Trading Agent workstream — fix(archival,invariants): stable-ID-set deletion; write the release invariants down and gate them",
