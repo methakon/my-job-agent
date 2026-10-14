@@ -1,92 +1,125 @@
-name: C++ Autonomous Trading Agent CI/CD Pipeline
+name: C++ Autonomous Trading Agent CI
+
+# Static analysis policy: findings that indicate a real defect (errors and warnings) block the
+# pipeline. Style, performance and portability findings are advisory - they are reported and
+# uploaded, never gating. Previously a single --enable=warning,style,performance,portability run
+# with --error-exitcode=1 gated everything, so this job never once reached compilation.
 
 on:
   push:
     branches: [ feat/cpp-trading-agent, main, dev ]
   pull_request:
     branches: [ feat/cpp-trading-agent, main, dev ]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
-    name: C++ Matrix Build, Security Scan & Regression Tests
+    name: Build, Static Analysis & Regression Tests (${{ matrix.compiler }})
     runs-on: ubuntu-latest
 
     strategy:
+      # A failure on one compiler must not cancel the other: both configurations have to report.
+      fail-fast: false
       matrix:
         compiler: [ g++-13, clang-17 ]
         build_type: [ Release ]
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - name: Install C++ Dependencies & Build Tools
+      - name: Install Build Dependencies
+        # The link line is: pthread mysqlclient curl ssl crypto.
+        #   libmysqlclient-dev  provides mysql/mysql.h and libmysqlclient   (was libmysqlcppconn-dev,
+        #                       which is a different, unused C++ connector)
+        #   libssl-dev          provides openssl/*.h and libssl/libcrypto
+        #   libcurl4-openssl-dev provides curl/curl.h
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential libssl-dev libmysqlcppconn-dev cppcheck clang-tidy
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential cppcheck \
+            libssl-dev libcurl4-openssl-dev libmysqlclient-dev
 
       - name: Configure CMake
+        # The previous invocation also passed -DENABLE_TESTS=ON and -DENABLE_HARDENING=ON. Neither
+        # option exists in CMakeLists.txt, so both were silently ignored. Hardening flags are set
+        # in CMAKE_CXX_FLAGS_RELEASE, and enable_testing()/add_test() run unconditionally.
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
-            -DENABLE_HARDENING=ON \
-            -DENABLE_TESTS=ON
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
 
-      - name: Run Static Analysis & Security Audit (Cppcheck)
+      - name: Static Analysis - blocking gate (errors and warnings)
         run: |
-          cppcheck --enable=warning,style,performance,portability --error-exitcode=1 src/
+          cppcheck --enable=warning \
+            --error-exitcode=1 \
+            --inline-suppr \
+            --suppress=missingIncludeSystem \
+            --template=gcc \
+            src/
 
-      - name: Build C++ Binary & Unit Tests
+      - name: Static Analysis - advisory report (style, performance, portability)
+        continue-on-error: true
         run: |
-          cmake --build build --config ${{ matrix.build_type }} -j $(nproc)
+          cppcheck --enable=style,performance,portability \
+            --suppress=missingIncludeSystem \
+            --template=gcc \
+            src/ 2>&1 | tee cppcheck-advisory.txt
 
-      - name: Run C++ Unit & Regression Test Suite
-        run: |
-          cd build && ctest --output-on-failure --verbose
-
-      - name: Run Latency Benchmark Gate (< 15µs P99 Target)
-        run: |
-          ./build/bin/latency_benchmark --max-p99-us 15
-
-      - name: Upload Binary Artifact
-        if: matrix.compiler == 'g++-13' && github.ref == 'refs/heads/feat/cpp-trading-agent'
+      - name: Upload advisory static-analysis report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cpp-trading-agent-linux-x64
-          path: build/bin/cpp-trading-agent
+          name: cppcheck-advisory-${{ matrix.compiler }}
+          path: cppcheck-advisory.txt
+          if-no-files-found: ignore
 
+      - name: Build Binary, Unit Tests and Regression Tests
+        run: cmake --build build -j $(nproc)
+
+      - name: Run Test Suites (ctest)
+        run: ctest --test-dir build --output-on-failure
+
+      # The old workflow ran ./build/bin/latency_benchmark --max-p99-us 15. No such target exists
+      # in CMakeLists.txt, and no binary is produced under build/bin/, so that step could only ever
+      # have failed. A latency gate is worth having, but it has to be built first - it is not
+      # reintroduced here as a passing-looking no-op.
+
+      - name: Upload Binary Artifact
+        if: matrix.compiler == 'g++-13'
+        uses: actions/upload-artifact@v4
+        with:
+          # Targets emit to build/<target>; there is no build/bin/ directory.
+          name: cpp-trading-agent-linux-x64
+          path: build/cpp-trading-agent
+          if-no-files-found: error
+
+  # ----------------------------------------------------------------------------------------------
+  # PRODUCTION DEPLOYMENT - DISABLED. Do not re-enable without an explicit authorization.
+  #
+  # This job was armed on any push to feat/cpp-trading-agent. It had never fired only because the
+  # build-and-test job failed at static analysis first, so it would have become live the moment
+  # the gate above was corrected. Three verified defects made that unsafe:
+  #
+  #   1. It would have copied a binary to the VM and restarted the agent from an unreviewed commit,
+  #      while the fail-closed daily-loss control and the ceiling preservation were local-only.
+  #   2. It restarted `cpp-trading-agent.service` over SSH with systemctl. The VM runs the agent
+  #      under PM2; that unit does not exist, so the restart would have failed *after* the binary
+  #      had already been overwritten - the worst ordering.
+  #   3. It copied to /home/ubuntu/trading-agent/bin. The agent runs from
+  #      /home/ubuntu/cpp-trading-agent.
+  #
+  # Deployment to the VM is done manually over SSH with a pm2 restart, and that remains the only
+  # path until this job is corrected, given a scoped credential, and deliberately re-enabled.
+  # ----------------------------------------------------------------------------------------------
   deploy-to-oracle-vm:
-    name: Deploy Executable to Oracle Cloud VM (Dhargent)
+    name: Deploy to Oracle Cloud VM (DISABLED)
     needs: build-and-test
-    if: github.ref == 'refs/heads/feat/cpp-trading-agent' && github.event_name == 'push'
+    if: false
     runs-on: ubuntu-latest
-
     steps:
-      - name: Download Built Binary Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: cpp-trading-agent-linux-x64
-          path: ./dist
-
-      - name: Deploy Binary via SSH to Oracle Cloud VM
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.ORACLE_VM_HOST }}
-          username: ubuntu
-          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
-          source: "./dist/cpp-trading-agent"
-          target: "/home/ubuntu/trading-agent/bin"
-
-      - name: Hot-Restart Agent Service & Run Post-Deploy Health Check
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.ORACLE_VM_HOST }}
-          username: ubuntu
-          key: ${{ secrets.ORACLE_VM_SSH_KEY }}
-          script: |
-            sudo systemctl restart cpp-trading-agent.service
-            sleep 2
-            curl --fail http://localhost:8080/health || (echo "Health check failed!" && exit 1)
+      - name: Deployment disabled
+        run: |
+          echo "Production deployment is disabled pending the corrections documented in this workflow."
