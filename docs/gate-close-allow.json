@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "f6a88e81634f3e3402a1a89749e696fc7535a316": {
+        "short": "f6a88e8",
+        "reason": "Trading Agent workstream — fix(static-analysis): reviewed suppressions for three provably-safe container bounds",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (stage review: CI repair; advisory style findings must not gate, actionable warnings resolved by reviewed suppression rather than by loosening the gate)",
+        "recorded": "2026-10-15",
+        "evidence": "suite 244/0 and ctest 2/2; each suppression carries the reasoning that makes it safe, verified by reading the code"
+      },
       "c77915319f12a46daef8b7ce48cdadecf33c4267": {
         "short": "c779153",
         "reason": "Trading Agent workstream — fix(expiry,memory): explicit unknown-expiry state, and the out-of-bounds read CI found",
