@@ -3136,6 +3136,77 @@ void run_solid_and_acid_test_suite() {
              MC::is_contract_expired("SOMEINDEX") == false);
     }
 
+
+    // Release invariants (item D). Some are carried in depth elsewhere - the detail tests are
+    // named in docs/RELEASE_INVARIANTS.md - and they are re-asserted here so a release gate has
+    // one place to look and one place to fail. Nothing here is a placeholder: each assertion is
+    // evaluated for real, and the database-backed ones seed their own state.
+    {
+        using MC = hermes::MarketCalendar;
+        using ES = hermes::MarketCalendar::ExpiryState;
+
+        // INVARIANT 1 and 4 need the database, so this block runs against the isolated schema.
+        MYSQL* raw_db = mysql_init(nullptr);
+        if (raw_db && mysql_real_connect(raw_db, db_host.c_str(), db_user.c_str(), db_pass.c_str(),
+                                         db_name.c_str(), db_port, nullptr, 0)) {
+            mysql_query(raw_db, "SET SESSION time_zone = '+05:30'");
+            auto exec = [&](const std::string& sql) { return mysql_query(raw_db, sql.c_str()) == 0; };
+            auto scalar = [&](const std::string& sql) -> double {
+                if (mysql_query(raw_db, sql.c_str()) != 0) return -1.0;
+                MYSQL_RES* r = mysql_store_result(raw_db); if (!r) return -1.0;
+                MYSQL_ROW row = mysql_fetch_row(r); double v = -1.0;
+                if (row && row[0]) { try { v = std::stod(row[0]); } catch (...) {} }
+                mysql_free_result(r); return v;
+            };
+
+            // 1. The operator ceiling cannot change through settlement.
+            exec("DELETE FROM cpp_trade_reports_test;");
+            exec("DELETE FROM cpp_portfolios_test;");
+            exec("INSERT INTO cpp_portfolios_test (id,label,capital,deployed,netPnl,autoTradeEnabled,executionMode) "
+                 "VALUES ('cpp-portfolio-v1','release-invariant-ceiling',100000.00,0.00,0.00,1,'PAPER');");
+            exec("INSERT INTO cpp_trade_reports_test (id,tradeUuid,instrument,side,quantity,entryPrice,exitPrice,"
+                 "grossPnl,cost,netPnl,status,orderedAt,signal_timestamp,algoSource,executionMode) VALUES "
+                 "('INV-CEIL','ui1','SENSEX26100172900CE (BSE_FO|9)','BUY',25,100.0,110.0,263716.63,58000.00,"
+                 "205716.63,'ARCHIVED','2026-10-01 09:30:00','2026-10-01 09:30:00.000000',"
+                 "'OFI_Microstructure_Breakout','PAPER'),"
+                 "('INV-CEIL-OPEN','ui2','SENSEX26100172910CE (BSE_FO|10)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                 "'OPEN','2026-10-01 09:30:00','2026-10-01 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+            db_client->settle_expired_positions();
+            TEST("INVARIANT-1: settlement cannot move the operator-set ceiling (stays 1,00,000)",
+                 std::abs(scalar("SELECT ceiling FROM cpp_portfolios_test WHERE id='cpp-portfolio-v1'") - 100000.00) < 0.001);
+
+            // 4. Incomplete MTM cannot be displayed as complete.
+            exec("DELETE FROM cpp_trade_reports_test;");
+            exec("DELETE FROM upstox_live_paper_option_quotes;");
+            exec("INSERT INTO cpp_trade_reports_test (id,tradeUuid,instrument,side,quantity,entryPrice,exitPrice,"
+                 "grossPnl,cost,netPnl,status,orderedAt,signal_timestamp,algoSource,executionMode) VALUES "
+                 "('INV-UNPRICED','ui3','NIFTY5026102722999CE (NSE_FO|91001)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                 "'OPEN','2026-10-15 09:30:00','2026-10-15 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+            auto inv_pf = db_client->fetch_user_portfolio("cpp-portfolio-v1");
+            TEST("INVARIANT-4: an unpriced open position makes the portfolio MTM incomplete",
+                 inv_pf.unpricedPositionCount == 1 && inv_pf.mtmComplete == false);
+            mysql_close(raw_db);
+        } else {
+            TEST("INVARIANT setup: raw connection available", false);
+        }
+
+        // 2. Unknown daily-loss state blocks new paper entries.
+        TEST("INVARIANT-2: an unknown daily-loss reading blocks entries at the gate",
+             hermes::IndependentRiskEngine::daily_loss_state_blocks_entries(false) == true &&
+             hermes::IndependentRiskEngine::daily_loss_state_blocks_entries(true) == false);
+
+        // 3. Unknown or expired contracts cannot enter execution.
+        TEST("INVARIANT-3: expired and unverifiable expiry are both refused at the entry path",
+             MC::expiry_state("SENSEX26100172400CE") == ES::EXPIRED &&
+             MC::expiry_state("SOMEINDEX") == ES::UNKNOWN &&
+             MC::expiry_state("SENSEX26123172400CE") == ES::NOT_EXPIRED);
+
+        // 5. Database-backed tests cannot connect to production.
+        TEST("INVARIANT-5: a production-shaped test configuration is refused",
+             hermes::testcfg::validate("1", "127.0.0.1", "3307", "mylife", "", "myjob_agent").ok == false &&
+             hermes::testcfg::validate("", "127.0.0.1", "3306", "cpp_test_rw", "", "hermes_cpp_test").ok == false);
+    }
+
     db_client->cleanup_test_schema();
 
     std::cout << "===================================================================\n";

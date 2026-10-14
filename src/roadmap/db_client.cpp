@@ -2438,65 +2438,99 @@ uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& bou
 
     std::string safe_date = boundary_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, boundary_date) + "'");
 
-    std::string copy_sql = 
-        "INSERT IGNORE INTO fnf_market_snapshots_history "
-        "(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt) "
-        "SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, UTC_TIMESTAMP() "
-        "FROM fnf_market_snapshots "
-        // Preview and DELETE share one predicate so the count always describes the delete.
-        // DATE(ts + 330m) < D is exactly ts < (D - 330m): the column stays bare, so an index on
-        // ts can be used, and the boundary is computed once instead of per row.
-        "WHERE ts < (" + safe_date + " - INTERVAL 330 MINUTE);";
+    // The boundary, in UTC, for an IST calendar day D:  ts < (D - INTERVAL 330 MINUTE).
+    // DATE(ts + INTERVAL 330 MINUTE) < D is the same predicate; this form leaves the column bare
+    // so an index on ts can be used.
+    const std::string boundary = "((" + safe_date + " - INTERVAL 330 MINUTE))";
 
-    // Item 3: a read-only preview of exactly what the DELETE will remove, evaluated with the
-    // SAME predicate, before anything is copied or deleted. It fails closed: a delete whose size
-    // cannot be established does not run, because an unmeasured destructive statement on a shared
-    // table is the class of defect this review exists to remove.
-    uint64_t preview_count = 0;
-    {
-        std::string count_sql = "SELECT COUNT(*) FROM fnf_market_snapshots "
-                                "WHERE ts < (" + safe_date + " - INTERVAL 330 MINUTE);";
-        if (mysql_query(conn, count_sql.c_str()) != 0) {
-            std::cerr << "❌ [RoadmapDbClient] archive preview failed, refusing to delete: "
+    // A matching preview and DELETE predicate is necessary but NOT sufficient. DELETE is a
+    // current read, not a snapshot read, so re-evaluating the predicate at delete time can remove
+    // rows the preview never counted - a backfill writing historical timestamps while this runs,
+    // for instance. Instead: identify a bounded batch of ids, copy exactly those, delete exactly
+    // those, and commit the pair together. Preview and deletion then operate on the same
+    // identified rows by construction rather than by convention.
+    constexpr size_t kBatch = 5000;
+    uint64_t copied_total = 0;
+
+    for (;;) {
+        // 1. Identify one batch.
+        std::string select_ids = "SELECT id FROM fnf_market_snapshots WHERE ts < " + boundary +
+                                 " ORDER BY ts ASC LIMIT " + std::to_string(kBatch) + ";";
+        if (mysql_query(conn, select_ids.c_str()) != 0) {
+            std::cerr << "\u274c [RoadmapDbClient] archive id-selection failed, nothing removed: "
                       << mysql_error(conn) << "\n";
             pool_->release(conn);
-            return 0;
+            return copied_total;
         }
-        MYSQL_RES* res = mysql_store_result(conn);
-        if (res) {
-            MYSQL_ROW row = mysql_fetch_row(res);
-            if (row && row[0]) preview_count = std::strtoull(row[0], nullptr, 10);
+        std::string in_list;
+        {
+            MYSQL_RES* res = mysql_store_result(conn);
+            if (!res) { pool_->release(conn); return copied_total; }
+            MYSQL_ROW row;
+            size_t n = 0;
+            while ((row = mysql_fetch_row(res)) != nullptr) {
+                if (!row[0]) continue;
+                if (!in_list.empty()) in_list += ",";
+                in_list += "'" + escape_string(conn, row[0]) + "'";
+                ++n;
+            }
             mysql_free_result(res);
+            if (n == 0) break;   // nothing older than the boundary: done
         }
-    }
-    std::cout << "🔎 [RoadmapDbClient] Archival preview: " << preview_count
-              << " row(s) fall before " << safe_date << " 00:00 IST"
-              << "  (equivalent to ts < " << safe_date << " - 330 minutes)\n";
 
-    uint64_t copied = 0;
-    if (mysql_query(conn, copy_sql.c_str()) == 0) {
-        copied = mysql_affected_rows(conn);
-        std::cout << "✅ [RoadmapDbClient] Market snapshots archived: " << copied << " row(s) moved to history.\n";
-    } else {
-        std::cerr << "❌ [RoadmapDbClient] archive copy error: " << mysql_error(conn) << "\n";
-        pool_->release(conn);
-        return 0;
-    }
-
-    std::string delete_sql = "DELETE FROM fnf_market_snapshots WHERE ts < (" + safe_date + " - INTERVAL 330 MINUTE);";
-    if (mysql_query(conn, delete_sql.c_str()) == 0) {
-        out_deleted = mysql_affected_rows(conn);
-        std::cout << "✅ [RoadmapDbClient] Cleaned live snapshots: " << out_deleted << " row(s) purged from live table.\n";
-        if (out_deleted != preview_count) {
-            std::cerr << "⚠️ [RoadmapDbClient] archival mismatch: previewed " << preview_count
-                      << " but removed " << out_deleted << " - rows changed between preview and delete\n";
+        // 2. Copy and delete that exact set, in one transaction, so a failure rolls both back.
+        if (mysql_query(conn, "START TRANSACTION;") != 0) {
+            std::cerr << "\u274c [RoadmapDbClient] archive transaction could not start\n";
+            pool_->release(conn);
+            return copied_total;
         }
-    } else {
-        std::cerr << "❌ [RoadmapDbClient] archive purge error: " << mysql_error(conn) << "\n";
+
+        std::string copy_sql =
+            "INSERT IGNORE INTO fnf_market_snapshots_history "
+            "(id, instrument, price, volume, open, high, low, close, ts, source, createdAt, archivedAt) "
+            "SELECT id, instrument, price, volume, open, high, low, close, ts, source, createdAt, UTC_TIMESTAMP() "
+            "FROM fnf_market_snapshots WHERE id IN (" + in_list + ");";
+        if (mysql_query(conn, copy_sql.c_str()) != 0) {
+            std::cerr << "\u274c [RoadmapDbClient] archive copy failed, rolling back: " << mysql_error(conn) << "\n";
+            mysql_query(conn, "ROLLBACK;");
+            pool_->release(conn);
+            return copied_total;
+        }
+        const uint64_t copied = static_cast<uint64_t>(mysql_affected_rows(conn));
+
+        std::string delete_sql = "DELETE FROM fnf_market_snapshots WHERE id IN (" + in_list + ");";
+        if (mysql_query(conn, delete_sql.c_str()) != 0) {
+            std::cerr << "\u274c [RoadmapDbClient] archive delete failed, rolling back: " << mysql_error(conn) << "\n";
+            mysql_query(conn, "ROLLBACK;");
+            pool_->release(conn);
+            return copied_total;
+        }
+        const uint64_t deleted = static_cast<uint64_t>(mysql_affected_rows(conn));
+
+        if (mysql_query(conn, "COMMIT;") != 0) {
+            std::cerr << "\u274c [RoadmapDbClient] archive commit failed: " << mysql_error(conn) << "\n";
+            pool_->release(conn);
+            return copied_total;
+        }
+
+        // 3. Auditable mismatch handling. copied < deleted is the dangerous direction: a row
+        //    removed from the live table that never reached history. Report it loudly with the
+        //    actual numbers; never silently continue on the assumption that they agree.
+        if (copied != deleted) {
+            std::cerr << "\u26a0\ufe0f [RoadmapDbClient] archival mismatch in batch: copied " << copied
+                      << ", removed " << deleted
+                      << " - investigate before the next run (a removed row with no history copy is data loss)\n";
+        }
+        copied_total += copied;
+        out_deleted += deleted;
+
+        if (deleted < kBatch) break;   // partial batch means the range is exhausted
     }
 
+    std::cout << "\u2705 [RoadmapDbClient] Archived " << copied_total << " row(s) before " << safe_date
+              << " 00:00 IST; removed " << out_deleted << " from the live table.\n";
     pool_->release(conn);
-    return copied;
+    return copied_total;
 }
 
 bool RoadmapDbClient::ensure_strategy_config_schema() {
