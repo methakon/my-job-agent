@@ -1,16 +1,13 @@
--- Minimal, version-controlled schema for database-backed tests.
---
--- Structure only: no rows, no production data. The tables the two test binaries actually
--- touch: the six ensure_test_schema() derives its _test copies from, the three the fixtures
--- write to directly, and the checklist/portal/analytics tables the audit and visitor suites
--- exercise. Loaded into a disposable CI MySQL service.
---
--- Pure DDL by design: no SET statements, no /*!...*/ directives and no DEFINER clauses.
--- Those carry the dumping session's state; an earlier version failed with
--- "Variable 'sql_mode' can't be set to the value of 'NULL'", and a DEFINER clause cannot
--- be created by a restricted account.
+-- Test schema (structure only, no rows). See docs/TIMESTAMP_CONVENTIONS.md and
+-- docs/RELEASE_INVARIANTS.md. Triggers are created by ensure_test_schema(), not here.
 
 SET FOREIGN_KEY_CHECKS=0;
+
+-- triggers, so relying on the schema to supply one made those tests pass only where an
+-- earlier session had created it by hand.
+--
+-- Pure DDL otherwise: the FOREIGN_KEY_CHECKS pair are plain constants, not session
+-- variables, and there are no DEFINER clauses (a restricted account cannot create one).
 
 CREATE TABLE `cpp_trade_reports` (
   `id` varchar(64) NOT NULL,
@@ -269,7 +266,7 @@ CREATE TABLE `analytics_devices` (
   KEY `idx_dev_os` (`operating_system`),
   KEY `idx_dev_type` (`device_type`),
   CONSTRAINT `fk_dev_visitor` FOREIGN KEY (`visitor_id`) REFERENCES `analytics_visitors` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=27568 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=27645 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `analytics_sessions` (
   `id` bigint NOT NULL AUTO_INCREMENT,
@@ -323,7 +320,7 @@ CREATE TABLE `analytics_locations` (
   KEY `idx_loc_city` (`city`),
   KEY `idx_loc_code` (`country_code`),
   CONSTRAINT `fk_loc_visitor` FOREIGN KEY (`visitor_id`) REFERENCES `analytics_visitors` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=27568 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=27645 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `analytics_page_visits` (
   `id` bigint NOT NULL AUTO_INCREMENT,
@@ -352,7 +349,7 @@ CREATE TABLE `analytics_page_visits` (
   KEY `idx_pv_is_bot` (`is_bot`),
   CONSTRAINT `fk_pv_session` FOREIGN KEY (`session_id`) REFERENCES `analytics_sessions` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_pv_visitor` FOREIGN KEY (`visitor_id`) REFERENCES `analytics_visitors` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=27568 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=27645 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `portal_user_sessions` (
   `session_token` varchar(128) NOT NULL,

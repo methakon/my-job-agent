@@ -990,6 +990,28 @@ bool RoadmapDbClient::ensure_test_schema() {
     // trades, and those writes must never land on the live audit trail or move live
     // accounting (ceiling/netPnl).
     int r6 = mysql_query(conn, "CREATE TABLE IF NOT EXISTS cpp_trade_reports_test LIKE cpp_trade_reports;");
+
+    // CREATE TABLE ... LIKE does NOT copy triggers, so the _test table had none. The SCM tests
+    // assert that a standalone UPDATE produces an audit row with no manual insert, which is
+    // exactly the trigger's job - and they passed locally only because an earlier session had
+    // created it by hand on the persistent test database. Created explicitly here so the tests
+    // depend on their own setup rather than on leftover state.
+    mysql_query(conn, "DROP TRIGGER IF EXISTS trg_cpp_strategy_config_audit_test;");
+    int r_trigger = mysql_query(conn,
+        "CREATE TRIGGER trg_cpp_strategy_config_audit_test AFTER UPDATE ON cpp_strategy_config_test "
+        "FOR EACH ROW BEGIN "
+        "  IF OLD.config_value <> NEW.config_value THEN "
+        "    INSERT INTO cpp_strategy_config_audit_test "
+        "      (config_key, old_value, new_value, approved_by, reason, created_at) "
+        "    VALUES (NEW.config_key, OLD.config_value, NEW.config_value, NEW.updated_by, "
+        "      CONCAT('Trigger-enforced audit: value updated from ', OLD.config_value, ' to ', "
+        "             NEW.config_value), NOW()); "
+        "  END IF; "
+        "END");
+    if (r_trigger != 0) {
+        std::cerr << "\u26a0\ufe0f [RoadmapDbClient] test audit trigger could not be created: "
+                  << mysql_error(conn) << " (the SCM trigger tests will fail)\n";
+    }
     int r7 = mysql_query(conn, "CREATE TABLE IF NOT EXISTS cpp_portfolios_test LIKE cpp_portfolios;");
     // Reset, never INSERT IGNORE: each run must start from a known empty book, or a
     // previous run's rows are read back as if they were this run's.
