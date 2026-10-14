@@ -1,5 +1,13 @@
 {
   "exemptions": {
+      "331810849af45994df57a32fda1b8c0b42ce1b3e": {
+        "short": "3318108",
+        "reason": "Trading Agent workstream — test(analytics): reproduce the visitor concurrency race, close the production-default hole",
+        "workstream": "trading-agent-roadmap",
+        "authority": "operator directive 2026-10-15 (deployment freeze; item 1: investigate the visitor concurrency race with a reproducible stress test)",
+        "recorded": "2026-10-15",
+        "evidence": "reproduced: 5/160 concurrent events fail, identity invariant holds; red on purpose pending the fix"
+      },
       "c776d0c590ff1beafb04412a9cecf42f3807ad44": {
         "short": "c776d0c",
         "reason": "Trading Agent workstream — docs: deployment and rollback plan for operator review",
