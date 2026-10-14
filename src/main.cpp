@@ -213,7 +213,10 @@ int main(int argc, char* argv[]) {
         int check_counter = 0;
         size_t total_saved_ticks = 0;
         size_t expired_contract_ticks_skipped = 0;
-        std::string last_seen_ts = "2026-09-30 00:00:00.000000";
+        // Counts consecutive cycles with no live feed, for rate-limited logging.
+        // Replaces last_seen_ts, whose hardcoded "2026-09-30" floor existed only to seed
+        // the stale-data replay that has been removed below.
+        size_t feed_down_cycles = 0;
         std::cout << "🛡️ [Supervisor] Token Validation & Ingestion Supervisor Thread Started.\n";
 
         auto is_exact_canonical_match = [](const std::string& trade_instrument, const CanonicalOptionTick& t) -> bool {
@@ -279,19 +282,35 @@ int main(int argc, char* argv[]) {
             bool is_trading_day = hermes::MarketCalendar::is_trading_weekday(ist_now);
             auto session_phase = hermes::MarketCalendar::get_session_phase();
 
-            // If native feed supervisor is not connected, fallback to shared DB polling during continuous market hours
+            // Feed-down during continuous market hours is FAIL-CLOSED: no substitute source, ever.
+            //
+            // Removed 2026-10-14. This branch fell back to shared DB polling via
+            // fetch_live_quotes_since(), which read upstox_live_paper_option_quotes - a table whose
+            // only writer is a stopped, separately-owned subsystem, and whose newest row was a week
+            // old. During that morning's feed outage it replayed rows stamped 2026-09-30 as if they
+            // were live (the reader set provenance = "UPSTOX_LIVE_READONLY" and is_real_data = true
+            // on them), and 23 positions were opened on two-week-old prices.
+            //
+            // A fail-closed invariant with a side path around it is not fail-closed. No feed means
+            // no decisions - not stale ones.
             auto sup_status = feed_supervisor->get_status();
-            if (!sup_status.is_connected && is_trading_day && session_phase == hermes::SessionPhase::MARKET_OPEN) {
-                auto new_ticks = db_client->fetch_live_quotes_since(last_seen_ts);
-                for (const auto& tick : new_ticks) {
-                    receiver.ingest_tick(tick);
-                    if (!tick.raw_timestamp.empty()) {
-                        last_seen_ts = tick.raw_timestamp;
+            if (!sup_status.is_connected) {
+                if (is_trading_day && session_phase == hermes::SessionPhase::MARKET_OPEN) {
+                    ++feed_down_cycles;
+                    if (feed_down_cycles == 1 || feed_down_cycles % 600 == 0) {
+                        std::cerr << "🛑 [FeedGuard] No live feed for " << feed_down_cycles
+                                  << " cycle(s) during market hours - refusing stale-data fallback;"
+                                  << " no decisions will be taken until the feed returns.\n";
                     }
                 }
-            } else if (!is_trading_day || session_phase != hermes::SessionPhase::MARKET_OPEN) {
-                // Outside continuous trading, sleep to avoid busy polling and synthetic decision generation
+                // Sleep so an unconnected feed cannot spin the loop.
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            } else {
+                feed_down_cycles = 0;
+                if (!is_trading_day || session_phase != hermes::SessionPhase::MARKET_OPEN) {
+                    // Outside continuous trading, sleep to avoid busy polling and synthetic decision generation
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                }
             }
 
             // Periodically refresh in-memory trade/portfolio cache every 2,000 ticks

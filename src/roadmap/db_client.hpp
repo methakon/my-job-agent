@@ -285,7 +285,6 @@ public:
     std::string fetch_active_broker_token_raw(const std::string& provider);
     bool save_broker_access_token(const std::string& provider, const std::string& token, const std::string& client_id, const std::string& expires_at);
     bool save_canonical_market_snapshot(const CanonicalOptionTick& tick);
-    std::vector<CanonicalOptionTick> fetch_live_quotes_since(const std::string& since_timestamp);
     std::pair<long long, long long> fetch_stored_tick_counts();
 
     // FNF Market Data, Decay, Learning, and Internal Sandbox Methods

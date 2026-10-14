@@ -1781,49 +1781,6 @@ void RoadmapDbClient::update_external_case_study_ltps() {
     pool_->release(conn);
 }
 
-std::vector<CanonicalOptionTick> RoadmapDbClient::fetch_live_quotes_since(const std::string& since_timestamp) {
-    std::vector<CanonicalOptionTick> ticks;
-    MYSQL* conn = pool_->acquire();
-    if (!conn) return ticks;
-
-    std::string safe_ts = escape_string(conn, since_timestamp.empty() ? "2026-09-30 00:00:00.000000" : since_timestamp);
-    std::string query = "SELECT contractSymbol, IFNULL(instrumentToken, ''), underlying, DATE_FORMAT(expiry, '%Y-%m-%d'), strike, optionType, ltp, IFNULL(bid, 0.0), IFNULL(ask, 0.0), IFNULL(bidQty, 0), IFNULL(askQty, 0), IFNULL(volume, 0), IFNULL(openInterest, 0), IFNULL(oiChange, 0), IFNULL(impliedVolatility, 0.0), DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s.%f') "
-                        "FROM upstox_live_paper_option_quotes "
-                        "WHERE ts > '" + safe_ts + "' "
-                        "ORDER BY ts ASC LIMIT 500;";
-
-    if (mysql_query(conn, query.c_str()) == 0) {
-        MYSQL_RES* res = mysql_store_result(conn);
-        if (res) {
-            MYSQL_ROW row;
-            while ((row = mysql_fetch_row(res))) {
-                CanonicalOptionTick tick;
-                tick.symbol = row[0] ? row[0] : "";
-                tick.instrument_key = row[1] ? row[1] : (row[2] ? row[2] : "");
-                tick.option_type = row[5] ? row[5] : "CE";
-                tick.provenance = "UPSTOX_LIVE_READONLY";
-                tick.is_real_data = true;
-                try {
-                    tick.strike = row[4] ? std::stod(row[4]) : 0.0;
-                    tick.ltp = row[6] ? std::stod(row[6]) : 0.0;
-                    tick.bid_price = row[7] ? std::stod(row[7]) : 0.0;
-                    tick.ask_price = row[8] ? std::stod(row[8]) : 0.0;
-                    tick.bid_qty = row[9] ? std::stoi(row[9]) : 0;
-                    tick.ask_qty = row[10] ? std::stoi(row[10]) : 0;
-                    tick.volume = row[11] ? std::stoi(row[11]) : 0;
-                    tick.open_interest = row[12] ? std::stoi(row[12]) : 0;
-                    tick.change_oi = row[13] ? std::stoi(row[13]) : 0;
-                    tick.iv = row[14] ? std::stod(row[14]) : 0.0;
-                    if (row[15]) tick.raw_timestamp = row[15];
-                } catch (...) {}
-                ticks.push_back(tick);
-            }
-            mysql_free_result(res);
-        }
-    }
-    pool_->release(conn);
-    return ticks;
-}
 
 std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     static std::pair<long long, long long> cached_counts{0, 0};
