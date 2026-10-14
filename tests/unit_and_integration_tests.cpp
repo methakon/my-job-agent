@@ -2039,7 +2039,7 @@ void run_solid_and_acid_test_suite() {
             unknown_dd.drawdown_failure_reason = "DB_CONNECTION_UNAVAILABLE";
             std::string u_text = DailyPnLEmailer::format_email_body(unknown_dd, false);
             std::string u_html = DailyPnLEmailer::format_email_body(unknown_dd, true);
-            TEST("DPNL-07: an UNKNOWN daily-loss reading renders as UNAVAILABLE, never as a reassuring zero",
+            TEST("DPNL-08: an UNKNOWN daily-loss reading renders as UNAVAILABLE, never as a reassuring zero",
                  u_text.find("UNAVAILABLE") != std::string::npos &&
                  u_text.find("UNKNOWN") != std::string::npos &&
                  u_html.find("UNKNOWN - NOT EVALUATED") != std::string::npos);
