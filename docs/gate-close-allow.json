@@ -1350,6 +1350,12 @@
 			"reason": "Trading Agent workstream - FRICTION_LOG entries: unsafe DB test defaults, Clang C-driver selection, ceiling-tripling risk, CI never compiled, unreliable instrumentation.",
 			"workstream": "Trading Agent C++ Migration",
 			"authority": "operator directive 2026-10-15 (FRICTION_LOG additions required: discovery, impact, evidence, correction, regression prevention)"
+		},
+		"7d4e720": {
+			"short": "7d4e720",
+			"reason": "Trading Agent workstream - gate warning keyed to the legacy path only (it fired on a correct GATE_CLOSE_ROOT override); Rule 27 recorded; three resolution paths verified. Touches scripts/, so it is in the guard's scope.",
+			"workstream": "Trading Agent C++ Migration",
+			"authority": "operator directive 2026-10-15 (advance the 7d4e720 exemption in its own chore commit with cited authority, then push)"
 		}
 	}
 }
