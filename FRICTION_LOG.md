@@ -24,6 +24,113 @@ Append at the bottom. Newest last.
 
 ---
 
+## 2026-10-15 — Database-backed tests addressed production by default
+
+**Discovery.** The main C++ suite, and separately the visitor-analytics suite, defaulted
+`MYSQL_PORT=3307`, `MYSQL_USER=mylife`, `MYSQL_HOST=127.0.0.1` — the port, user and host of the
+operator's production tunnel. A fresh checkout with no test configuration therefore opened
+connections toward production rather than refusing to run.
+
+**Impact.** Every local run since those defaults were written ran one config-resolution step away
+from production. CI exposed it as 19 failures reaching `127.0.0.1:3307` — a failure that was
+lucky, because a reachable tunnel and a matching fixture would have written to production and
+passed. The suite's green local history was evidence only that the tunnel happened to be up.
+
+**Evidence.** CI run `38634788162`: `[EnvLoader] Warning: Could not open .env` followed by
+`[MySQLPool] Connection failed to 127.0.0.1:3307 (mylife)`. Both suites carried the same defaults;
+the first fix covered only the main suite, and the visitor suite was found to carry them too.
+
+**Correction.** `tests/test_db_config.hpp` — a pure resolver that opens no connection, has no
+defaults at all, and refuses production-shaped configuration. A missing or invalid test config
+terminates before any connection is made. Negative tests assert that absent configuration,
+production-like defaults and an unexpected schema cannot establish a test connection.
+
+**Prevention.** A test default that resolves to a live endpoint is not a convenience, it is a
+silent production dependency. Defaults must fail closed: absent configuration must terminate, not
+fall back. When a config value has a "sensible default", ask what that default *addresses*.
+
+## 2026-10-15 — The Clang matrix entry selected the C compiler
+
+**Discovery.** The Clang job installed `clang-17` and selected it as `CC`/`CXX`. `clang-17` is the
+C driver; a `.cpp` input through it does not link C++ standard-library symbols.
+
+**Impact.** The Clang half of the matrix could never link the test binaries, so half the intended
+compiler coverage was decorative and the pipeline's Clang signal meant nothing.
+
+**Evidence.** CI run `38634788162`: Clang compiled but failed at link once the job reached
+building, which it had not done before the static-analysis gate was repaired.
+
+**Correction.** The matrix entry became `clang++-17`, with the compiler installed explicitly.
+Confirmed by an actual link, CTest execution and artifact generation.
+
+**Prevention.** A compiler identity is not a compiler driver. Verify a matrix entry by linking,
+not by the presence of a binary name.
+
+## 2026-10-15 — Historical-P&L reconciliation would have tripled the operator's ceiling
+
+**Discovery.** Both settlement paths wrote `ceiling = capital + (SELECT SUM(netPnl) ...)`. With
+confirmed historical net P&L of ₹2,05,716.63 against an operator-authorized ceiling of ₹1,00,000,
+the next settlement would have set the ceiling to roughly ₹3,05,716 — tripling the risk the
+operator had authorized, as a side effect of an accounting update.
+
+**Impact.** Capital authority is not an accounting figure. The write would have silently expanded
+the trading envelope, and it would have looked like correct bookkeeping while doing it.
+
+**Evidence.** Both paths read (`sync_sql` and the settlement update); the ₹2,05,716.63 historical
+figure against the ₹1,00,000 ceiling; committed as `8195ac4`.
+
+**Correction.** The ceiling write was removed from both settlement paths. Realized accounting is
+updated independently; the ceiling is operator-authoritative and changes only by operator action.
+`CEIL-01..05c` pin it, including "repeated settlement cannot change the ceiling".
+
+**Prevention.** Never derive a risk limit from a performance figure. If a column bounds what the
+operator has authorized, nothing but the operator may write it -- and a test must prove that.
+
+## 2026-10-15 — The CI pipeline had never compiled anything, in 26 runs
+
+**Discovery.** Every run since inception died at the Cppcheck step, which ran with
+`--enable=warning,style,performance,portability --error-exitcode=1` and therefore failed on cosmetic
+`style` findings. The pipeline had never reached build, test or artifact upload.
+
+**Impact.** 26 red runs read as code health signals while carrying no information about the code.
+The local suite was the only verification this code had ever had, and the artifact step had never
+executed once.
+
+**Evidence.** 26 runs, 26 failures, all at static analysis; the deploy job's `needs:` on a job that
+never succeeded; an artifact path (`build/bin/`) that CMake never creates; a service name PM2 does
+not use; and a library (`libmysqlcppconn-dev`) the link line does not reference.
+
+**Correction.** Static analysis split into a blocking gate (errors/warnings) and an advisory report
+(style/performance/portability); the three deploy-job defects fixed as correctness-only; deploy set
+`if: false`. The first genuinely compiled run followed (CI run `38634788162`).
+
+**Prevention.** A red pipeline that has never been green is not a signal, it is an unexamined
+assumption. Confirm a pipeline can reach its final step before trusting any of its earlier ones.
+
+## 2026-10-15 — "No failure recorded" was read as evidence about the code
+
+**Discovery.** Instrumenting an existing function to find a concurrency failure, the instrumented
+build reported `AF-00` -- the cleared diagnostic -- for calls that had definitely failed. That was
+read as "the function returns false without passing any failure site", and conclusions followed.
+
+**Impact.** The reading was an artifact of the instrumentation, not a fact about the defect: the
+first instrumentor also replaced each `return false;` instead of prefixing it, so every failure
+path fell through. Two conclusions were drawn from a build whose diagnostics could not be trusted.
+
+**Evidence.** The generated diff showed `return false;` replaced rather than preceded; reverted
+with `git checkout`; later, a per-invocation counter showed `expected=160 counted=157` with
+`instrumented_failures_recorded=0` alongside an actually-emitted `AF-01` line -- the counts
+disagreeing with each other, which is the signature of an unreliable probe.
+
+**Correction.** The instrumentation now counts invocations, records both outcomes, captures the
+MySQL error at the point of failure before any rollback can clear it, and carries a self-test that
+pushes a known-failing call through the real path and asserts the trace saw it. A trace reading is
+inadmissible until that self-test passes.
+
+**Prevention.** Instrumentation must prove it can observe a failure it is certain of before its
+absence-of-failure readings mean anything. Wire the positive control first; never infer a root
+cause from a diagnostic that has not demonstrated it can fire.
+
 ## 2026-10-14 — Tests proved a fix against a population that excluded the bug
 
 **What happened.** `is_contract_expired` took the first run of six consecutive digits in
