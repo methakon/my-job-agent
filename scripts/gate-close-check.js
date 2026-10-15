@@ -29,7 +29,28 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
-const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent-job';
+// ROOT self-locates. It used to be a hardcoded absolute path into a DIFFERENT project's
+// worktree, from which this script also loaded dotenv, that project's .env, and mysql2 -- so this
+// repo's push gate depended on another repo's existence and read another repo's credentials, and
+// it failed outright wherever that path was absent (a clean clone, CI, another machine).
+// Resolution order: an explicit override, then this repo, then the legacy path -- and the legacy
+// path is announced, never silently used, so the coupling cannot reappear unnoticed.
+const SELF_ROOT = path.resolve(__dirname, '..');
+const LEGACY_ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent-job';
+const ROOT = [process.env.GATE_CLOSE_ROOT, SELF_ROOT, LEGACY_ROOT]
+	.filter(Boolean)
+	.find((r) => {
+		try {
+			return fs.existsSync(path.join(r, 'node_modules/dotenv'))
+				&& fs.existsSync(path.join(r, 'node_modules/mysql2'));
+		} catch (e) {
+			return false;
+		}
+	}) || SELF_ROOT;
+if (ROOT !== SELF_ROOT) {
+	console.warn(`[gate-close] dependencies resolved from ${ROOT}, not this repo.`);
+	console.warn('[gate-close] set GATE_CLOSE_ROOT or install deps here to remove the coupling.');
+}
 require(path.join(ROOT, 'node_modules/dotenv')).config({ path: path.join(ROOT, '.env') });
 const mysql = require(path.join(ROOT, 'node_modules/mysql2/promise'));
 
