@@ -24,6 +24,31 @@ Append at the bottom. Newest last.
 
 ---
 
+## 2026-10-15 — A fail-open fallback hid a dead option feed for about a week
+
+**Discovery.** `upstox_live_paper_option_quotes` holds 4,703,198 rows and **zero from today**. The
+option feed has been silent since around 2026-10-07, while the engine continued to look healthy:
+1,49,787 index snapshots and 57,608 index ticks arrived today (source `UPSTOX_WS`), positions were
+managed, and nothing alarmed.
+
+**Impact.** Roughly a week of operation in which no option contract quote existed, reported
+internally as normal functioning. The stale-data fail-open fallback (item 30) is what let a dead
+feed read as a live one: the engine substituted a stale value rather than declaring the data
+unavailable, so the failure was invisible at exactly the layer that should have surfaced it. This
+is the same defect class as item 30, observed in production rather than in a test.
+
+**Evidence.** `SELECT COUNT(*) FROM upstox_live_paper_option_quotes WHERE ts >= <today 09:15 IST>`
+returns 0 against 4,703,198 total; today's tick provenance is uniformly `UPSTOX_WS`; no option-shaped
+instrument appears in today's live feed at all (`option-shaped = 0` over 54,344 rows).
+
+**Correction.** Fail-open substitution removed (item 30.1/30.4, deployed `112ad56`). The option-feed
+stop is now tracked as item 38 — a regression to be diagnosed, not a feature to be built.
+
+**Prevention.** A missing feed must be representable as missing. Any fallback that fills a gap with
+an older value converts an outage into silence, and silence is the expensive failure: it consumes
+the time an outage would otherwise have been noticed in. When adding a fallback, ask what failure it
+would conceal.
+
 ## 2026-10-15 — Database-backed tests addressed production by default
 
 **Discovery.** The main C++ suite, and separately the visitor-analytics suite, defaulted

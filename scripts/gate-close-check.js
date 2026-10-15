@@ -47,7 +47,10 @@ const ROOT = [process.env.GATE_CLOSE_ROOT, SELF_ROOT, LEGACY_ROOT]
 			return false;
 		}
 	}) || SELF_ROOT;
-if (ROOT !== SELF_ROOT) {
+// Warn ONLY on the legacy path. An explicit GATE_CLOSE_ROOT is the operator's deliberate choice
+// and must be silent; a repo-local root is the intended state and must be silent too. Warning on
+// "not self" would fire on a correct override, which would train everyone to ignore the warning.
+if (ROOT === LEGACY_ROOT) {
 	console.warn(`[gate-close] dependencies resolved from ${ROOT}, not this repo.`);
 	console.warn('[gate-close] set GATE_CLOSE_ROOT or install deps here to remove the coupling.');
 }
