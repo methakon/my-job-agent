@@ -63,3 +63,10 @@ add_executable(auth_tests tests/auth_tests.cpp)
 target_include_directories(auth_tests PRIVATE src)
 target_link_libraries(auth_tests PRIVATE pthread ssl crypto)
 add_test(NAME Roadmap_Auth_TestSuite COMMAND auth_tests)
+
+# Differential dispatcher harness. Not a ctest test: it takes a port and an output path, starts the
+# real RoadmapServer (no trading engine, no feed, no single-instance lock) and replays a fixed
+# request set over a TCP socket, so the same source can be built against two revisions and the
+# results diffed. Driven by tests/run_dispatcher_differential.sh.
+add_executable(differential_harness tests/differential_harness.cpp ${ENGINE_SOURCES})
+target_link_libraries(differential_harness PRIVATE pthread mysqlclient curl ssl crypto)
