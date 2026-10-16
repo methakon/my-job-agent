@@ -116,12 +116,14 @@ const std::vector<Req>& request_set() {
         // ---- the original bypass classes. Each must have SUCCEEDED before the fix ----
         {"BYPASS_1_header_name_only",    "GET /dashboard HTTP/1.1\r\nHost: h\r\nx-operator-password: \r\n\r\n"},
         {"BYPASS_2_hardcoded_cookie",    "GET /admin/visitors HTTP/1.1\r\nHost: h\r\nCookie: auth_token=operator_valid_session\r\n\r\n"},
-        {"BYPASS_3_name_in_query",       "GET /answer?x-operator-password=1 HTTP/1.1\r\nHost: h\r\n\r\n"},
-        {"BYPASS_4_route_string_in_body",with_body("GET /portfolio HTTP/1.1\r\nHost: h\r\n", "POST /api/roadmap/item/update")},
+        {"BYPASS_3_name_in_query",       "GET /dashboard?x-operator-password=1 HTTP/1.1\r\nHost: h\r\n\r\n"},
+        {"BYPASS_4_route_string_in_body",with_body("GET /dashboard HTTP/1.1\r\nHost: h\r\n", "POST /api/roadmap/item/update")},
         {"BYPASS_5_wrong_secret_value",  "GET /tokens HTTP/1.1\r\nHost: h\r\nx-operator-password: not-the-secret\r\n\r\n"},
-        {"BYPASS_6_name_in_user_agent",  "GET /health HTTP/1.1\r\nHost: h\r\nUser-Agent: x-operator-password\r\n\r\n"},
+        {"BYPASS_6_name_in_user_agent",  "GET /tokens HTTP/1.1\r\nHost: h\r\nUser-Agent: x-operator-password\r\n\r\n"},
         {"BYPASS_7_looking_header",      with_body("POST /auth/login HTTP/1.1\r\nHost: h\r\n", "x-operator-password: whatever")},
         {"BYPASS_8_double_header",       "GET /api/strategy/config HTTP/1.1\r\nHost: h\r\nx-operator-password: a\r\nx-operator-password: b\r\n\r\n"},
+        {"BYPASS_9_body_text_routes",    with_body("POST /definitely-not-a-route HTTP/1.1\r\nHost: h\r\n", "POST /api/roadmap/item/update")},
+        {"BYPASS_10_folded_header",      "GET /tokens HTTP/1.1\r\nHost: h\r\nx-operator-password:\r\n harness-operator-secret\r\n\r\n"},
 
         // ---- legitimate access, using the harness-only secrets ----
         {"LEGIT_correct_password",       "GET /dashboard HTTP/1.1\r\nHost: h\r\nx-operator-password: harness-operator-secret\r\n\r\n"},
@@ -263,6 +265,21 @@ Result send_request(int port, const std::string& raw) {
 
 }  // namespace
 
+// Redact an OAuth `state` value out of a Location URL: record only whether one is present and how
+// long it is, so the result file is stable across runs while still proving a state was issued.
+std::string redact_state(const std::string& loc) {
+    const std::string key = "state=";
+    const size_t p = loc.find(key);
+    if (p == std::string::npos) return loc + " | has_state=no";
+    const size_t vs = p + key.size();
+    size_t ve = loc.find('&', vs);
+    if (ve == std::string::npos) ve = loc.size();
+    const std::string value = loc.substr(vs, ve - vs);
+    std::string out = loc.substr(0, vs) + "REDACTED" + loc.substr(ve);
+    out += " | has_state=yes state_len=" + std::to_string(value.size());
+    return out;
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "usage: differential_harness <port> <outfile> [hold_seconds]\n";
@@ -310,11 +327,64 @@ int main(int argc, char** argv) {
         out << "REQ " << idx++ << " " << q.label
             << " -> status=" << r.status
             << " ctype=" << (r.ctype.empty() ? "-" : r.ctype)
-            << " loc=" << (r.location.empty() ? "-" : r.location)
+            << " loc=" << (r.location.empty() ? "-" : redact_state(r.location))
             << " body=" << r.marker
             << "\n";
         out.flush();
     }
+
+    // ---- dynamic phase: does a callback have to follow a token/init this server issued? ----
+    // The state is issued by the token/init route and then replayed in the callback: first with the
+    // issued value (consumed once), then with the same value again (must be refused), then with no
+    // state at all, then with an unknown one. A callback that presents no valid state must not
+    // reach the code exchange. No outbound broker call happens here: the callbacks are sent with no
+    // `code`, so a callback that gets past the state check still only reports a missing code.
+    auto state_of = [](const std::string& loc) -> std::string {
+        const std::string key = "state=";
+        const size_t p = loc.find(key);
+        if (p == std::string::npos) return "";
+        const size_t vs = p + key.size();
+        size_t ve = loc.find('&', vs);
+        if (ve == std::string::npos) ve = loc.size();
+        return loc.substr(vs, ve - vs);
+    };
+
+    const std::string pw = EnvLoader::get("OPERATOR_PASSWORD", "");
+    const std::string init_req =
+        "GET /api/upstox/token/init HTTP/1.1\r\nHost: h\r\nx-operator-password: " + pw + "\r\n\r\n";
+    const Result init_r = send_request(port, init_req);
+    const std::string issued = state_of(init_r.location);
+    out << "REQ " << idx++ << " DYN_1_token_init_with_credential -> status=" << init_r.status
+        << " ctype=" << (init_r.ctype.empty() ? "-" : init_r.ctype)
+        << " loc=" << (init_r.location.empty() ? "-" : redact_state(init_r.location))
+        << " body=" << init_r.marker << "\n";
+
+    auto callback_line = [&](const char* label, const std::string& url) {
+        const Result r = send_request(port, "GET " + url + " HTTP/1.1\r\nHost: h\r\n\r\n");
+        out << "REQ " << idx++ << " " << label << " -> status=" << r.status
+            << " ctype=" << (r.ctype.empty() ? "-" : r.ctype)
+            << " loc=" << (r.location.empty() ? "-" : r.location)
+            << " body=" << r.marker << "\n";
+        out.flush();
+    };
+    callback_line("DYN_2_callback_with_issued_state", "/api/upstox/callback?state=" + issued);
+    callback_line("DYN_3_callback_replays_spent_state", "/api/upstox/callback?state=" + issued);
+    callback_line("DYN_4_callback_no_state", "/api/upstox/callback");
+    callback_line("DYN_5_callback_unknown_state",
+                  "/api/upstox/callback?state=0000000000000000000000000000000000000000000000000000000000000000");
+
+    // The Fyers flow is the same shape, and its old redirect carried a constant `state=hermes_state`.
+    const std::string fyers_init_req =
+        "GET /api/fyers/token/init HTTP/1.1\r\nHost: h\r\nx-operator-password: " + pw + "\r\n\r\n";
+    const Result fyers_r = send_request(port, fyers_init_req);
+    const std::string fyers_state = state_of(fyers_r.location);
+    out << "REQ " << idx++ << " DYN_6_fyers_init_with_credential -> status=" << fyers_r.status
+        << " ctype=" << (fyers_r.ctype.empty() ? "-" : fyers_r.ctype)
+        << " loc=" << (fyers_r.location.empty() ? "-" : redact_state(fyers_r.location))
+        << " body=" << fyers_r.marker << "\n";
+    callback_line("DYN_7_fyers_callback_with_issued_state", "/auth/fyers/callback?state=" + fyers_state);
+    callback_line("DYN_8_fyers_callback_replays_spent_state", "/auth/fyers/callback?state=" + fyers_state);
+    callback_line("DYN_9_fyers_callback_no_state", "/auth/fyers/callback");
     out.close();
     std::cout << "[harness] wrote " << idx << " results to " << out_path << "\n";
     if (hold_seconds > 0) {

@@ -23,6 +23,7 @@
 //     a constant, and never issued from a value that appears in source.
 //   * Absence of credentials denies. There is no fallback that returns true.
 
+#include <cctype>
 #include <cstdio>
 #include <cstddef>
 #include <cstdlib>
@@ -36,6 +37,28 @@
 
 namespace hermes {
 namespace http_auth {
+
+// 32 bytes of kernel entropy as lowercase hex, or "" if the CSPRNG cannot be read.
+//
+// Every caller must treat "" as failure and FAIL CLOSED: an empty token must never be stored,
+// issued, or compared, and a route that cannot obtain state must not proceed. Deliberately not
+// rand(): the review flagged rand() as a predictable-IV fallback elsewhere in this codebase.
+inline std::string random_hex_32() {
+    unsigned char raw[32];
+    FILE* entropy = std::fopen("/dev/urandom", "rb");
+    if (!entropy) return std::string();
+    const size_t got = std::fread(raw, 1, sizeof(raw), entropy);
+    std::fclose(entropy);
+    if (got != sizeof(raw)) return std::string();
+    static const char* hex = "0123456789abcdef";
+    std::string token;
+    token.reserve(sizeof(raw) * 2);
+    for (size_t i = 0; i < sizeof(raw); ++i) {
+        token.push_back(hex[raw[i] >> 4]);
+        token.push_back(hex[raw[i] & 0x0F]);
+    }
+    return token;
+}
 
 // Constant-time equality. Equal length is required, but the comparison over the bytes is not
 // short-circuited, and an empty secret never matches.
@@ -108,21 +131,8 @@ public:
     explicit SessionStore(long ttl_seconds = 3600) : ttl_(ttl_seconds) {}
 
     std::string issue() {
-        // CSPRNG via the kernel. Deliberately not rand(): the review flagged rand() as a
-        // predictable-IV fallback elsewhere in this codebase.
-        unsigned char raw[32];
-        FILE* entropy = std::fopen("/dev/urandom", "rb");
-        if (!entropy) return std::string();
-        const size_t got = std::fread(raw, 1, sizeof(raw), entropy);
-        std::fclose(entropy);
-        if (got != sizeof(raw)) return std::string();
-        static const char* hex = "0123456789abcdef";
-        std::string token;
-        token.reserve(sizeof(raw) * 2);
-        for (size_t i = 0; i < sizeof(raw); ++i) {
-            token.push_back(hex[raw[i] >> 4]);
-            token.push_back(hex[raw[i] & 0x0F]);
-        }
+        const std::string token = random_hex_32();
+        if (token.empty()) return std::string();      // CSPRNG unavailable: issue nothing
         std::lock_guard<std::mutex> lock(mutex_);
         sessions_[token] = static_cast<long>(::time(nullptr)) + ttl_;
         return token;
@@ -144,6 +154,46 @@ private:
     long ttl_;
     std::mutex mutex_;
     std::unordered_map<std::string, long> sessions_;
+};
+
+// One-time, expiring OAuth `state` values.
+//
+// The callback routes cannot require a session -- the broker's browser arrives at them directly,
+// with no operator cookie -- so the state, and not a cookie, is what proves the callback follows a
+// token/init request this server issued. `consume()` is single use: the value is erased whether or
+// not it was still valid, so a replayed or injected code cannot reach the token exchange twice.
+class OneTimeStateStore {
+public:
+    explicit OneTimeStateStore(long ttl_seconds = 300) : ttl_(ttl_seconds) {}
+
+    std::string issue() {
+        const std::string s = random_hex_32();
+        if (s.empty()) return std::string();          // CSPRNG unavailable: issue nothing
+        std::lock_guard<std::mutex> lock(mutex_);
+        states_[s] = static_cast<long>(::time(nullptr)) + ttl_;
+        return s;
+    }
+
+    // True exactly once per issued state, and only before it expires.
+    bool consume(const std::string& s) {
+        if (s.empty()) return false;
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = states_.find(s);
+        if (it == states_.end()) return false;
+        const bool fresh = it->second > static_cast<long>(::time(nullptr));
+        states_.erase(it);                            // single use, valid or not
+        return fresh;
+    }
+
+    std::size_t size() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return states_.size();
+    }
+
+private:
+    long ttl_;
+    std::mutex mutex_;
+    std::unordered_map<std::string, long> states_;
 };
 
 // The single decision point for request authentication.

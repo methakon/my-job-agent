@@ -5,6 +5,7 @@
 #include "../engine/strategy_config_manager.hpp"
 #include "../analytics/visitor_tracker.hpp"
 #include "route_table.hpp"
+#include "http_auth.hpp"
 #include <iostream>
 #include <sstream>
 #include <csignal>
@@ -47,6 +48,21 @@ static std::string html_escape(const std::string& str) {
 // exact (method, path) lookup with an explicit is_public allow-list. Dispatch reads the request
 // LINE only, so request text can never steer which handler runs.
 namespace rt = hermes::route_table;
+
+// One-time OAuth `state` values, shared by the Upstox and Fyers flows.
+//
+// The callback routes are reachable without a session (the broker's browser lands on them with no
+// operator cookie), so the state is what ties a callback to a token/init this server issued:
+//   * it is issued ONLY by a route the gate already required a session for (the token/init routes);
+//   * it is single use -- consuming erases it, so a replayed or injected code cannot reach the
+//     token exchange a second time;
+//   * it expires (5 minutes).
+// A callback that cannot present a valid state does not exchange the code at all.
+static hermes::http_auth::OneTimeStateStore& oauth_state_store() {
+    static hermes::http_auth::OneTimeStateStore store(300);
+    return store;
+}
+
 
 static const char* GOOGLE_ANALYTICS_FOOTER_TAG =
     "<!-- Google tag (gtag.js) -->\n"
@@ -2385,6 +2401,23 @@ void RoadmapServer::start() {
                 content_type = "application/json";
             };
 
+            // ---- default-deny gate ----
+            // is_public() is an explicit allow-list; every route not named in it requires
+            // authentication. This is the ONLY place that decision is made, so "is this route
+            // protected?" is answered by the table rather than by reading each handler -- and a
+            // route added to the table later is protected until somebody deliberately says
+            // otherwise. The deny response is uniform: 401 with a JSON body, whatever the route's
+            // content type would have been. (The old chain redirected HTML routes to /login and
+            // returned 401 for JSON ones, which meant two different answers to one question.)
+            const bool gate_allowed = rt::is_public(route) || is_auth;
+            if (!gate_allowed) {
+                std::cout << "🔒 [Router] DENIED " << rt::name(route)
+                          << " (not public, no valid credential)\n";
+                status_code = 401;
+                content_type = "application/json";
+                body = "{\"error\":\"Unauthorized\"}";
+            } else {
+
             switch (route) {
                 case rt::Route::Home:
                     body = render_home_page(is_auth);
@@ -2448,62 +2481,40 @@ void RoadmapServer::start() {
                     }
                     break;
 
-                case rt::Route::AdminVisitors:
-                    if (is_auth) {
-                        std::string page_str = extract_query_param(req, "page");
-                        std::string limit_str = extract_query_param(req, "limit");
-                        std::string search_ip = extract_query_param(req, "search");
-                        std::string country_filter = extract_query_param(req, "country");
-                        std::string bot_str = extract_query_param(req, "bot");
-                        int page = 1; int limit = 20; int bot_filter = -1;
-                        try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
-                        try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
-                        try { if (!bot_str.empty()) bot_filter = std::stoi(bot_str); } catch(...) {}
-                        body = render_admin_visitors_page(is_auth, page, limit, search_ip, country_filter, bot_filter);
-                    } else {
-                        status_code = 303;
-                        extra_headers = "Location: /login\r\n";
-                        body = "Redirecting to login...";
-                    }
+                case rt::Route::AdminVisitors: {
+                    std::string page_str = extract_query_param(req, "page");
+                    std::string limit_str = extract_query_param(req, "limit");
+                    std::string search_ip = extract_query_param(req, "search");
+                    std::string country_filter = extract_query_param(req, "country");
+                    std::string bot_str = extract_query_param(req, "bot");
+                    int page = 1; int limit = 20; int bot_filter = -1;
+                    try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
+                    try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
+                    try { if (!bot_str.empty()) bot_filter = std::stoi(bot_str); } catch(...) {}
+                    body = render_admin_visitors_page(is_auth, page, limit, search_ip, country_filter, bot_filter);
                     break;
+                }
 
-                case rt::Route::AdminVisitorDetail:
-                    if (is_auth) {
-                        std::string v_id;
-                        if (clean_path.length() > 16 && clean_path.rfind("/admin/visitors/", 0) == 0) {
-                            v_id = clean_path.substr(16);
-                        } else {
-                            v_id = extract_query_param(req, "id");
-                        }
-                        body = render_admin_visitor_detail_page(is_auth, v_id);
+                case rt::Route::AdminVisitorDetail: {
+                    std::string v_id;
+                    if (clean_path.length() > 16 && clean_path.rfind("/admin/visitors/", 0) == 0) {
+                        v_id = clean_path.substr(16);
                     } else {
-                        status_code = 303;
-                        extra_headers = "Location: /login\r\n";
-                        body = "Redirecting to login...";
+                        v_id = extract_query_param(req, "id");
                     }
+                    body = render_admin_visitor_detail_page(is_auth, v_id);
                     break;
+                }
 
                 case rt::Route::AnalyticsRetentionPurge:
-                    if (is_auth) {
-                        analytics::VisitorTracker::instance().run_retention_purge();
-                        status_code = 303;
-                        extra_headers = "Location: /admin/visitors?purge=success\r\n";
-                        body = "Retention purge initiated successfully";
-                    } else {
-                        status_code = 401;
-                        content_type = "application/json";
-                        body = "{\"error\":\"Unauthorized\"}";
-                    }
+                    analytics::VisitorTracker::instance().run_retention_purge();
+                    status_code = 303;
+                    extra_headers = "Location: /admin/visitors?purge=success\r\n";
+                    body = "Retention purge initiated successfully";
                     break;
 
                 case rt::Route::Dashboard:
-                    if (is_auth) {
-                        body = render_dashboard_page(true);
-                    } else {
-                        status_code = 303;
-                        extra_headers = "Location: /login\r\n";
-                        body = "Redirecting to login...";
-                    }
+                    body = render_dashboard_page(true);
                     break;
 
                 case rt::Route::Portfolio:
@@ -2620,16 +2631,12 @@ void RoadmapServer::start() {
                     break;
                 }
 
-                case rt::Route::UserPortfolio:
-                    if (is_auth) {
-                        auto p = db_client_->fetch_user_portfolio("e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee");
-                        body = "{\"status\":\"OK\",\"user_id\":\"" + p.userId + "\",\"capital\":" + std::to_string(p.capital) + ",\"deployed\":" + std::to_string(p.deployed) + ",\"net_pnl\":" + std::to_string(p.netPnl) + ",\"auto_trade\":" + std::to_string(p.autoTradeEnabled) + "}";
-                    } else {
-                        status_code = 401;
-                        body = "{\"error\":\"Unauthorized access\"}";
-                    }
+                case rt::Route::UserPortfolio: {
+                    auto p = db_client_->fetch_user_portfolio("e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee");
+                    body = "{\"status\":\"OK\",\"user_id\":\"" + p.userId + "\",\"capital\":" + std::to_string(p.capital) + ",\"deployed\":" + std::to_string(p.deployed) + ",\"net_pnl\":" + std::to_string(p.netPnl) + ",\"auto_trade\":" + std::to_string(p.autoTradeEnabled) + "}";
                     content_type = "application/json";
                     break;
+                }
 
                 case rt::Route::UpstoxOrderWebhook:
                 case rt::Route::UpstoxNotifier:
@@ -2641,14 +2648,22 @@ void RoadmapServer::start() {
 
                 case rt::Route::UpstoxTokenInit: {
                     std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
+                    const std::string state = oauth_state_store().issue();
                     if (upstox_app_id.empty()) {
                         status_code = 400;
                         content_type = "application/json";
                         body = "{\"error\":\"Live Upstox API key not configured in .env\"}";
+                    } else if (state.empty()) {
+                        // The CSPRNG failed. Without a state the callback cannot be verified, so the
+                        // flow must not start at all: fail closed rather than redirect.
+                        std::cerr << "❌ [UpstoxOAuth] No OAuth state could be issued (/dev/urandom); refusing to start the flow\n";
+                        status_code = 503;
+                        content_type = "application/json";
+                        body = "{\"error\":\"OAuth state could not be issued\"}";
                     } else {
                         status_code = 303;
                         std::string upstox_redirect_uri = EnvLoader::get("UPSTOX_LIVE_REDIRECT_URI", "https://berhampore.in/api/upstox/callback");
-                        std::string redirect_url = "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=" + upstox_app_id + "&redirect_uri=" + url_encode(upstox_redirect_uri);
+                        std::string redirect_url = "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=" + upstox_app_id + "&redirect_uri=" + url_encode(upstox_redirect_uri) + "&state=" + state;
                         extra_headers = "Location: " + redirect_url + "\r\n";
                         body = "Redirecting to Upstox OAuth Login...";
                     }
@@ -2657,7 +2672,16 @@ void RoadmapServer::start() {
 
                 case rt::Route::UpstoxCallback: {
                     std::string code = extract_query_param(req, "code");
-                    if (!code.empty()) {
+                    std::string state = extract_query_param(req, "state");
+                    if (!oauth_state_store().consume(state)) {
+                        // No valid, unspent state: this callback does not follow a token/init this
+                        // server issued. The code is not exchanged and no token is written, so a
+                        // crafted or replayed `code` values nothing.
+                        std::cout << "🚫 [UpstoxOAuth] Callback rejected: missing, unknown, spent or expired state\n";
+                        status_code = 401;
+                        content_type = "application/json";
+                        body = "{\"error\":\"Invalid OAuth state\"}";
+                    } else if (!code.empty()) {
                         std::cout << "🔑 [UpstoxOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
                         std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
                         std::string expires_at;
@@ -2683,14 +2707,23 @@ void RoadmapServer::start() {
 
                 case rt::Route::FyersTokenInit: {
                     std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
+                    const std::string state = oauth_state_store().issue();
                     if (fyers_app_id.empty()) {
                         status_code = 400;
                         content_type = "application/json";
                         body = "{\"error\":\"Live FYERS App ID not configured in .env\"}";
+                    } else if (state.empty()) {
+                        std::cerr << "❌ [FyersOAuth] No OAuth state could be issued (/dev/urandom); refusing to start the flow\n";
+                        status_code = 503;
+                        content_type = "application/json";
+                        body = "{\"error\":\"OAuth state could not be issued\"}";
                     } else {
                         status_code = 303;
                         std::string fyers_redirect_uri = EnvLoader::get("FYERS_REDIRECT_URI", "https://berhampore.in/auth/fyers/callback");
-                        std::string redirect_url = "https://api-t1.fyers.in/api/v3/generate-authcode?client_id=" + fyers_app_id + "&redirect_uri=" + fyers_redirect_uri + "&response_type=code&state=hermes_state";
+                        // The old URL carried the literal `state=hermes_state`: a constant in the
+                        // source, so any caller could forge a callback. It is now server-issued,
+                        // single use, and verified below.
+                        std::string redirect_url = "https://api-t1.fyers.in/api/v3/generate-authcode?client_id=" + fyers_app_id + "&redirect_uri=" + fyers_redirect_uri + "&response_type=code&state=" + state;
                         extra_headers = "Location: " + redirect_url + "\r\n";
                         body = "Redirecting to FYERS OAuth Login...";
                     }
@@ -2700,7 +2733,13 @@ void RoadmapServer::start() {
                 case rt::Route::FyersCallback: {
                     std::string code = extract_query_param(req, "auth_code");
                     if (code.empty()) code = extract_query_param(req, "code");
-                    if (!code.empty()) {
+                    std::string state = extract_query_param(req, "state");
+                    if (!oauth_state_store().consume(state)) {
+                        std::cout << "🚫 [FyersOAuth] Callback rejected: missing, unknown, spent or expired state\n";
+                        status_code = 401;
+                        content_type = "application/json";
+                        body = "{\"error\":\"Invalid OAuth state\"}";
+                    } else if (!code.empty()) {
                         std::cout << "🔑 [FyersOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
                         std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
                         std::string expires_at;
@@ -2801,6 +2840,7 @@ void RoadmapServer::start() {
                     body = "{\"error\":\"Not Found\"}";
                     break;
             }
+            }   // end default-deny gate
 
             std::string reason_phrase = "OK";
             if (status_code == 400) reason_phrase = "Bad Request";

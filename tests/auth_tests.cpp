@@ -181,6 +181,36 @@ int main() {
         CHECK(!Authenticator::is_mutating_route("/project-status"));
     }
 
+    // ---- AUTH-14: one-time OAuth state -- random, single use, expiring ----
+    {
+        // The OAuth callbacks cannot require a session, so the state is the only thing tying a
+        // callback to a token/init this server issued. It must be unguessable, spendable once, and
+        // must expire.
+        OneTimeStateStore states(60);
+        const std::string a = states.issue();
+        CHECK_MSG(!a.empty(), "AUTH-14: a state must be issued");
+        CHECK_MSG(a.size() == 64, "AUTH-14: state should be 32 random bytes as hex");
+        CHECK_MSG(states.consume(a), "AUTH-14: the issued state must be accepted once");
+        CHECK_MSG(!states.consume(a), "AUTH-14: the same state must not be accepted twice");
+        CHECK_MSG(!states.consume(""), "AUTH-14: an empty state must never be accepted");
+        CHECK_MSG(!states.consume(std::string(64, '0')), "AUTH-14: an unknown state must not be accepted");
+        const std::string b = states.issue();
+        CHECK_MSG(!b.empty() && b != a, "AUTH-14: states must differ between issues");
+        CHECK_MSG(states.size() == 1, "AUTH-14: a spent state must be dropped, not retained");
+
+        OneTimeStateStore expired(0);              // expires immediately
+        const std::string e = expired.issue();
+        CHECK_MSG(!expired.consume(e), "AUTH-14: an expired state must not be accepted");
+        CHECK_MSG(expired.size() == 0, "AUTH-14: a refused state must still be erased");
+
+        // And the CSPRNG helper the two stores share must never return something usable on failure:
+        // an empty return is the failure signal, and callers must treat it as such.
+        const std::string r1 = random_hex_32();
+        const std::string r2 = random_hex_32();
+        CHECK_MSG(r1.size() == 64 && r2.size() == 64, "AUTH-14: random_hex_32 must yield 32 bytes");
+        CHECK_MSG(r1 != r2, "AUTH-14: two draws must differ");
+    }
+
 
     // =========================================================================================
     // Route-table tests. The point of this table is that "which route is this?" is answerable

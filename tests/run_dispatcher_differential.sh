@@ -132,6 +132,12 @@ MYSQL_PASSWORD=harness-not-a-real-password
 DATABASE_NAME=harness_nodb
 SESSION_PASSWORD=harness-session-secret
 OPERATOR_PASSWORD=harness-operator-secret
+UPSTOX_LIVE_API_KEY=harness-upstox-app-id
+UPSTOX_LIVE_API_SECRET=harness-upstox-secret
+UPSTOX_LIVE_REDIRECT_URI=https://harness.invalid/api/upstox/callback
+FYERS_APP_ID=harness-fyers-app-id
+FYERS_SECRET_KEY=harness-fyers-secret
+FYERS_REDIRECT_URI=https://harness.invalid/auth/fyers/callback
 EOF
 
 run_side() {
@@ -160,5 +166,11 @@ awk 'FNR==NR{ if ($3 ~ /^(BYPASS|LEGIT)/) old[$3]=$5; next }
             else v="CHECK";
         } else { v = (o==n) ? "unchanged" : "CHANGED"; }
         printf "%-32s %-13s %-13s %s\n", $3, o, n, v }' "$RES_OLD" "$RES_NEW"
+echo
+echo "===== oauth state (dynamic phase) ====="
+for f in "$RES_OLD" "$RES_NEW"; do
+    echo "--- $(basename "$f") ---"
+    grep -E "DYN_" "$f" | sed -E "s/ loc=-//" || true
+done
 echo
 echo "results: $RES_OLD  $RES_NEW"
