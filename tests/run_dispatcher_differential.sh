@@ -13,7 +13,8 @@
 # the harness target.
 #
 # Usage:
-#   tests/run_dispatcher_differential.sh [--old-root DIR] [--old-ref REF] [--out DIR]
+#   tests/run_dispatcher_differential.sh [--old-root DIR] [--old-ref REF] [--out DIR] \
+#                                       [--revert-unstaged f1,f2,...]
 #
 # Exit status: 0 when the run completed (differences are printed, not judged), 1 on a build or run
 # error. Interpreting the differences is the caller's job -- see the report.
@@ -26,12 +27,14 @@ OLD_ROOT=""
 OUT=""
 PORT_OLD=18091
 PORT_NEW=18092
+REVERT=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --old-root) OLD_ROOT="$2"; shift 2 ;;
         --old-ref)  OLD_REF="$2";  shift 2 ;;
         --out)      OUT="$2";      shift 2 ;;
+        --revert-unstaged) REVERT="$2"; shift 2 ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
     esac
 done
@@ -93,8 +96,29 @@ build_side() {
     echo "[build:$tag] ok -> $src/build/differential_harness"
 }
 
-build_side "$OLD_SRC" "old" || exit 3
-build_side "$NEW_ROOT" "new" || exit 3
+# ---- new side: a copy of the working tree with files that are modified but NOT part of the
+# change under test restored from HEAD, so a difference can be attributed to the change and not to
+# somebody else's in-flight work. The working tree itself is never touched. ----
+NEW_SRC="$OUT/newsrc"
+rm -rf "$NEW_SRC"
+mkdir -p "$NEW_SRC"
+tar -C "$NEW_ROOT" --exclude=./build --exclude=./.git --exclude=./include --exclude=./lib \
+    -cf - . | tar -C "$NEW_SRC" -xf -
+for d in include lib; do [[ -d "$NEW_ROOT/$d" ]] && cp -a "$NEW_ROOT/$d" "$NEW_SRC/$d"; done
+if [[ -n "$REVERT" ]]; then
+    echo "[new] reverting these files from HEAD in the copy (declared as unrelated in-flight work):"
+    IFS=',' read -ra _rev <<< "$REVERT"
+    for f in "${_rev[@]}"; do
+        [[ -z "$f" ]] && continue
+        echo "      $f"
+        git -C "$NEW_ROOT" show "HEAD:$f" > "$NEW_SRC/$f" || { echo "cannot revert $f" >&2; exit 2; }
+    done
+else
+    echo "[new] no files reverted: the copy is the working tree as it stands"
+fi
+
+build_side "$OLD_SRC" "old"  || exit 3
+build_side "$NEW_SRC" "new"  || exit 3
 
 # Harness run directory: a .env that cannot reach a real store.
 RUN="$OUT/run"
@@ -118,7 +142,7 @@ run_side() {
     return 0
 }
 run_side "old" "$PORT_OLD" "$OLD_SRC/build/differential_harness"
-run_side "new" "$PORT_NEW" "$NEW_ROOT/build/differential_harness"
+run_side "new" "$PORT_NEW" "$NEW_SRC/build/differential_harness"
 
 RES_OLD="$OUT/result-old.txt"
 RES_NEW="$OUT/result-new.txt"

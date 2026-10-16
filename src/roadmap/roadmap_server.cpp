@@ -4,6 +4,7 @@
 #include "../engine/market_calendar.hpp"
 #include "../engine/strategy_config_manager.hpp"
 #include "../analytics/visitor_tracker.hpp"
+#include "route_table.hpp"
 #include <iostream>
 #include <sstream>
 #include <csignal>
@@ -41,6 +42,11 @@ static std::string html_escape(const std::string& str) {
     }
     return out;
 }
+
+// The roadmap portal's route identity is a single table (src/roadmap/route_table.hpp): an
+// exact (method, path) lookup with an explicit is_public allow-list. Dispatch reads the request
+// LINE only, so request text can never steer which handler runs.
+namespace rt = hermes::route_table;
 
 static const char* GOOGLE_ANALYTICS_FOOTER_TAG =
     "<!-- Google tag (gtag.js) -->\n"
@@ -2328,29 +2334,14 @@ void RoadmapServer::start() {
                 int status_code = 200;
 
                 std::string method = "GET";
-                {
-                    size_t s1 = req.find(' ');
-                    if (s1 != std::string::npos) method = req.substr(0, s1);
-                }
 
-                std::string clean_path = "/";
-                std::string raw_query = "";
-                {
-                    size_t s1 = req.find(' ');
-                    if (s1 != std::string::npos) {
-                        size_t s2 = req.find(' ', s1 + 1);
-                        if (s2 != std::string::npos) {
-                            std::string full_target = req.substr(s1 + 1, s2 - (s1 + 1));
-                            size_t qmark = full_target.find('?');
-                            if (qmark != std::string::npos) {
-                                clean_path = full_target.substr(0, qmark);
-                                raw_query = full_target.substr(qmark + 1);
-                            } else {
-                                clean_path = full_target;
-                            }
-                        }
-                    }
-                }
+                // The request line is parsed once and strictly. A malformed line is not guessed at;
+                // it resolves to no route and is answered 404.
+                const rt::RequestLine rl = rt::parse_request_line(req);
+                if (rl.ok) method = rl.method;
+
+                std::string clean_path = rl.ok ? rl.path : std::string("/");
+                std::string raw_query  = rl.ok ? rl.query : std::string("");
 
                 std::cout << "🌐 [RoadmapServer] Incoming Request: " << clean_path << "\n";
 
@@ -2368,298 +2359,18 @@ void RoadmapServer::start() {
                 analytics::UserAgentInfo ua_info = analytics::UserAgentParser::parse(user_agent);
                 std::string dev_sig = analytics::UserAgentParser::compute_device_signature(ua_info, accept_lang);
 
-            // Route matching
-            if (clean_path == "/" || clean_path == "/home") {
-                body = render_home_page(is_auth);
-            } else if (clean_path == "/visitor-info") {
-                body = render_visitor_info_page(is_auth);
-            } else if (clean_path == "/api/visitor-info/stats") {
-                status_code = 200;
-                content_type = "application/json";
-                if (db_client_) {
-                    auto stats = db_client_->fetch_analytics_summary_stats();
-                    std::ostringstream ss;
-                    ss << "{\"status\":\"OK\",\"summary\":{";
-                    size_t idx = 0;
-                    for (const auto& kv : stats) {
-                        if (idx++ > 0) ss << ",";
-                        ss << "\"" << kv.first << "\":\"" << kv.second << "\"";
-                    }
-                    ss << "}}";
-                    body = ss.str();
-                } else {
-                    body = "{\"status\":\"ERROR\",\"message\":\"Database client unavailable\"}";
-                }
-            } else if (clean_path == "/api/market/session-status") {
-                status_code = 200;
-                content_type = "application/json";
-                if (db_client_) {
-                    auto tel = db_client_->compute_live_session_status_telemetry();
-                    std::ostringstream ss;
-                    ss << std::fixed << std::setprecision(2);
-                    ss << "{"
-                       << "\"status\":\"OK\","
-                       << "\"session_phase_str\":\"" << tel.session_phase_str << "\","
-                       << "\"paper_trading_state\":\"" << tel.paper_trading_state << "\","
-                       << "\"phase_badge_text\":\"" << tel.phase_badge_text << "\","
-                       << "\"phase_badge_css\":\"" << tel.phase_badge_css << "\","
-                       << "\"market_read_one_liner\":\"" << html_escape(tel.market_read_one_liner) << "\","
-                       << "\"trigger_rule\":\"" << tel.trigger_rule << "\","
-                       << "\"ltp\":" << tel.ltp << ","
-                       << "\"prev_close\":" << tel.prev_close << ","
-                       << "\"change_pct\":" << tel.change_pct << ","
-                       << "\"open_price\":" << tel.open_price << ","
-                       << "\"vwap\":" << tel.vwap << ","
-                       << "\"vwap_delta\":" << tel.vwap_delta << ","
-                       << "\"orb_high\":" << tel.orb_high << ","
-                       << "\"orb_low\":" << tel.orb_low << ","
-                       << "\"ofi\":" << tel.ofi << ","
-                       << "\"atr_14\":" << tel.atr_14 << ","
-                       << "\"baseline_vol_20d\":" << tel.baseline_vol_20d << ","
-                       << "\"intraday_range\":" << tel.intraday_range << ","
-                       << "\"evaluated_at_ist\":\"" << tel.evaluated_at_ist << "\""
-                       << "}";
-                    body = ss.str();
-                } else {
-                    body = "{\"status\":\"ERROR\",\"message\":\"Database client unavailable\"}";
-                }
-            } else if (clean_path == "/admin/visitors") {
-                if (is_auth) {
-                    std::string page_str = extract_query_param(req, "page");
-                    std::string limit_str = extract_query_param(req, "limit");
-                    std::string search_ip = extract_query_param(req, "search");
-                    std::string country_filter = extract_query_param(req, "country");
-                    std::string bot_str = extract_query_param(req, "bot");
-                    int page = 1; int limit = 20; int bot_filter = -1;
-                    try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
-                    try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
-                    try { if (!bot_str.empty()) bot_filter = std::stoi(bot_str); } catch(...) {}
-                    body = render_admin_visitors_page(is_auth, page, limit, search_ip, country_filter, bot_filter);
-                } else {
-                    status_code = 303;
-                    extra_headers = "Location: /login\r\n";
-                    body = "Redirecting to login...";
-                }
-            } else if (clean_path.rfind("/admin/visitors/", 0) == 0 || clean_path == "/admin/visitor") {
-                if (is_auth) {
-                    std::string v_id;
-                    if (clean_path.length() > 16 && clean_path.rfind("/admin/visitors/", 0) == 0) {
-                        v_id = clean_path.substr(16);
-                    } else {
-                        v_id = extract_query_param(req, "id");
-                    }
-                    body = render_admin_visitor_detail_page(is_auth, v_id);
-                } else {
-                    status_code = 303;
-                    extra_headers = "Location: /login\r\n";
-                    body = "Redirecting to login...";
-                }
-            } else if (req.find("POST /admin/analytics/retention-purge") != std::string::npos) {
-                if (is_auth) {
-                    analytics::VisitorTracker::instance().run_retention_purge();
-                    status_code = 303;
-                    extra_headers = "Location: /admin/visitors?purge=success\r\n";
-                    body = "Retention purge initiated successfully";
-                } else {
-                    status_code = 401;
-                    content_type = "application/json";
-                    body = "{\"error\":\"Unauthorized\"}";
-                }
-            } else if (req.find("GET /dashboard") != std::string::npos) {
-                if (is_auth) {
-                    body = render_dashboard_page(true);
-                } else {
-                    status_code = 303;
-                    extra_headers = "Location: /login\r\n";
-                    body = "Redirecting to login...";
-                }
-            } else if (req.find("GET /portfolio") != std::string::npos) {
-                body = render_portfolio_page(is_auth);
-            } else if (req.find("GET /paper-trading") != std::string::npos || req.find("GET /fnf-trading") != std::string::npos) {
-                std::string page_str = extract_query_param(req, "page");
-                std::string limit_str = extract_query_param(req, "limit");
-                int page = 1;
-                int limit = 20;
-                try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
-                try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
-                body = render_paper_trading_page(is_auth, "", page, limit);
-            } else if (req.find("GET /tokens") != std::string::npos) {
-                body = render_tokens_page(is_auth);
-            } else if (req.find("GET /login") != std::string::npos) {
-                body = render_login_page();
-            } else if (req.find("POST /auth/login") != std::string::npos) {
-                auto body_pos = req.find("\r\n\r\n");
-                std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
-                std::string email = extract_post_param(post_body, "email");
-                std::string password = extract_post_param(post_body, "password");
-                std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "");
-                std::string operator_pwd = EnvLoader::get("OPERATOR_PASSWORD", "");
+            // ---- dispatch: exact (method, path) resolution from route_table.hpp ----
+            // The route is decided by the parsed request LINE and nothing else. A route string in a
+            // body, a query parameter, a header value or the User-Agent can no longer select a
+            // handler, which is what the previous `req.find("POST /api/roadmap/item/update")` chain
+            // allowed. A path that matches no entry resolves to Unknown and is answered 404: there
+            // is deliberately no "else" branch that renders a default page.
+            const rt::Route route = rl.ok ? rt::resolve(rl.method, rl.path) : rt::Route::Unknown;
+            std::cout << "🧭 [Router] " << (rl.ok ? rl.method : std::string("?")) << " "
+                      << (rl.ok ? rl.path : std::string("<malformed>"))
+                      << " -> " << rt::name(route) << "\n";
 
-                bool is_valid = (!session_pwd.empty() && password == session_pwd) ||
-                                (!operator_pwd.empty() && password == operator_pwd) ||
-                                (db_client_ && db_client_->verify_operator_password(email, password));
-
-                if (is_valid) {
-                    status_code = 303;
-                    extra_headers = "Set-Cookie: auth_token=operator_valid_session; Path=/; HttpOnly\r\nLocation: /dashboard\r\n";
-                    body = "Redirecting to dashboard...";
-                } else {
-                    body = render_login_page("Invalid operator password. Please try again.");
-                }
-            } else if (req.find("POST /auth/logout") != std::string::npos) {
-                status_code = 303;
-                extra_headers = "Set-Cookie: auth_token=; Path=/; Max-Age=0\r\nLocation: /\r\n";
-                body = "Redirecting...";
-            } else if (req.find("POST /api/roadmap/item/update") != std::string::npos) {
-                auto body_pos = req.find("\r\n\r\n");
-                std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
-                std::string item_id = extract_post_param(post_body, "item_id");
-                std::string status = extract_post_param(post_body, "status");
-                std::string note = extract_post_param(post_body, "note");
-                db_client_->update_hermes_cpp_item_status_and_note(item_id, status, note);
-                status_code = 303;
-                extra_headers = "Location: /project-status#item-" + item_id + "\r\n";
-                body = "Updated item successfully";
-            } else if (req.find("POST /api/roadmap/clarification/ask") != std::string::npos) {
-                auto body_pos = req.find("\r\n\r\n");
-                std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
-                std::string item_id = extract_post_param(post_body, "item_id");
-                std::string stage_label = extract_post_param(post_body, "stage_label");
-                std::string question = extract_post_param(post_body, "question");
-                db_client_->add_hermes_cpp_clarification(item_id, stage_label, question);
-                status_code = 303;
-                extra_headers = "Location: /project-status#clarifications\r\n";
-                body = "Clarification posted successfully";
-            } else if (req.find("POST /api/roadmap/clarification/answer") != std::string::npos) {
-                auto body_pos = req.find("\r\n\r\n");
-                std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
-                std::string id_str = extract_post_param(post_body, "clarification_id");
-                std::string answer = extract_post_param(post_body, "answer");
-                long long id = 0;
-                try { id = std::stoll(id_str); } catch(...) {}
-                if (id > 0) db_client_->answer_hermes_cpp_clarification(id, answer);
-                status_code = 303;
-                extra_headers = "Location: /project-status#clarifications\r\n";
-                body = "Clarification answered successfully";
-            } else if (req.find("GET /api/seasonality-patterns") != std::string::npos) {
-                status_code = 200;
-                content_type = "application/json";
-                auto patterns = db_client_->fetch_seasonality_patterns();
-                std::ostringstream ss;
-                ss << "{\"status\":\"OK\",\"min_required_session_days\":20,\"patterns_count\":" << patterns.size() << ",\"data\":[";
-                for (size_t i = 0; i < patterns.size(); ++i) {
-                    const auto& p = patterns[i];
-                    if (i > 0) ss << ",";
-                    ss << "{\"id\":\"" << p.at("id") << "\",\"underlying\":\"" << p.at("underlying")
-                       << "\",\"time_bucket_15m\":\"" << p.at("time_bucket_15m") << "\",\"dow\":" << p.at("day_of_week")
-                       << ",\"dte\":" << p.at("days_to_expiry") << ",\"ticks\":" << p.at("sample_ticks_count")
-                       << ",\"session_days\":" << p.at("sample_session_days") << ",\"volatility\":" << p.at("realized_volatility")
-                       << ",\"persistence\":" << p.at("directional_persistence") << ",\"spread_pct\":" << p.at("avg_spread_pct")
-                       << ",\"oi_buildup\":" << p.at("avg_oi_buildup_rate") << ",\"status\":\"" << p.at("gating_status")
-                       << "\",\"advisory_modifier\":" << p.at("advisory_confidence_modifier") << ",\"summary\":\"" << p.at("hypothesis_summary") << "\"}";
-                }
-                ss << "]}";
-                body = ss.str();
-            } else if (req.find("GET /api/user/portfolio") != std::string::npos) {
-                if (is_auth) {
-                    auto p = db_client_->fetch_user_portfolio("e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee");
-                    body = "{\"status\":\"OK\",\"user_id\":\"" + p.userId + "\",\"capital\":" + std::to_string(p.capital) + ",\"deployed\":" + std::to_string(p.deployed) + ",\"net_pnl\":" + std::to_string(p.netPnl) + ",\"auto_trade\":" + std::to_string(p.autoTradeEnabled) + "}";
-                } else {
-                    status_code = 401;
-                    body = "{\"error\":\"Unauthorized access\"}";
-                }
-                content_type = "application/json";
-            } else if (req.find("POST /api/upstox/order-webhook") != std::string::npos || req.find("POST /api/upstox/notifier") != std::string::npos) {
-                status_code = 200;
-                content_type = "application/json";
-                body = "{\"status\":\"RECEIVED\",\"engine\":\"HERMES_CPP_V1\",\"timestamp\":" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + "}";
-            } else if (req.find("GET /api/upstox/token/init") != std::string::npos) {
-                std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
-                if (upstox_app_id.empty()) {
-                    status_code = 400;
-                    content_type = "application/json";
-                    body = "{\"error\":\"Live Upstox API key not configured in .env\"}";
-                } else {
-                    status_code = 303;
-                    std::string upstox_redirect_uri = EnvLoader::get("UPSTOX_LIVE_REDIRECT_URI", "https://berhampore.in/api/upstox/callback");
-                    std::string redirect_url = "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=" + upstox_app_id + "&redirect_uri=" + url_encode(upstox_redirect_uri);
-                    extra_headers = "Location: " + redirect_url + "\r\n";
-                    body = "Redirecting to Upstox OAuth Login...";
-                }
-            } else if (clean_path == "/api/upstox/callback" || clean_path == "/auth/upstox/callback" || req.find("GET /api/upstox/callback") != std::string::npos || req.find("GET /auth/upstox/callback") != std::string::npos) {
-                std::string code = extract_query_param(req, "code");
-                if (!code.empty()) {
-                    std::cout << "🔑 [UpstoxOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
-                    std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
-                    std::string expires_at;
-                    std::string access_token = exchange_upstox_code_for_token(code, expires_at);
-                    if (!access_token.empty()) {
-                        db_client_->save_upstox_access_token(access_token, upstox_app_id, expires_at);
-                        std::cout << "✅ [UpstoxOAuth] Access token exchanged and stored in provider_tokens table!\n";
-                        status_code = 303;
-                        extra_headers = "Location: /dashboard?upstox=success\r\n";
-                        body = "Upstox token exchanged successfully!";
-                    } else {
-                        status_code = 303;
-                        extra_headers = "Location: /dashboard?upstox=failed_exchange\r\n";
-                        body = "Upstox token exchange failed.";
-                    }
-                } else {
-                    status_code = 303;
-                    extra_headers = "Location: /dashboard?upstox=failed\r\n";
-                    body = "Upstox Authorization code missing";
-                }
-            } else if (req.find("GET /api/fyers/token/init") != std::string::npos) {
-                std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
-                if (fyers_app_id.empty()) {
-                    status_code = 400;
-                    content_type = "application/json";
-                    body = "{\"error\":\"Live FYERS App ID not configured in .env\"}";
-                } else {
-                    status_code = 303;
-                    std::string fyers_redirect_uri = EnvLoader::get("FYERS_REDIRECT_URI", "https://berhampore.in/auth/fyers/callback");
-                    std::string redirect_url = "https://api-t1.fyers.in/api/v3/generate-authcode?client_id=" + fyers_app_id + "&redirect_uri=" + fyers_redirect_uri + "&response_type=code&state=hermes_state";
-                    extra_headers = "Location: " + redirect_url + "\r\n";
-                    body = "Redirecting to FYERS OAuth Login...";
-                }
-            } else if (clean_path == "/auth/fyers/callback" || clean_path == "/api/fyers/callback" || req.find("GET /api/fyers/callback") != std::string::npos || req.find("GET /auth/fyers/callback") != std::string::npos) {
-                std::string code = extract_query_param(req, "auth_code");
-                if (code.empty()) code = extract_query_param(req, "code");
-                if (!code.empty()) {
-                    std::cout << "🔑 [FyersOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
-                    std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
-                    std::string expires_at;
-                    std::string access_token = exchange_fyers_code_for_token(code, expires_at);
-                    if (!access_token.empty()) {
-                        db_client_->save_broker_access_token("fyers", access_token, fyers_app_id, expires_at);
-                        std::cout << "✅ [FyersOAuth] Access token exchanged, encrypted and stored in provider_tokens table!\n";
-                        status_code = 303;
-                        extra_headers = "Location: /dashboard?fyers=success\r\n";
-                        body = "FYERS token exchanged successfully!";
-                    } else {
-                        status_code = 303;
-                        extra_headers = "Location: /dashboard?fyers=failed_exchange\r\n";
-                        body = "FYERS token exchange failed.";
-                    }
-                } else {
-                    status_code = 303;
-                    extra_headers = "Location: /dashboard?fyers=failed\r\n";
-                    body = "FYERS Authorization code missing";
-                }
-            } else if (req.find("GET /api/upstox-sandbox/token/verify") != std::string::npos) {
-                db_client_->save_broker_access_token("upstox_sandbox", "active_sandbox_token", "9a0248ff-4bb6-46b0-951c-99fb219ef2a2", "2026-12-31 23:59:59");
-                status_code = 303;
-                extra_headers = "Location: /dashboard?sandbox=success\r\n";
-                body = "Upstox Sandbox token verified successfully!";
-            } else if (req.find("GET /docs") != std::string::npos || req.find("GET /swagger") != std::string::npos) {
-                body = render_swagger_ui_page(is_auth);
-            } else if (req.find("GET /api/v1/openapi.json") != std::string::npos) {
-                body = render_openapi_json();
-                content_type = "application/json";
-            } else if (req.find("GET /project-status/json") != std::string::npos) {
-                body = render_json_summary();
-                content_type = "application/json";
-            } else if (req.find("GET /api/health") != std::string::npos || req.find("GET /health?format=json") != std::string::npos) {
+            auto render_health_json = [&]() {
                 bool is_db_connected = false;
                 try {
                     if (db_client_) is_db_connected = db_client_->test_connection();
@@ -2672,36 +2383,423 @@ void RoadmapServer::start() {
                      + HERMES_BUILD_GIT_SHA
                      + "\",\"db_connected\":" + (is_db_connected ? "true" : "false") + "}";
                 content_type = "application/json";
-            } else if (req.find("GET /health") != std::string::npos) {
-                body = render_health_page(is_auth);
-            } else if (req.find("GET /api/system/stats") != std::string::npos) {
-                body = read_system_stats_json(db_client_);
-                content_type = "application/json";
-            } else if (req.find("GET /api/strategy/config") != std::string::npos) {
-                std::ostringstream ss;
-                ss << "{\"active_config\":" << hermes::StrategyConfigManager::instance().to_json();
-                if (db_client_) {
-                    auto audits = db_client_->fetch_strategy_config_audit(10);
-                    ss << ",\"recent_audits\":[";
-                    for (size_t i = 0; i < audits.size(); ++i) {
-                        if (i > 0) ss << ",";
-                        ss << "{\"id\":\"" << audits[i]["id"] << "\","
-                           << "\"key\":\"" << audits[i]["config_key"] << "\","
-                           << "\"old\":\"" << audits[i]["old_value"] << "\","
-                           << "\"new\":\"" << audits[i]["new_value"] << "\","
-                           << "\"by\":\"" << audits[i]["approved_by"] << "\","
-                           << "\"reason\":\"" << audits[i]["reason"] << "\","
-                           << "\"at\":\"" << audits[i]["created_at"] << "\"}";
+            };
+
+            switch (route) {
+                case rt::Route::Home:
+                    body = render_home_page(is_auth);
+                    break;
+
+                case rt::Route::VisitorInfo:
+                    body = render_visitor_info_page(is_auth);
+                    break;
+
+                case rt::Route::VisitorStats:
+                    status_code = 200;
+                    content_type = "application/json";
+                    if (db_client_) {
+                        auto stats = db_client_->fetch_analytics_summary_stats();
+                        std::ostringstream ss;
+                        ss << "{\"status\":\"OK\",\"summary\":{";
+                        size_t idx = 0;
+                        for (const auto& kv : stats) {
+                            if (idx++ > 0) ss << ",";
+                            ss << "\"" << kv.first << "\":\"" << kv.second << "\"";
+                        }
+                        ss << "}}";
+                        body = ss.str();
+                    } else {
+                        body = "{\"status\":\"ERROR\",\"message\":\"Database client unavailable\"}";
                     }
-                    ss << "]";
+                    break;
+
+                case rt::Route::MarketSessionStatus:
+                    status_code = 200;
+                    content_type = "application/json";
+                    if (db_client_) {
+                        auto tel = db_client_->compute_live_session_status_telemetry();
+                        std::ostringstream ss;
+                        ss << std::fixed << std::setprecision(2);
+                        ss << "{"
+                           << "\"status\":\"OK\","
+                           << "\"session_phase_str\":\"" << tel.session_phase_str << "\","
+                           << "\"paper_trading_state\":\"" << tel.paper_trading_state << "\","
+                           << "\"phase_badge_text\":\"" << tel.phase_badge_text << "\","
+                           << "\"phase_badge_css\":\"" << tel.phase_badge_css << "\","
+                           << "\"market_read_one_liner\":\"" << html_escape(tel.market_read_one_liner) << "\","
+                           << "\"trigger_rule\":\"" << tel.trigger_rule << "\","
+                           << "\"ltp\":" << tel.ltp << ","
+                           << "\"prev_close\":" << tel.prev_close << ","
+                           << "\"change_pct\":" << tel.change_pct << ","
+                           << "\"open_price\":" << tel.open_price << ","
+                           << "\"vwap\":" << tel.vwap << ","
+                           << "\"vwap_delta\":" << tel.vwap_delta << ","
+                           << "\"orb_high\":" << tel.orb_high << ","
+                           << "\"orb_low\":" << tel.orb_low << ","
+                           << "\"ofi\":" << tel.ofi << ","
+                           << "\"atr_14\":" << tel.atr_14 << ","
+                           << "\"baseline_vol_20d\":" << tel.baseline_vol_20d << ","
+                           << "\"intraday_range\":" << tel.intraday_range << ","
+                           << "\"evaluated_at_ist\":\"" << tel.evaluated_at_ist << "\""
+                           << "}";
+                        body = ss.str();
+                    } else {
+                        body = "{\"status\":\"ERROR\",\"message\":\"Database client unavailable\"}";
+                    }
+                    break;
+
+                case rt::Route::AdminVisitors:
+                    if (is_auth) {
+                        std::string page_str = extract_query_param(req, "page");
+                        std::string limit_str = extract_query_param(req, "limit");
+                        std::string search_ip = extract_query_param(req, "search");
+                        std::string country_filter = extract_query_param(req, "country");
+                        std::string bot_str = extract_query_param(req, "bot");
+                        int page = 1; int limit = 20; int bot_filter = -1;
+                        try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
+                        try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
+                        try { if (!bot_str.empty()) bot_filter = std::stoi(bot_str); } catch(...) {}
+                        body = render_admin_visitors_page(is_auth, page, limit, search_ip, country_filter, bot_filter);
+                    } else {
+                        status_code = 303;
+                        extra_headers = "Location: /login\r\n";
+                        body = "Redirecting to login...";
+                    }
+                    break;
+
+                case rt::Route::AdminVisitorDetail:
+                    if (is_auth) {
+                        std::string v_id;
+                        if (clean_path.length() > 16 && clean_path.rfind("/admin/visitors/", 0) == 0) {
+                            v_id = clean_path.substr(16);
+                        } else {
+                            v_id = extract_query_param(req, "id");
+                        }
+                        body = render_admin_visitor_detail_page(is_auth, v_id);
+                    } else {
+                        status_code = 303;
+                        extra_headers = "Location: /login\r\n";
+                        body = "Redirecting to login...";
+                    }
+                    break;
+
+                case rt::Route::AnalyticsRetentionPurge:
+                    if (is_auth) {
+                        analytics::VisitorTracker::instance().run_retention_purge();
+                        status_code = 303;
+                        extra_headers = "Location: /admin/visitors?purge=success\r\n";
+                        body = "Retention purge initiated successfully";
+                    } else {
+                        status_code = 401;
+                        content_type = "application/json";
+                        body = "{\"error\":\"Unauthorized\"}";
+                    }
+                    break;
+
+                case rt::Route::Dashboard:
+                    if (is_auth) {
+                        body = render_dashboard_page(true);
+                    } else {
+                        status_code = 303;
+                        extra_headers = "Location: /login\r\n";
+                        body = "Redirecting to login...";
+                    }
+                    break;
+
+                case rt::Route::Portfolio:
+                    body = render_portfolio_page(is_auth);
+                    break;
+
+                case rt::Route::PaperTrading:
+                case rt::Route::FnfTrading: {
+                    std::string page_str = extract_query_param(req, "page");
+                    std::string limit_str = extract_query_param(req, "limit");
+                    int page = 1;
+                    int limit = 20;
+                    try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
+                    try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
+                    body = render_paper_trading_page(is_auth, "", page, limit);
+                    break;
                 }
-                ss << "}";
-                body = ss.str();
-                content_type = "application/json";
-            } else if (req.find("GET /project-status") != std::string::npos) {
-                body = render_html_page(is_auth);
-            } else {
-                body = render_home_page(is_auth);
+
+                case rt::Route::Tokens:
+                    body = render_tokens_page(is_auth);
+                    break;
+
+                case rt::Route::LoginPage:
+                    body = render_login_page();
+                    break;
+
+                case rt::Route::LoginPost: {
+                    auto body_pos = req.find("\r\n\r\n");
+                    std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
+                    std::string email = extract_post_param(post_body, "email");
+                    std::string password = extract_post_param(post_body, "password");
+                    std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "");
+                    std::string operator_pwd = EnvLoader::get("OPERATOR_PASSWORD", "");
+
+                    bool is_valid = (!session_pwd.empty() && password == session_pwd) ||
+                                    (!operator_pwd.empty() && password == operator_pwd) ||
+                                    (db_client_ && db_client_->verify_operator_password(email, password));
+
+                    if (is_valid) {
+                        status_code = 303;
+                        extra_headers = "Set-Cookie: auth_token=operator_valid_session; Path=/; HttpOnly\r\nLocation: /dashboard\r\n";
+                        body = "Redirecting to dashboard...";
+                    } else {
+                        body = render_login_page("Invalid operator password. Please try again.");
+                    }
+                    break;
+                }
+
+                case rt::Route::Logout:
+                    status_code = 303;
+                    extra_headers = "Set-Cookie: auth_token=; Path=/; Max-Age=0\r\nLocation: /\r\n";
+                    body = "Redirecting...";
+                    break;
+
+                case rt::Route::RoadmapItemUpdate: {
+                    auto body_pos = req.find("\r\n\r\n");
+                    std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
+                    std::string item_id = extract_post_param(post_body, "item_id");
+                    std::string status = extract_post_param(post_body, "status");
+                    std::string note = extract_post_param(post_body, "note");
+                    db_client_->update_hermes_cpp_item_status_and_note(item_id, status, note);
+                    status_code = 303;
+                    extra_headers = "Location: /project-status#item-" + item_id + "\r\n";
+                    body = "Updated item successfully";
+                    break;
+                }
+
+                case rt::Route::ClarificationAsk: {
+                    auto body_pos = req.find("\r\n\r\n");
+                    std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
+                    std::string item_id = extract_post_param(post_body, "item_id");
+                    std::string stage_label = extract_post_param(post_body, "stage_label");
+                    std::string question = extract_post_param(post_body, "question");
+                    db_client_->add_hermes_cpp_clarification(item_id, stage_label, question);
+                    status_code = 303;
+                    extra_headers = "Location: /project-status#clarifications\r\n";
+                    body = "Clarification posted successfully";
+                    break;
+                }
+
+                case rt::Route::ClarificationAnswer: {
+                    auto body_pos = req.find("\r\n\r\n");
+                    std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
+                    std::string id_str = extract_post_param(post_body, "clarification_id");
+                    std::string answer = extract_post_param(post_body, "answer");
+                    long long id = 0;
+                    try { id = std::stoll(id_str); } catch(...) {}
+                    if (id > 0) db_client_->answer_hermes_cpp_clarification(id, answer);
+                    status_code = 303;
+                    extra_headers = "Location: /project-status#clarifications\r\n";
+                    body = "Clarification answered successfully";
+                    break;
+                }
+
+                case rt::Route::SeasonalityPatterns: {
+                    status_code = 200;
+                    content_type = "application/json";
+                    auto patterns = db_client_->fetch_seasonality_patterns();
+                    std::ostringstream ss;
+                    ss << "{\"status\":\"OK\",\"min_required_session_days\":20,\"patterns_count\":" << patterns.size() << ",\"data\":[";
+                    for (size_t i = 0; i < patterns.size(); ++i) {
+                        const auto& p = patterns[i];
+                        if (i > 0) ss << ",";
+                        ss << "{\"id\":\"" << p.at("id") << "\",\"underlying\":\"" << p.at("underlying")
+                           << "\",\"time_bucket_15m\":\"" << p.at("time_bucket_15m") << "\",\"dow\":" << p.at("day_of_week")
+                           << ",\"dte\":" << p.at("days_to_expiry") << ",\"ticks\":" << p.at("sample_ticks_count")
+                           << ",\"session_days\":" << p.at("sample_session_days") << ",\"volatility\":" << p.at("realized_volatility")
+                           << ",\"persistence\":" << p.at("directional_persistence") << ",\"spread_pct\":" << p.at("avg_spread_pct")
+                           << ",\"oi_buildup\":" << p.at("avg_oi_buildup_rate") << ",\"status\":\"" << p.at("gating_status")
+                           << "\",\"advisory_modifier\":" << p.at("advisory_confidence_modifier") << ",\"summary\":\"" << p.at("hypothesis_summary") << "\"}";
+                    }
+                    ss << "]}";
+                    body = ss.str();
+                    break;
+                }
+
+                case rt::Route::UserPortfolio:
+                    if (is_auth) {
+                        auto p = db_client_->fetch_user_portfolio("e120d0ba-f5e7-44e9-b1f5-9d93ee8e90ee");
+                        body = "{\"status\":\"OK\",\"user_id\":\"" + p.userId + "\",\"capital\":" + std::to_string(p.capital) + ",\"deployed\":" + std::to_string(p.deployed) + ",\"net_pnl\":" + std::to_string(p.netPnl) + ",\"auto_trade\":" + std::to_string(p.autoTradeEnabled) + "}";
+                    } else {
+                        status_code = 401;
+                        body = "{\"error\":\"Unauthorized access\"}";
+                    }
+                    content_type = "application/json";
+                    break;
+
+                case rt::Route::UpstoxOrderWebhook:
+                case rt::Route::UpstoxNotifier:
+                    // Acknowledged only: this branch reads nothing and writes nothing.
+                    status_code = 200;
+                    content_type = "application/json";
+                    body = "{\"status\":\"RECEIVED\",\"engine\":\"HERMES_CPP_V1\",\"timestamp\":" + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count()) + "}";
+                    break;
+
+                case rt::Route::UpstoxTokenInit: {
+                    std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
+                    if (upstox_app_id.empty()) {
+                        status_code = 400;
+                        content_type = "application/json";
+                        body = "{\"error\":\"Live Upstox API key not configured in .env\"}";
+                    } else {
+                        status_code = 303;
+                        std::string upstox_redirect_uri = EnvLoader::get("UPSTOX_LIVE_REDIRECT_URI", "https://berhampore.in/api/upstox/callback");
+                        std::string redirect_url = "https://api.upstox.com/v2/login/authorization/dialog?response_type=code&client_id=" + upstox_app_id + "&redirect_uri=" + url_encode(upstox_redirect_uri);
+                        extra_headers = "Location: " + redirect_url + "\r\n";
+                        body = "Redirecting to Upstox OAuth Login...";
+                    }
+                    break;
+                }
+
+                case rt::Route::UpstoxCallback: {
+                    std::string code = extract_query_param(req, "code");
+                    if (!code.empty()) {
+                        std::cout << "🔑 [UpstoxOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
+                        std::string upstox_app_id = EnvLoader::get("UPSTOX_LIVE_API_KEY", "");
+                        std::string expires_at;
+                        std::string access_token = exchange_upstox_code_for_token(code, expires_at);
+                        if (!access_token.empty()) {
+                            db_client_->save_upstox_access_token(access_token, upstox_app_id, expires_at);
+                            std::cout << "✅ [UpstoxOAuth] Access token exchanged and stored in provider_tokens table!\n";
+                            status_code = 303;
+                            extra_headers = "Location: /dashboard?upstox=success\r\n";
+                            body = "Upstox token exchanged successfully!";
+                        } else {
+                            status_code = 303;
+                            extra_headers = "Location: /dashboard?upstox=failed_exchange\r\n";
+                            body = "Upstox token exchange failed.";
+                        }
+                    } else {
+                        status_code = 303;
+                        extra_headers = "Location: /dashboard?upstox=failed\r\n";
+                        body = "Upstox Authorization code missing";
+                    }
+                    break;
+                }
+
+                case rt::Route::FyersTokenInit: {
+                    std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
+                    if (fyers_app_id.empty()) {
+                        status_code = 400;
+                        content_type = "application/json";
+                        body = "{\"error\":\"Live FYERS App ID not configured in .env\"}";
+                    } else {
+                        status_code = 303;
+                        std::string fyers_redirect_uri = EnvLoader::get("FYERS_REDIRECT_URI", "https://berhampore.in/auth/fyers/callback");
+                        std::string redirect_url = "https://api-t1.fyers.in/api/v3/generate-authcode?client_id=" + fyers_app_id + "&redirect_uri=" + fyers_redirect_uri + "&response_type=code&state=hermes_state";
+                        extra_headers = "Location: " + redirect_url + "\r\n";
+                        body = "Redirecting to FYERS OAuth Login...";
+                    }
+                    break;
+                }
+
+                case rt::Route::FyersCallback: {
+                    std::string code = extract_query_param(req, "auth_code");
+                    if (code.empty()) code = extract_query_param(req, "code");
+                    if (!code.empty()) {
+                        std::cout << "🔑 [FyersOAuth] Received authorization code (length " << code.length() << "). Exchanging for access token...\n";
+                        std::string fyers_app_id = EnvLoader::get("FYERS_APP_ID", "");
+                        std::string expires_at;
+                        std::string access_token = exchange_fyers_code_for_token(code, expires_at);
+                        if (!access_token.empty()) {
+                            db_client_->save_broker_access_token("fyers", access_token, fyers_app_id, expires_at);
+                            std::cout << "✅ [FyersOAuth] Access token exchanged, encrypted and stored in provider_tokens table!\n";
+                            status_code = 303;
+                            extra_headers = "Location: /dashboard?fyers=success\r\n";
+                            body = "FYERS token exchanged successfully!";
+                        } else {
+                            status_code = 303;
+                            extra_headers = "Location: /dashboard?fyers=failed_exchange\r\n";
+                            body = "FYERS token exchange failed.";
+                        }
+                    } else {
+                        status_code = 303;
+                        extra_headers = "Location: /dashboard?fyers=failed\r\n";
+                        body = "FYERS Authorization code missing";
+                    }
+                    break;
+                }
+
+                case rt::Route::UpstoxSandboxTokenVerify:
+                    db_client_->save_broker_access_token("upstox_sandbox", "active_sandbox_token", "9a0248ff-4bb6-46b0-951c-99fb219ef2a2", "2026-12-31 23:59:59");
+                    status_code = 303;
+                    extra_headers = "Location: /dashboard?sandbox=success\r\n";
+                    body = "Upstox Sandbox token verified successfully!";
+                    break;
+
+                case rt::Route::Docs:
+                    body = render_swagger_ui_page(is_auth);
+                    break;
+
+                case rt::Route::OpenApiJson:
+                    body = render_openapi_json();
+                    content_type = "application/json";
+                    break;
+
+                case rt::Route::ProjectStatusJson:
+                    body = render_json_summary();
+                    content_type = "application/json";
+                    break;
+
+                case rt::Route::HealthJson:
+                    render_health_json();
+                    break;
+
+                case rt::Route::Health:
+                    // /health?format=json returns the JSON status; any other query returns the page.
+                    // The old chain matched the substring "GET /health?format=json", so "?format=jsonX"
+                    // also served JSON; the parsed query must now be exactly format=json (CHAR-03).
+                    if (rl.query == "format=json") {
+                        render_health_json();
+                    } else {
+                        body = render_health_page(is_auth);
+                    }
+                    break;
+
+                case rt::Route::SystemStats:
+                    body = read_system_stats_json(db_client_);
+                    content_type = "application/json";
+                    break;
+
+                case rt::Route::StrategyConfig: {
+                    std::ostringstream ss;
+                    ss << "{\"active_config\":" << hermes::StrategyConfigManager::instance().to_json();
+                    if (db_client_) {
+                        auto audits = db_client_->fetch_strategy_config_audit(10);
+                        ss << ",\"recent_audits\":[";
+                        for (size_t i = 0; i < audits.size(); ++i) {
+                            if (i > 0) ss << ",";
+                            ss << "{\"id\":\"" << audits[i]["id"] << "\","
+                               << "\"key\":\"" << audits[i]["config_key"] << "\","
+                               << "\"old\":\"" << audits[i]["old_value"] << "\","
+                               << "\"new\":\"" << audits[i]["new_value"] << "\","
+                               << "\"by\":\"" << audits[i]["approved_by"] << "\","
+                               << "\"reason\":\"" << audits[i]["reason"] << "\","
+                               << "\"at\":\"" << audits[i]["created_at"] << "\"}";
+                        }
+                        ss << "]";
+                    }
+                    ss << "}";
+                    body = ss.str();
+                    content_type = "application/json";
+                    break;
+                }
+
+                case rt::Route::ProjectStatus:
+                    body = render_html_page(is_auth);
+                    break;
+
+                case rt::Route::Unknown:
+                default:
+                    // No fall-through: an unrouted path is not a page.
+                    status_code = 404;
+                    content_type = "application/json";
+                    body = "{\"error\":\"Not Found\"}";
+                    break;
             }
 
             std::string reason_phrase = "OK";
