@@ -233,7 +233,8 @@ inline bool is_public(Route r) {
             return true;
 
         // -- the public website's own pages. These render marketing/analytics content and
-        //    read no operator data. PROPOSED, pending confirmation -- see the report.
+        //    read no operator data. CONFIRMED by the handler audit in docs/S1_HANDLER_AUDIT.md,
+        //    which reads every route body at df7193a: aggregates only, no IPs, no identifiers.
         case Route::Home:           // GET / and /home
         case Route::VisitorInfo:    // GET /visitor-info
         case Route::VisitorStats:   // GET /api/visitor-info/stats (aggregate counts)
