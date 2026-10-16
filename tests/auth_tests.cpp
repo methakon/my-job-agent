@@ -7,6 +7,7 @@
 // so the tests pin the defect, not just the fix.
 
 #include "roadmap/http_auth.hpp"
+#include "roadmap/route_table.hpp"
 
 #include <iostream>
 #include <string>
@@ -178,6 +179,103 @@ int main() {
         CHECK(Authenticator::is_mutating_route("/api/upstox-sandbox/token/verify"));
         CHECK(!Authenticator::is_mutating_route("/"));
         CHECK(!Authenticator::is_mutating_route("/project-status"));
+    }
+
+
+    // =========================================================================================
+    // Route-table tests. The point of this table is that "which route is this?" is answerable
+    // from the request LINE alone, so request text can never steer dispatch. These tests pin
+    // exactly that.
+    // =========================================================================================
+    using namespace hermes::route_table;
+    {
+        // ROUTE-01: every table entry resolves by exact method+path to its own route.
+        std::size_t n = 0;
+        for (const Entry* e = table(); e->path != nullptr; ++e) {
+            ++n;
+            const Route got = resolve(e->method, e->path);
+            CHECK_MSG(got == e->route,
+                      std::string("ROUTE-01: ") + e->method + " " + e->path + " resolved to " +
+                      name(got) + ", expected " + name(e->route));
+            CHECK_MSG(std::string(name(e->route)) != "Unknown",
+                      std::string("ROUTE-01: unnamed entry ") + e->path);
+        }
+        CHECK_MSG(n >= 40, "ROUTE-01: table should carry every dispatcher route");
+        std::cout << "    route table entries: " << n << "\n";
+    }
+    {
+        // ROUTE-02: the two routes whose method/path the earlier list got wrong.
+        CHECK(parse_request_line("POST /api/roadmap/clarification/answer HTTP/1.1\r\n").ok);
+        CHECK(resolve("POST", "/api/roadmap/clarification/answer") == Route::ClarificationAnswer);
+        CHECK(resolve("GET", "/api/upstox-sandbox/token/verify") == Route::UpstoxSandboxTokenVerify);
+        CHECK_MSG(resolve("POST", "/api/upstox-sandbox/token/verify") == Route::Unknown,
+                  "ROUTE-02: the sandbox route is a GET; a POST must not reach it");
+    }
+    {
+        // ROUTE-03: a route string in the BODY does not route. This is the original defect.
+        const std::string body_req =
+            "GET /dashboard HTTP/1.1\r\nHost: x\r\n\r\nPOST /api/roadmap/item/update";
+        const RequestLine rl = parse_request_line(body_req);
+        CHECK(rl.ok);
+        CHECK(resolve(rl.method, rl.path) == Route::Dashboard);
+        CHECK_MSG(resolve(rl.method, rl.path) != Route::RoadmapItemUpdate,
+                  "ROUTE-03: body text must not select a route");
+
+        // A route string smuggled into the request LINE with a space is not a valid target at
+        // all: the parser rejects the line outright rather than guessing where the path ends.
+        const std::string smuggled =
+            "GET /dashboard?next=POST /api/roadmap/item/update HTTP/1.1\r\n";
+        const RequestLine rs = parse_request_line(smuggled);
+        CHECK_MSG(!rs.ok, "ROUTE-03: a target containing a space must be rejected, not parsed");
+
+        const std::string qs_req = "GET /dashboard?next=/api/roadmap/item/update HTTP/1.1\r\n";
+        const RequestLine rq = parse_request_line(qs_req);
+        CHECK_MSG(rq.path == "/dashboard", "ROUTE-03: query string must be stripped from the path");
+        CHECK(resolve(rq.method, rq.path) == Route::Dashboard);
+    }
+    {
+        // ROUTE-04: malformed request lines resolve to Unknown, never to a guess.
+        const char* bad[] = {
+            "", "GET", "GET ", "GET /dashboard", "GET /dashboard HTTP/2",
+            "get /dashboard HTTP/1.1", "GET dashboard HTTP/1.1",
+            "GET /dashboard?x HTTP/9.9",
+        };
+        for (const char* b : bad) {
+            const RequestLine rl = parse_request_line(b);
+            CHECK_MSG(!rl.ok || resolve(rl.method, rl.path) == Route::Unknown,
+                      std::string("ROUTE-04: malformed line must not resolve: ") + b);
+        }
+        CHECK(!parse_request_line("GET /dashboard HTTP/1.1\r\n").ok == false);
+    }
+    {
+        // ROUTE-05: method is part of the identity. GET where POST is required never matches.
+        CHECK(resolve("GET", "/api/roadmap/item/update") == Route::Unknown);
+        CHECK(resolve("POST", "/dashboard") == Route::Unknown);
+        CHECK(resolve("GET", "/login") == Route::LoginPage);
+        CHECK_MSG(resolve("GET", "/auth/login") == Route::Unknown, "ROUTE-05: /auth/login is POST-only");
+        CHECK(resolve("POST", "/auth/login") == Route::LoginPost);
+    }
+    {
+        // ROUTE-06: the mutating classification and the allow-list, as the gate will use them.
+        CHECK(is_mutating(Route::RoadmapItemUpdate));
+        CHECK(is_mutating(Route::ClarificationAsk));
+        CHECK(is_mutating(Route::ClarificationAnswer));
+        CHECK(is_mutating(Route::AnalyticsRetentionPurge));
+        CHECK(is_mutating(Route::UpstoxOrderWebhook));
+        CHECK(is_mutating(Route::UpstoxNotifier));
+        CHECK(is_mutating(Route::Logout));
+        CHECK_MSG(is_mutating(Route::UpstoxSandboxTokenVerify), "ROUTE-06: sandbox token GET mutates");
+        CHECK_MSG(is_mutating(Route::UpstoxTokenInit), "ROUTE-06: token init starts a flow");
+        CHECK_MSG(is_mutating(Route::FyersTokenInit), "ROUTE-06: token init starts a flow");
+        CHECK_MSG(is_mutating(Route::AdminVisitors), "ROUTE-06: admin visitors is gated");
+        CHECK_MSG(!is_mutating(Route::Dashboard), "ROUTE-06: dashboard is read-only");
+        CHECK_MSG(!is_mutating(Route::Health), "ROUTE-06: health is read-only");
+
+        CHECK(is_allowlisted(Route::LoginPost));
+        CHECK(is_allowlisted(Route::UpstoxCallback));
+        CHECK(is_allowlisted(Route::FyersCallback));
+        CHECK_MSG(!is_allowlisted(Route::RoadmapItemUpdate), "ROUTE-06: no other route is open");
+        CHECK_MSG(!is_allowlisted(Route::AdminVisitors), "ROUTE-06: admin is not open");
     }
 
     std::cout << "\n  checks=" << checks << "  failures=" << failures << "\n";
