@@ -125,7 +125,17 @@ inline RequestLine parse_request_line(const std::string& req) {
         const char c = method[i];
         if (!((c >= 'A' && c <= 'Z') || c == '-')) return out;   // no lowercase, no controls
     }
-    if (version.rfind("HTTP/1.", 0) != 0) return out;
+    // The version must be exactly HTTP/1.0 or HTTP/1.1. A prefix check would accept
+    // "HTTP/1.1x", "HTTP/1.9" and "HTTP/1." alone.
+    if (version != "HTTP/1.0" && version != "HTTP/1.1") return out;
+
+    // Reject control characters and NUL anywhere in the target, before it is split or used.
+    // (0x20 cannot appear -- the space split above already consumed it -- but the check is
+    // unconditional so the guarantee does not depend on that.)
+    for (size_t i = 0; i < target.size(); ++i) {
+        const unsigned char u = static_cast<unsigned char>(target[i]);
+        if (u <= 0x20 || u == 0x7F) return out;
+    }
 
     std::string path = target, query;
     const size_t q = target.find('?');
@@ -195,38 +205,43 @@ inline const char* name(Route r) {
     return "Unknown";
 }
 
-// A route is "mutating" when it changes state. This classification drives the default-deny gate,
-// so it is derived from the route identity, never from the request text.
-inline bool is_mutating(Route r) {
+// is_public answers ONE question: may this route be reached without authentication?
+// It is an explicit allow-list. Everything not named here requires a valid session, so a route
+// added to the table later is protected by default -- the failure mode of forgetting is a denied
+// request, not an open door.
+//
+// Each entry carries its reason. The set is deliberately minimal and is an OPERATOR DECISION:
+// widening it is a security change, not a convenience.
+inline bool is_public(Route r) {
     switch (r) {
-        // all POSTs other than the allow-list
-        case Route::Logout:
-        case Route::RoadmapItemUpdate:
-        case Route::ClarificationAsk:
-        case Route::ClarificationAnswer:
-        case Route::UpstoxOrderWebhook:
-        case Route::UpstoxNotifier:
-        case Route::AnalyticsRetentionPurge:
-        // GET routes that are NOT side-effect free
-        case Route::UpstoxSandboxTokenVerify:   // writes a token record
-        case Route::UpstoxTokenInit:            // starts an OAuth flow
-        case Route::FyersTokenInit:             // starts an OAuth flow
-        case Route::AdminVisitors:              // admin data
-        case Route::AdminVisitorDetail:         // admin data
+        // -- the login flow itself: you cannot authenticate without reaching it --
+        case Route::LoginPage:      // GET /login renders the form; no session exists yet
             return true;
-        default:
-            return false;
-    }
-}
+        case Route::LoginPost:      // POST /auth/login is the submission; throttled in step D
+            return true;
 
-// The explicit allow-list: routes reachable without a session, each with its reason.
-//   LoginPost     -- the login submission itself; throttled separately (step D).
-//   UpstoxCallback / FyersCallback -- OAuth redirects arrive from the broker's browser session
-//       with no operator cookie, so they cannot require one. They are instead gated by a
-//       one-time server-issued state token: the matching /token/init route requires a session
-//       and issues the state, and the callback verifies it (step B).
-inline bool is_allowlisted(Route r) {
-    return r == Route::LoginPost || r == Route::UpstoxCallback || r == Route::FyersCallback;
+        // -- OAuth redirects: the broker's browser lands here with no operator cookie. They are
+        //    NOT unauthenticated in effect: /token/init requires a session and issues a one-time
+        //    state, and the callback must present and verify it (step B).
+        case Route::UpstoxCallback:
+        case Route::FyersCallback:
+            return true;
+
+        // -- liveness only: exposes no data, no state, no identifiers --
+        case Route::Health:         // GET /health  -> HTML status line
+        case Route::HealthJson:     // GET /api/health -> {"status":...}
+            return true;
+
+        // -- the public website's own pages. These render marketing/analytics content and
+        //    read no operator data. PROPOSED, pending confirmation -- see the report.
+        case Route::Home:           // GET / and /home
+        case Route::VisitorInfo:    // GET /visitor-info
+        case Route::VisitorStats:   // GET /api/visitor-info/stats (aggregate counts)
+            return true;
+
+        default:
+            return false;           // everything else requires auth
+    }
 }
 
 }  // namespace route_table

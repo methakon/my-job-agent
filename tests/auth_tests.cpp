@@ -257,25 +257,29 @@ int main() {
     }
     {
         // ROUTE-06: the mutating classification and the allow-list, as the gate will use them.
-        CHECK(is_mutating(Route::RoadmapItemUpdate));
-        CHECK(is_mutating(Route::ClarificationAsk));
-        CHECK(is_mutating(Route::ClarificationAnswer));
-        CHECK(is_mutating(Route::AnalyticsRetentionPurge));
-        CHECK(is_mutating(Route::UpstoxOrderWebhook));
-        CHECK(is_mutating(Route::UpstoxNotifier));
-        CHECK(is_mutating(Route::Logout));
-        CHECK_MSG(is_mutating(Route::UpstoxSandboxTokenVerify), "ROUTE-06: sandbox token GET mutates");
-        CHECK_MSG(is_mutating(Route::UpstoxTokenInit), "ROUTE-06: token init starts a flow");
-        CHECK_MSG(is_mutating(Route::FyersTokenInit), "ROUTE-06: token init starts a flow");
-        CHECK_MSG(is_mutating(Route::AdminVisitors), "ROUTE-06: admin visitors is gated");
-        CHECK_MSG(!is_mutating(Route::Dashboard), "ROUTE-06: dashboard is read-only");
-        CHECK_MSG(!is_mutating(Route::Health), "ROUTE-06: health is read-only");
+        CHECK(!is_public(Route::RoadmapItemUpdate));
+        CHECK(!is_public(Route::ClarificationAsk));
+        CHECK(!is_public(Route::ClarificationAnswer));
+        CHECK(!is_public(Route::AnalyticsRetentionPurge));
+        CHECK(!is_public(Route::UpstoxOrderWebhook));
+        CHECK(!is_public(Route::UpstoxNotifier));
+        CHECK(!is_public(Route::Logout));
+        CHECK_MSG(!is_public(Route::UpstoxSandboxTokenVerify), "ROUTE-06: sandbox token GET requires auth");
+        CHECK_MSG(!is_public(Route::UpstoxTokenInit), "ROUTE-06: token init requires auth");
+        CHECK_MSG(!is_public(Route::FyersTokenInit), "ROUTE-06: token init requires auth");
+        CHECK_MSG(!is_public(Route::AdminVisitors), "ROUTE-06: admin visitors requires auth");
+        CHECK_MSG(!is_public(Route::Dashboard), "ROUTE-06: dashboard requires auth despite being read-only");
+        CHECK_MSG(is_public(Route::Health), "ROUTE-06: health is public liveness");
 
-        CHECK(is_allowlisted(Route::LoginPost));
-        CHECK(is_allowlisted(Route::UpstoxCallback));
-        CHECK(is_allowlisted(Route::FyersCallback));
-        CHECK_MSG(!is_allowlisted(Route::RoadmapItemUpdate), "ROUTE-06: no other route is open");
-        CHECK_MSG(!is_allowlisted(Route::AdminVisitors), "ROUTE-06: admin is not open");
+        CHECK(is_public(Route::LoginPage));
+        CHECK(is_public(Route::LoginPost));
+        CHECK(is_public(Route::UpstoxCallback));
+        CHECK(is_public(Route::FyersCallback));
+        CHECK(is_public(Route::HealthJson));
+        CHECK_MSG(!is_public(Route::RoadmapItemUpdate), "ROUTE-06: no other route is open");
+        CHECK_MSG(!is_public(Route::AdminVisitors), "ROUTE-06: admin is not open");
+        // default-deny: a route nobody classified is not public
+        CHECK_MSG(!is_public(Route::Unknown), "ROUTE-06: Unknown must never be public");
     }
 
 
@@ -389,6 +393,27 @@ int main() {
         CHECK(resolve("PATCH",   "/api/roadmap/item/update") == Route::Unknown);
         CHECK(resolve("DELETE",  "/api/roadmap/item/update") == Route::Unknown);
         CHECK(parse_request_line("HEAD /health HTTP/1.1\r\n").ok == true);
+    }
+
+
+    {
+        // PARSE-01: control characters and NUL anywhere in the target are rejected.
+        CHECK_MSG(!parse_request_line("GET /dash\x01board HTTP/1.1\r\n").ok, "PARSE-01: SOH rejected");
+        CHECK_MSG(!parse_request_line(std::string("GET /dash") + '\0' + "board HTTP/1.1\r\n").ok, "PARSE-01: NUL rejected");
+        CHECK_MSG(!parse_request_line("GET /dash\tboard HTTP/1.1\r\n").ok, "PARSE-01: tab rejected");
+        // \x7F followed by 'b' would parse as \x7FB; split the literals so the byte is exactly DEL.
+        CHECK_MSG(!parse_request_line("GET /dash\x7F" "board HTTP/1.1\r\n").ok, "PARSE-01: DEL rejected");
+        CHECK_MSG(!parse_request_line("GET /a\nHTTP/1.1\r\n").ok, "PARSE-01: embedded LF rejected");
+        CHECK(parse_request_line("GET /a%20b HTTP/1.1\r\n").ok);   // percent-encoding stays legal
+
+        // PARSE-02: the version must be exactly HTTP/1.0 or HTTP/1.1.
+        CHECK(parse_request_line("GET / HTTP/1.0\r\n").ok);
+        CHECK(parse_request_line("GET / HTTP/1.1\r\n").ok);
+        CHECK_MSG(!parse_request_line("GET / HTTP/1.1x\r\n").ok, "PARSE-02: HTTP/1.1x rejected");
+        CHECK_MSG(!parse_request_line("GET / HTTP/1.\r\n").ok, "PARSE-02: bare HTTP/1. rejected");
+        CHECK_MSG(!parse_request_line("GET / HTTP/1.9\r\n").ok, "PARSE-02: HTTP/1.9 rejected");
+        CHECK_MSG(!parse_request_line("GET / HTTP/2\r\n").ok, "PARSE-02: HTTP/2 rejected");
+        CHECK_MSG(!parse_request_line("GET / http/1.1\r\n").ok, "PARSE-02: lowercase version rejected");
     }
 
     std::cout << "\n  checks=" << checks << "  failures=" << failures << "\n";
