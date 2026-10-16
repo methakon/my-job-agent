@@ -278,6 +278,119 @@ int main() {
         CHECK_MSG(!is_allowlisted(Route::AdminVisitors), "ROUTE-06: admin is not open");
     }
 
+
+    // =========================================================================================
+    // CHARACTERIZATION of the old dispatcher chain, captured by reading it, so the swap onto the
+    // table must reproduce it. Each entry cites the branch line it was read from.
+    //
+    // This is the contract A2 has to keep. Two entries are deliberately recorded as BEHAVIOUR
+    // CHANGES rather than equivalences -- see CHAR-03.
+    // =========================================================================================
+    {
+        struct Char { const char* m; const char* p; Route want; int line; };
+        const Char cases[] = {
+            {"GET",  "/",                                  Route::Home,                    2372},
+            {"GET",  "/home",                              Route::Home,                    2372},
+            {"GET",  "/visitor-info",                      Route::VisitorInfo,             2374},
+            {"GET",  "/api/visitor-info/stats",            Route::VisitorStats,            2376},
+            {"GET",  "/api/market/session-status",         Route::MarketSessionStatus,     2393},
+            {"GET",  "/admin/visitors",                    Route::AdminVisitors,           2426},
+            {"GET",  "/admin/visitor",                     Route::AdminVisitorDetail,      2443},
+            {"GET",  "/admin/visitors/abc123",             Route::AdminVisitorDetail,      2443},
+            {"POST", "/admin/analytics/retention-purge",   Route::AnalyticsRetentionPurge, 2457},
+            {"GET",  "/dashboard",                         Route::Dashboard,               2468},
+            {"GET",  "/portfolio",                         Route::Portfolio,               2476},
+            {"GET",  "/paper-trading",                     Route::PaperTrading,            2478},
+            {"GET",  "/fnf-trading",                       Route::FnfTrading,              2478},
+            {"GET",  "/tokens",                            Route::Tokens,                  2486},
+            {"GET",  "/login",                             Route::LoginPage,               2488},
+            {"POST", "/auth/login",                        Route::LoginPost,               2490},
+            {"POST", "/auth/logout",                       Route::Logout,                  2509},
+            {"POST", "/api/roadmap/item/update",           Route::RoadmapItemUpdate,       2513},
+            {"POST", "/api/roadmap/clarification/ask",     Route::ClarificationAsk,        2523},
+            {"POST", "/api/roadmap/clarification/answer",  Route::ClarificationAnswer,     2533},
+            {"GET",  "/api/seasonality-patterns",          Route::SeasonalityPatterns,     2544},
+            {"GET",  "/api/user/portfolio",                Route::UserPortfolio,           2563},
+            {"POST", "/api/upstox/order-webhook",          Route::UpstoxOrderWebhook,      2572},
+            {"POST", "/api/upstox/notifier",               Route::UpstoxNotifier,          2572},
+            {"GET",  "/api/upstox/token/init",             Route::UpstoxTokenInit,         2576},
+            {"GET",  "/api/upstox/callback",               Route::UpstoxCallback,          2589},
+            {"GET",  "/auth/upstox/callback",              Route::UpstoxCallback,          2589},
+            {"GET",  "/api/fyers/token/init",              Route::FyersTokenInit,          2612},
+            {"GET",  "/api/fyers/callback",                Route::FyersCallback,           2625},
+            {"GET",  "/auth/fyers/callback",               Route::FyersCallback,           2625},
+            {"GET",  "/api/upstox-sandbox/token/verify",   Route::UpstoxSandboxTokenVerify,2649},
+            {"GET",  "/docs",                              Route::Docs,                    2654},
+            {"GET",  "/swagger",                           Route::Docs,                    2654},
+            {"GET",  "/api/v1/openapi.json",               Route::OpenApiJson,             2656},
+            {"GET",  "/project-status/json",               Route::ProjectStatusJson,       2659},
+            {"GET",  "/api/health",                        Route::HealthJson,              2662},
+            {"GET",  "/health",                            Route::Health,                  2675},
+            {"GET",  "/api/system/stats",                  Route::SystemStats,             2677},
+            {"GET",  "/api/strategy/config",               Route::StrategyConfig,          2680},
+            {"GET",  "/project-status",                    Route::ProjectStatus,           2701},
+        };
+        for (const Char& c : cases) {
+            const Route got = resolve(c.m, c.p);
+            CHECK_MSG(got == c.want,
+                      std::string("CHAR: old chain line ") + std::to_string(c.line) + " " + c.m +
+                      " " + c.p + " -> " + name(got) + ", expected " + name(c.want));
+        }
+        std::cout << "    characterized handlers: " << (sizeof(cases)/sizeof(cases[0])) << "\n";
+    }
+    {
+        // CHAR-03: /health?format=json. The OLD chain matched with req.find(), i.e. a SUBSTRING,
+        // so "?format=jsonX" also served JSON. Resolving on path and then requiring the parsed
+        // query to be exactly format=json TIGHTENS that. Stated and pinned here as a deliberate
+        // behaviour change, not smuggled in as an equivalence.
+        const RequestLine j = parse_request_line("GET /health?format=json HTTP/1.1\r\n");
+        CHECK(j.ok);
+        CHECK(j.path == "/health");
+        CHECK(j.query == "format=json");
+        CHECK(resolve(j.method, j.path) == Route::Health);
+
+        const RequestLine x = parse_request_line("GET /health?format=jsonX HTTP/1.1\r\n");
+        CHECK(x.ok);
+        CHECK_MSG(x.query == "format=jsonX", "CHAR-03: query is preserved verbatim");
+        CHECK_MSG(x.query != "format=json",
+                  "CHAR-03: format=jsonX must NOT be treated as format=json (old chain did)");
+
+        const RequestLine none = parse_request_line("GET /health HTTP/1.1\r\n");
+        CHECK(none.ok);
+        CHECK(none.query.empty());
+    }
+    {
+        // CHAR-04: /admin/visitors/<id> - the id must be validated before use. The old chain
+        // matched any suffix at all via rfind, so it accepted an id containing path traversal,
+        // quotes or percent-encoding.
+        auto strict_id = [](const std::string& id) -> bool {
+            if (id.empty() || id.size() > 64) return false;
+            for (char ch : id) {
+                const bool ok = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') ||
+                                (ch >= 'A' && ch <= 'Z') || ch == '-' || ch == '_';
+                if (!ok) return false;             // no '.', '/', '%', quotes, whitespace
+            }
+            return true;
+        };
+        CHECK(strict_id("abc123"));
+        CHECK(strict_id("9f8e-7d6c_5b"));
+        CHECK_MSG(!strict_id("../../etc/passwd"), "CHAR-04: traversal must be rejected");
+        CHECK_MSG(!strict_id("a%2Fb"), "CHAR-04: percent-encoding must be rejected");
+        CHECK_MSG(!strict_id("a b"), "CHAR-04: whitespace must be rejected");
+        CHECK_MSG(!strict_id("<script>"), "CHAR-04: markup must be rejected");
+        CHECK_MSG(!strict_id(""), "CHAR-04: empty id must be rejected");
+        CHECK_MSG(!strict_id(std::string(65, 'a')), "CHAR-04: over-long id must be rejected");
+    }
+    {
+        // CHAR-05: every method the server does not implement denies by default.
+        CHECK(resolve("HEAD",    "/health") == Route::Unknown);
+        CHECK(resolve("OPTIONS", "/health") == Route::Unknown);
+        CHECK(resolve("PUT",     "/dashboard") == Route::Unknown);
+        CHECK(resolve("PATCH",   "/api/roadmap/item/update") == Route::Unknown);
+        CHECK(resolve("DELETE",  "/api/roadmap/item/update") == Route::Unknown);
+        CHECK(parse_request_line("HEAD /health HTTP/1.1\r\n").ok == true);
+    }
+
     std::cout << "\n  checks=" << checks << "  failures=" << failures << "\n";
     if (failures == 0) {
         std::cout << "  ✅ all auth regression tests passed\n";
