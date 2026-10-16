@@ -56,3 +56,10 @@ add_test(NAME SOLID_ACID_TestSuite COMMAND unit_and_integration_tests)
 add_test(NAME Visitor_Analytics_TestSuite COMMAND visitor_analytics_tests)
 
 message(STATUS "C++ Trading Agent & SOLID/ACID Test Suite Built Successfully")
+
+# Roadmap portal authentication regression tests. No database, no network: the auth decision is a
+# pure function of the request text plus an injected session lookup.
+add_executable(auth_tests tests/auth_tests.cpp)
+target_include_directories(auth_tests PRIVATE src)
+target_link_libraries(auth_tests PRIVATE pthread ssl crypto)
+add_test(NAME Roadmap_Auth_TestSuite COMMAND auth_tests)
