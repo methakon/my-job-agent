@@ -1404,6 +1404,38 @@
 			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent without deployment. Control plane unreachable for a /project-status sync (PM2 empty, no listener on :3010), so the sanctioned exact-SHA exemption path is used instead of GATE_CLOSE_SKIP.",
 			"recorded": "2026-11-02",
 			"evidence": "check_auth substring match replaced by Authenticator; verified 0 substring references remain in roadmap_server.cpp"
+		},
+		"518a6caff59e62be2c972a0b56b15d442964200a": {
+			"short": "518a6ca",
+			"reason": "Merge of origin/feat/cpp-trading-agent into the local branch — combines already-allow-listed and already-pushed commits; introduces no original change",
+			"workstream": "repo-migration-and-integration",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent. Row sync unreachable without deployment (no listener on :3010, PM2 empty); exemption used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "clean --no-ff merge, 0 conflicts across 31 files; tree restored to the merge result and verified"
+		},
+		"d80e6a3f07f8835da132f4cca5d5c19919d6370d": {
+			"short": "d80e6a3",
+			"reason": "chore(migration): repoint tracked paths at the consolidated projects/algotrading layout — environment/control-plane change, cannot belong to a roadmap row",
+			"workstream": "repo-migration-and-integration",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent. Row sync unreachable without deployment (no listener on :3010, PM2 empty); exemption used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "21 files, 29 insertions / 29 deletions, pure path substitution; node scripts/gate-close-check.js runs to IN SYNC exit 0 after the change"
+		},
+		"26128343a2a98709138992c6345d2b6ff482e0a0": {
+			"short": "2612834",
+			"reason": "fix: remediate 2026-11-02 system audit (A-01..A-17, warnings 27 -> 0) — authored and pushed by Kiro Agent before any /project-status sync",
+			"workstream": "audit-remediation-2026-11-02",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent. Row sync unreachable without deployment (no listener on :3010, PM2 empty); exemption used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "pushed to origin by Kiro Agent; NOT independently verified by this session — the warnings 27->0 claim has not been re-measured"
+		},
+		"cc1a0caee3ea9c26028b117461c487de151c647a": {
+			"short": "cc1a0ca",
+			"reason": "fix: remaining audit items (A-11, A-12, A-18..A-21, A-07 visibility) — authored and pushed by Kiro Agent before any /project-status sync",
+			"workstream": "audit-remediation-2026-11-02",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent. Row sync unreachable without deployment (no listener on :3010, PM2 empty); exemption used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "pushed to origin by Kiro Agent; A-11 partially contradicted — db_client.cpp:845 still maps open/high/low/close all to tick.ltp, the original A-11 defect"
 		}
 	}
 }
