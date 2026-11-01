@@ -34,7 +34,10 @@ struct TradeDecision {
 
 class LiveOrderExecutionGuard {
 public:
-    static bool place_live_broker_order(const std::string& broker, const std::string& symbol, const std::string& side, int qty, double price, std::string& out_error) {
+    // The parameters are deliberately unnamed: this stub exists to be called and to refuse, and it
+    // must never read an order. The signature is the interface that has to stay; the names are not.
+    static bool place_live_broker_order(const std::string& /*broker*/, const std::string& /*symbol*/, const std::string& /*side*/,
+                                        int /*qty*/, double /*price*/, std::string& out_error) {
 #if HERMES_COMPILE_TIME_PAPER_ONLY
         out_error = "HARD_GUARD_REJECTION: Compile-time HERMES_COMPILE_TIME_PAPER_ONLY guard active. Live order placement is strictly disabled.";
         return false;

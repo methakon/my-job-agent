@@ -148,15 +148,25 @@ DailyDataArchivalReport PostSessionAnalyzer::run_daily_data_archival(const std::
     report.retention_policy_note = "Rollup to cpp_historical_daily_candles; past-session ticks migrated to fnf_market_snapshots_history; live table retains today only.";
 
     // Step 1: Rollup ticks into cpp_historical_daily_candles
-    report.candles_rolled_up = db_client_->rollup_ticks_to_daily_candles(date_str);
+    bool rollup_ok = false;
+    report.candles_rolled_up = db_client_->rollup_ticks_to_daily_candles(date_str, &rollup_ok);
 
     // Step 2: Archive ticks from previous dates (DATE(ts) < today) to fnf_market_snapshots_history
     uint64_t deleted_count = 0;
-    report.snapshots_archived = db_client_->archive_market_snapshots_before(date_str, deleted_count);
+    bool archive_ok = false;
+    report.snapshots_archived = db_client_->archive_market_snapshots_before(date_str, deleted_count, &archive_ok);
     report.snapshots_deleted = deleted_count;
 
-    report.execution_success = (report.candles_rolled_up > 0 || report.snapshots_archived >= 0);
-    std::cout << "✅ [PostSessionAnalyzer] Daily archival complete: "
+    // Success means both steps ran to completion. The previous expression,
+    // (candles_rolled_up > 0 || snapshots_archived >= 0), was always true: snapshots_archived is
+    // unsigned, so ">= 0" cannot be false, and a failed rollup or archive still reported success.
+    report.execution_success = rollup_ok && archive_ok;
+    if (!report.execution_success) {
+        std::cerr << "❌ [PostSessionAnalyzer] Daily archival did NOT complete cleanly (rollup "
+                  << (rollup_ok ? "ok" : "FAILED") << ", archive " << (archive_ok ? "ok" : "FAILED") << ")\n";
+    }
+    std::cout << (report.execution_success ? "✅" : "⚠️") << " [PostSessionAnalyzer] Daily archival "
+              << (report.execution_success ? "complete: " : "finished with errors: ")
               << report.candles_rolled_up << " candles rolled up, "
               << report.snapshots_archived << " past snapshots archived, "
               << report.snapshots_deleted << " cleaned from live.\n";

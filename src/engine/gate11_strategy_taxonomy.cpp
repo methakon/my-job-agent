@@ -60,7 +60,7 @@ StrategyProposal GammaScalpP1Strategy::evaluate(const StrategyInput& input) {
 CalendarSpreadP2Strategy::CalendarSpreadP2Strategy(bool plateau_evidence_proven, const std::string& exp_id)
     : plateau_evidence_proven_(plateau_evidence_proven), exp_id_(exp_id) {}
 
-StrategyProposal CalendarSpreadP2Strategy::evaluate(const StrategyInput& input) {
+StrategyProposal CalendarSpreadP2Strategy::evaluate(const StrategyInput& /*input*/) {   // gated on evidence, not on market input
     StrategyProposal prop;
     prop.strategy_name = name();
     prop.priority_level = priority_level();
@@ -80,7 +80,7 @@ StrategyProposal CalendarSpreadP2Strategy::evaluate(const StrategyInput& input) 
 }
 
 // Market Maker Strategy (EXCLUDED FROM V1)
-StrategyProposal HFTMarketMakerStrategy::evaluate(const StrategyInput& input) {
+StrategyProposal HFTMarketMakerStrategy::evaluate(const StrategyInput& /*input*/) {   // excluded from V1 unconditionally
     StrategyProposal prop;
     prop.strategy_name = name();
     prop.priority_level = priority_level();

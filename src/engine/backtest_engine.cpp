@@ -11,6 +11,17 @@ BacktestEngine::BacktestEngine(std::shared_ptr<RoadmapDbClient> db_client)
 
 BacktestEngine::~BacktestEngine() {}
 
+double per_trade_sharpe(const std::vector<double>& pnls) {
+    if (pnls.size() < 2) return 0.0;
+    double sum = 0.0;
+    for (double v : pnls) sum += v;
+    const double mean = sum / static_cast<double>(pnls.size());
+    double sq = 0.0;
+    for (double v : pnls) sq += (v - mean) * (v - mean);
+    const double sd = std::sqrt(sq / static_cast<double>(pnls.size() - 1));   // sample (n-1)
+    return (sd > 1e-12) ? (mean / sd) : 0.0;
+}
+
 BacktestResult BacktestEngine::run_historical_replay(const std::vector<CanonicalOptionTick>& ticks) {
     auto start_time = std::chrono::high_resolution_clock::now();
     BacktestResult res;
@@ -42,6 +53,7 @@ BacktestResult BacktestEngine::run_historical_replay(const std::vector<Canonical
             current_capital += trade_pnl;
 
             res.total_trades++;
+            res.trade_pnls.push_back(trade_pnl);
             if (trade_pnl > 0) res.winning_trades++;
             else res.losing_trades++;
 
@@ -61,7 +73,8 @@ BacktestResult BacktestEngine::run_historical_replay(const std::vector<Canonical
     res.win_rate_pct = (res.total_trades > 0) ? ((double)res.winning_trades / res.total_trades * 100.0) : 0.0;
     res.max_drawdown_pct = max_dd;
     res.avg_decision_latency_micros = (res.total_ticks_processed > 0) ? ((double)total_latency / res.total_ticks_processed) : 0.0;
-    res.sharpe_ratio = (res.total_trades > 0 && res.total_net_pnl != 0) ? (res.total_net_pnl / (res.initial_capital * 0.05 + 1.0)) : 0.0;
+    res.pnl_over_risk_capital = (res.total_trades > 0 && res.total_net_pnl != 0) ? (res.total_net_pnl / (res.initial_capital * 0.05 + 1.0)) : 0.0;
+    res.sharpe_ratio = per_trade_sharpe(res.trade_pnls);
 
     return res;
 }
@@ -109,6 +122,7 @@ BacktestResult BacktestEngine::run_parallel_backtest(const std::string& symbol, 
         combined.winning_trades += res.winning_trades;
         combined.losing_trades += res.losing_trades;
         combined.total_net_pnl += res.total_net_pnl;
+        combined.trade_pnls.insert(combined.trade_pnls.end(), res.trade_pnls.begin(), res.trade_pnls.end());
         combined.avg_decision_latency_micros += res.avg_decision_latency_micros;
         if (res.max_drawdown_pct > combined.max_drawdown_pct) {
             combined.max_drawdown_pct = res.max_drawdown_pct;
@@ -118,6 +132,9 @@ BacktestResult BacktestEngine::run_parallel_backtest(const std::string& symbol, 
     combined.final_capital = combined.initial_capital + combined.total_net_pnl;
     combined.win_rate_pct = (combined.total_trades > 0) ? ((double)combined.winning_trades / combined.total_trades * 100.0) : 0.0;
     combined.avg_decision_latency_micros /= num_threads;
+    combined.pnl_over_risk_capital = (combined.total_trades > 0 && combined.total_net_pnl != 0)
+        ? (combined.total_net_pnl / (combined.initial_capital * 0.05 + 1.0)) : 0.0;
+    combined.sharpe_ratio = per_trade_sharpe(combined.trade_pnls);
 
     return combined;
 }

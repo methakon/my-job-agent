@@ -1,4 +1,9 @@
 #include "market_calendar.hpp"
+#include "../common/env_loader.hpp"
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <sstream>
 #include <cctype>
 #include <ctime>
 #include <set>
@@ -35,7 +40,46 @@ bool MarketCalendar::is_trading_weekday(const IstDateTime& ist) {
     return (ist.weekday >= 1 && ist.weekday <= 5);
 }
 
-bool MarketCalendar::is_nse_holiday(int year, int month, int day) {
+namespace {
+
+bool real_calendar_date(int y, int m, int d) {
+    if (y < 1970 || y > 2200 || m < 1 || m > 12 || d < 1) return false;
+    static const int md[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    const bool leap = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
+    return d <= ((m == 2 && leap) ? 29 : md[m - 1]);
+}
+
+// Holidays added from NSE_HOLIDAYS / NSE_HOLIDAYS_FILE. Built once; read-only afterwards.
+const std::set<std::tuple<int, int, int>>& extra_holidays() {
+    static std::set<std::tuple<int, int, int>> extra;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        std::vector<std::string> rejected;
+        const std::string env = EnvLoader::get("NSE_HOLIDAYS", "");
+        if (!env.empty()) {
+            auto parsed = MarketCalendar::parse_holiday_list(env, &rejected);
+            extra.insert(parsed.begin(), parsed.end());
+        }
+        const std::string file = EnvLoader::get("NSE_HOLIDAYS_FILE", "");
+        if (!file.empty()) {
+            std::ifstream in(file);
+            if (!in) {
+                std::cerr << "⚠️ [MarketCalendar] NSE_HOLIDAYS_FILE could not be read: " << file << "\n";
+            } else {
+                std::stringstream buf;
+                buf << in.rdbuf();
+                auto parsed = MarketCalendar::parse_holiday_list(buf.str(), &rejected);
+                extra.insert(parsed.begin(), parsed.end());
+            }
+        }
+        for (const std::string& r : rejected) {
+            std::cerr << "⚠️ [MarketCalendar] ignored holiday entry that is not a valid YYYY-MM-DD date: \"" << r << "\"\n";
+        }
+    });
+    return extra;
+}
+
+const std::set<std::tuple<int, int, int>>& builtin_holidays() {
     // Standard NSE Trading Holidays for 2026
     static const std::set<std::tuple<int, int, int>> holidays = {
         {2026, 1, 26},  // Republic Day
@@ -54,8 +98,65 @@ bool MarketCalendar::is_nse_holiday(int year, int month, int day) {
         {2026, 11, 24}, // Guru Nanak Jayanti
         {2026, 12, 25}  // Christmas
     };
+    return holidays;
+}
 
-    return holidays.find(std::make_tuple(year, month, day)) != holidays.end();
+}  // namespace
+
+std::set<std::tuple<int, int, int>> MarketCalendar::parse_holiday_list(const std::string& text,
+                                                                       std::vector<std::string>* rejected) {
+    std::set<std::tuple<int, int, int>> out;
+    std::string token;
+    auto flush = [&]() {
+        // trim
+        size_t b = token.find_first_not_of(" \t\r");
+        size_t e = token.find_last_not_of(" \t\r");
+        std::string t = (b == std::string::npos) ? "" : token.substr(b, e - b + 1);
+        token.clear();
+        if (t.empty()) return;
+        bool shape = t.size() == 10 && t[4] == '-' && t[7] == '-';
+        for (size_t i = 0; shape && i < t.size(); ++i) {
+            if (i == 4 || i == 7) continue;
+            if (!std::isdigit(static_cast<unsigned char>(t[i]))) shape = false;
+        }
+        if (shape) {
+            const int y = std::stoi(t.substr(0, 4)), m = std::stoi(t.substr(5, 2)), d = std::stoi(t.substr(8, 2));
+            if (real_calendar_date(y, m, d)) { out.insert(std::make_tuple(y, m, d)); return; }
+        }
+        if (rejected) rejected->push_back(t);
+    };
+    bool in_comment = false;
+    for (char c : text) {
+        if (c == '\n') { in_comment = false; flush(); continue; }
+        if (in_comment) continue;
+        if (c == '#') { in_comment = true; flush(); continue; }
+        if (c == ',') { flush(); continue; }
+        token.push_back(c);
+    }
+    flush();
+    return out;
+}
+
+bool MarketCalendar::holiday_data_covers_year(int year) {
+    for (const auto& h : builtin_holidays()) if (std::get<0>(h) == year) return true;
+    for (const auto& h : extra_holidays()) if (std::get<0>(h) == year) return true;
+    return false;
+}
+
+bool MarketCalendar::is_nse_holiday(int year, int month, int day) {
+    // A year with no holiday data cannot answer "is this a holiday?": every weekday of it would read
+    // as a trading day. Say so once per year instead of failing silently.
+    if (!holiday_data_covers_year(year)) {
+        static std::mutex warn_mutex;
+        static std::set<int> warned;
+        std::lock_guard<std::mutex> lock(warn_mutex);
+        if (warned.insert(year).second) {
+            std::cerr << "⚠️ [MarketCalendar] No NSE holiday data for " << year
+                      << ": every weekday will be treated as a trading day. Set NSE_HOLIDAYS or NSE_HOLIDAYS_FILE.\n";
+        }
+    }
+    const auto key = std::make_tuple(year, month, day);
+    return builtin_holidays().count(key) > 0 || extra_holidays().count(key) > 0;
 }
 
 bool MarketCalendar::is_trading_day(uint64_t epoch_ms) {

@@ -40,16 +40,23 @@ add_compile_definitions(HERMES_BUILD_GIT_SHA="${HERMES_GIT_SHA}")
 
 file(GLOB_RECURSE ENGINE_SOURCES "src/engine/*.cpp" "src/roadmap/*.cpp" "src/common/*.cpp" "src/market_data/*.cpp" "src/analytics/*.cpp")
 
+# The shared engine sources are compiled ONCE, here, and linked into every target below. They used
+# to be listed in each add_executable(), so the same ~50 translation units were compiled once per
+# target (5 times, and every compiler warning in them was printed 5 times with them). One object
+# library gives each source one compilation, one set of warnings, and an unambiguous answer to
+# "which object code do the tests exercise": the same objects the binary links.
+add_library(engine_objs OBJECT ${ENGINE_SOURCES})
+
 # Main Executable Target
-add_executable(cpp-trading-agent src/main.cpp ${ENGINE_SOURCES})
+add_executable(cpp-trading-agent src/main.cpp $<TARGET_OBJECTS:engine_objs>)
 target_link_libraries(cpp-trading-agent PRIVATE pthread mysqlclient curl ssl crypto)
 
 # Test Suite Executable Target
 enable_testing()
-add_executable(unit_and_integration_tests tests/unit_and_integration_tests.cpp ${ENGINE_SOURCES})
+add_executable(unit_and_integration_tests tests/unit_and_integration_tests.cpp $<TARGET_OBJECTS:engine_objs>)
 target_link_libraries(unit_and_integration_tests PRIVATE pthread mysqlclient curl ssl crypto)
 
-add_executable(visitor_analytics_tests tests/visitor_analytics_tests.cpp ${ENGINE_SOURCES})
+add_executable(visitor_analytics_tests tests/visitor_analytics_tests.cpp $<TARGET_OBJECTS:engine_objs>)
 target_link_libraries(visitor_analytics_tests PRIVATE pthread mysqlclient curl ssl crypto)
 
 add_test(NAME SOLID_ACID_TestSuite COMMAND unit_and_integration_tests)
@@ -68,5 +75,5 @@ add_test(NAME Roadmap_Auth_TestSuite COMMAND auth_tests)
 # real RoadmapServer (no trading engine, no feed, no single-instance lock) and replays a fixed
 # request set over a TCP socket, so the same source can be built against two revisions and the
 # results diffed. Driven by tests/run_dispatcher_differential.sh.
-add_executable(differential_harness tests/differential_harness.cpp ${ENGINE_SOURCES})
+add_executable(differential_harness tests/differential_harness.cpp $<TARGET_OBJECTS:engine_objs>)
 target_link_libraries(differential_harness PRIVATE pthread mysqlclient curl ssl crypto)
