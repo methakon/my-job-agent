@@ -1,7 +1,7 @@
 # Audit remediation hand-off — 2026-11-02
 
 **Branch:** `feat/cpp-trading-agent`
-**Code commit:** `2612834` (`fix: remediate 2026-11-02 system audit`)
+**Code commits:** `2612834` (round 1: security, concurrency, warnings), then round 2 (data integrity, low findings), see below
 **Audit:** [SYSTEM_AND_TECHNICAL_AUDIT_2026-11-02.md](SYSTEM_AND_TECHNICAL_AUDIT_2026-11-02.md), [WARNINGS_2026-11-02.md](WARNINGS_2026-11-02.md)
 
 This file is for whoever (human or agent) continues the work on a local checkout. It states what
@@ -70,9 +70,30 @@ ignored two `CREATE TABLE` results; the operator's reason on strategy-config cha
 query values were read from the whole request instead of the parsed query; a `vector<bool>` data race
 in the visitor stress test hid real results.
 
+## Round 2 (remaining audit items)
+
+| Finding | Change |
+|---|---|
+| A-11 | `save_canonical_market_snapshot` stores `open = high = low = close = ltp` (it stored `bid / ask / bid / ltp`). `ts` and `createdAt` are written with `UTC_TIMESTAMP()` as `docs/TIMESTAMP_CONVENTIONS.md` requires (`NOW()` follows the session zone). The TypeScript feature engine builds daily bars from `MAX(high)`, `MIN(low)` and the first `open` of these rows, so ATR was inflated by the spread. **Existing rows keep the old meaning; they were not rewritten.** The C++ rollup reads `price`, so it was never affected. |
+| A-12 | Two broken reads. `fetch_latest_post_session_record` selected six columns that do not exist (always empty, no log), so the pre-market report always said "no prior session"; fixed, and it now honours test isolation and logs errors. `count_historical_candles_for_date` filtered on a non-existent `candle_date` (always 0); it now counts rows whose `timestamp` falls in the requested day. A runtime probe called all 53 distinct read queries against the schema: none now fails on a column. |
+| A-18 | The `fnf_market_snapshots.ts` label printed UTC with an "IST" suffix; it is now shifted +330 min. The same suffix on `hermes_cpp_project_clarifications` and `fnf_decay_calibrations.lastRectifiedAt` was **not** changed: their DDL is not in the repo, so whether they hold UTC or IST is unknown. |
+| A-19 | `changePct` was the constant `0.5`; it is now the move since the previous tick of the same instrument (0 when there is none). |
+| A-20 | The holiday list is still 2026-only (no 2027 dates were invented; NSE publishes them in December). `NSE_HOLIDAYS` / `NSE_HOLIDAYS_FILE` add dates, bad entries are reported, and a query for a year with no data logs a warning once instead of silently calling every weekday a trading day. |
+| A-21 | `sharpe_ratio` is now a real per-trade Sharpe (mean / sample sd of trade P&L, not annualised). The old figure is kept as `pnl_over_risk_capital`. |
+| A-07 (partial) | Behaviour unchanged. The Kelly result was computed and discarded; each decision-journal row now carries `{"sizing": {applied_lots, kelly_suggested_lots, kelly_oos_gate_passed, ...}}` so the gap can be measured. |
+| config | `.env.example` documents every setting added in rounds 1 and 2. A zero or negative timeout setting now means "use the default", not a 1-second timeout. |
+
+## Gate wiring inventory (A-03), generated from the source
+
+Only these gate files are referenced outside the gate files themselves: `gate0` (journal, arbiter),
+`gate7` (decoder), `gate11` (db client, server), `gate16` (`main.cpp`), `gate22` (`main.cpp`).
+**Everything else has no call site:**
+`gate3`, `gate4`, `gate5`, `gate6`, `gate8`, `gate9`, `gate10`, `gate12`, `gate13`, `gate14`, `gate15`,
+`gate17`, `gate18`, `gate19`, `gate20`, `gate21`, and `gate_const_invariants`.
+
 ## Verification (cloud sandbox: g++ 11.5, MariaDB 10.11, libcurl 8.10)
 
-- `ctest`: 3/3. Unit suite 303 passed / 0 failed (baseline 257 / 1). Auth suite 303 checks (baseline 249).
+- `ctest`: 3/3. Unit suite 329 passed / 0 failed (baseline 257 / 1), stable over 4 repeat runs. Auth suite 303 checks (baseline 249).
 - Visitor suite: 5/5 clean runs. The old code, with the test race fixed, failed every run with a real deadlock.
 - Warnings: 0 under the audit's own command; baseline had 231 emitted lines.
 - CI's blocking cppcheck gate (`--enable=warning`): clean (cppcheck 2.13).
@@ -87,14 +108,27 @@ in the visitor stress test hid real results.
 - Without `ANALYTICS_SECRET`, a random per-process secret is used, so visitor identities reset on restart.
 - Storing a FYERS token requires `ENCRYPTION_KEY` or `APP_SECRET`; it is refused rather than stored in the clear.
 - The WebSocket client now verifies the server certificate, so the host needs a working CA bundle.
+- New snapshot rows have real OHLC (see A-11). Daily bars the TypeScript feature engine derives from days that mix old and new rows will mix the two meanings until the old rows age out or are archived.
+- `changePct` and the "IST" label on the market-snapshot view now show different numbers from before (they were a constant and a UTC time).
+- `BacktestResult::sharpe_ratio` changed meaning; the old figure is `pnl_over_risk_capital`.
+- Decision-journal `feature_snapshot_json` is now `{"sizing": {...}}` instead of `{}` for entry decisions.
 
 ## Not done
 
-- A-03, A-07: wiring the gates. The audit's ordering constraint is to do this only after Gate 21 is trustworthy, which needs a real source for breach counts and out-of-sample promotion first.
-- A-11, A-12: tick OHLC mapping and the two read queries selecting non-existent columns (`db_client.cpp`).
-- A-14: option-quote capture has no idempotency key.
-- A-15: the import is on the operator's machine.
-- A-18 to A-21: display timezone labels, hardcoded `changePct`, 2026-only holidays, `sharpe_ratio` naming.
+- **A-03 / A-07, the gates themselves.** Wiring a gate into the live decision path changes which paper
+  trades are taken and their size. Gate 21 now fails closed, so the audit's ordering constraint is met,
+  but each wiring is a trading-behaviour decision. Suggested order: run a gate in **shadow** (compute
+  and journal its verdict, take no action), compare against outcomes, then promote. The Kelly sizing
+  numbers needed for that comparison are now in the journal (see A-07 above).
+- **A-14, option-quote idempotency key.** Needs a schema migration (a unique key on a table that takes
+  hundreds of thousands of rows a day) and a choice of key. `fnf_market_snapshots.ts` has one-second
+  resolution, so (instrument, ts) would merge genuinely different ticks, and de-duplicating on price
+  and volume discards data. This needs the table's real size and the broker payload's own ids; both
+  are on the operator's side. `upstox_live_paper_option_quotes` already has `payloadHash`, which is
+  the likely key for that table.
+- **A-15, the import** runs on the operator's machine.
+- **A-18 (two labels)**, see the table above: needs the DDL for those two tables.
+- **A-20 data**: the 2027 holiday list, when NSE publishes it.
 
 ## Left alone on purpose (need an operator decision)
 
@@ -109,4 +143,4 @@ in the visitor stress test hid real results.
 pre-push drift guard blocks code commits without one. The cloud session could not reach the control
 plane and did **not** add an entry to `docs/gate-close-allow.json`, because that file records an
 operator directive as its authority. Either sync the row with `npm run gate:status`, or add an
-exact-SHA allow-list entry yourself. Commit `2612834` is the one affected.
+exact-SHA allow-list entry yourself. Commit `2612834`, the round-2 commit that follows it, and this file's own commit are all affected.

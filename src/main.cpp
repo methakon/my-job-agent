@@ -16,6 +16,7 @@
 #include "engine/pre_market_readiness_analyzer.hpp"
 #include "market_data/broker_feed_supervisor.hpp"
 #include <iostream>
+#include <sstream>
 #include <memory>
 #include <thread>
 #include <cstring>
@@ -475,6 +476,19 @@ int main(int argc, char* argv[]) {
 
                     auto kelly_result = hermes::IndependentRiskEngine::calculate_kelly_lot_size("OFI_Microstructure_Breakout", symbol, side, entry_px, spot_px, capital_in_hand);
 
+                    // The Kelly result is computed on every entry but position size is the flat
+                    // lot_size above: nothing consumes suggested_lots. Changing real paper-position
+                    // sizes is a decision for the operator (the "validated" bucket rests on a fixed
+                    // W / R / N recorded in gate16), so behaviour is unchanged. What changes is that
+                    // the journal row now carries both numbers, so how far apart they are can be
+                    // measured instead of assumed.
+                    std::ostringstream sizing_json;
+                    sizing_json << "{\"sizing\":{\"applied_lots\":" << lot_size
+                                << ",\"kelly_suggested_lots\":" << kelly_result.suggested_lots
+                                << ",\"kelly_oos_gate_passed\":" << (kelly_result.oos_gate_passed ? "true" : "false")
+                                << ",\"kelly_bucket\":\"" << kelly_result.bucket_status << "\""
+                                << ",\"margin_per_lot\":" << kelly_result.margin_per_lot << "}}";
+
                     size_t open_positions_for_symbol = 0;
                     for (const auto& tr : cached_open_trades) {
                         if (tr.status == "OPEN" && tr.instrument == canonical_inst) {
@@ -530,7 +544,7 @@ int main(int argc, char* argv[]) {
                     }
 
                     if (veto.risk_approved) {
-                        db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, side + "_" + option_kind, final_confidence, 0.05, "OFI_BULLISH_BREAKOUT_CONFIRMED", "{}");
+                        db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, side + "_" + option_kind, final_confidence, 0.05, "OFI_BULLISH_BREAKOUT_CONFIRMED", sizing_json.str());
 
                         UserTradeData trade;
                         trade.id = "cpp-paper-" + std::to_string(now_ns) + "-" + std::to_string(decision_seq.load());
@@ -551,7 +565,7 @@ int main(int argc, char* argv[]) {
                         refresh_trade_cache();
                     } else {
                         std::string prefix = (veto.veto_reason.find("MARGIN_INSUFFICIENT") != std::string::npos) ? "MARGIN_VETO: " : "RISK_VETO: ";
-                        db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, "NO_TRADE", final_confidence, 0.0, prefix + veto.veto_reason, "{}");
+                        db_client->log_decision_journal_record(uuid, "live-session", kBuildGitSha, "1.0.0", symbol, "NO_TRADE", final_confidence, 0.0, prefix + veto.veto_reason, sizing_json.str());
                     }
                 } else if (total_saved_ticks % 100 == 0) {
                     // Periodically sample evaluated candidate ticks every 100 ticks

@@ -46,10 +46,12 @@ MySQLConnectionPool::MySQLConnectionPool(std::string host, int port, std::string
     // Timeouts. connect was already 5 s; read/write had none, so a server that stopped answering
     // mid-statement blocked the calling thread (and its checked-out connection) indefinitely.
     // The defaults are deliberately generous because the end-of-day rollup is one long statement.
-    connect_timeout_s_ = static_cast<unsigned int>(std::max(1, EnvLoader::get_int("MYSQL_CONNECT_TIMEOUT_SEC", 5)));
-    read_timeout_s_    = static_cast<unsigned int>(std::max(1, EnvLoader::get_int("MYSQL_READ_TIMEOUT_SEC", 120)));
-    write_timeout_s_   = static_cast<unsigned int>(std::max(1, EnvLoader::get_int("MYSQL_WRITE_TIMEOUT_SEC", 60)));
-    acquire_timeout_   = std::chrono::milliseconds(std::max(100, EnvLoader::get_int("MYSQL_POOL_ACQUIRE_TIMEOUT_MS", 10000)));
+    // A zero or negative setting is a mistake, not a request for a 1-second timeout: use the default.
+    auto positive_or = [](const char* key, int def) { const int v = EnvLoader::get_int(key, def); return v > 0 ? v : def; };
+    connect_timeout_s_ = static_cast<unsigned int>(positive_or("MYSQL_CONNECT_TIMEOUT_SEC", 5));
+    read_timeout_s_    = static_cast<unsigned int>(positive_or("MYSQL_READ_TIMEOUT_SEC", 120));
+    write_timeout_s_   = static_cast<unsigned int>(positive_or("MYSQL_WRITE_TIMEOUT_SEC", 60));
+    acquire_timeout_   = std::chrono::milliseconds(std::max(100, positive_or("MYSQL_POOL_ACQUIRE_TIMEOUT_MS", 10000)));
     tls_policy_        = resolve_tls_policy(host_, EnvLoader::get("MYSQL_SSL_MODE", ""));
 
     mysql_library_init(0, nullptr, nullptr);
@@ -825,11 +827,23 @@ bool RoadmapDbClient::save_canonical_market_snapshot(const CanonicalOptionTick& 
     std::string safe_inst = escape_string(conn, tick.instrument_key.empty() ? tick.symbol : tick.instrument_key);
     std::string safe_src = escape_string(conn, tick.provenance.empty() ? "LIVE_FEED" : tick.provenance);
 
+    // One tick is one price, so its open, high, low and close are all the last traded price.
+    // The columns used to hold open=bid, high=ask, low=bid, close=ltp: a quote spread filed under
+    // OHLC names. The TypeScript feature engine builds its daily bars from MAX(high), MIN(low) and
+    // the first open of these rows, so every day's high was an ask and every low a bid, which
+    // widens each range by the spread and biases the ATR the entry filters use. (The C++ rollup
+    // reads `price`, not these columns, so it was never affected. Rows already written keep the
+    // old meaning: they are not rewritten here.)
+    //
+    // ts and createdAt are UTC-valued DATETIMEs (docs/TIMESTAMP_CONVENTIONS.md), so they are
+    // written with UTC_TIMESTAMP(). NOW() followed the session time zone: identical under a UTC
+    // session, but under MYSQL_SESSION_TIME_ZONE=+05:30 it put IST wall clocks into a column every
+    // reader shifts as if it were UTC.
     std::ostringstream ss;
     ss << "INSERT INTO fnf_market_snapshots (id, instrument, price, volume, open, high, low, close, ts, source, createdAt) "
        << "VALUES (UUID(), '" << safe_inst << "', " << tick.ltp << ", " << tick.volume << ", "
-       << tick.bid_price << ", " << tick.ask_price << ", " << tick.bid_price << ", " << tick.ltp << ", NOW(), '"
-       << safe_src << "', NOW(6));";
+       << tick.ltp << ", " << tick.ltp << ", " << tick.ltp << ", " << tick.ltp << ", UTC_TIMESTAMP(), '"
+       << safe_src << "', UTC_TIMESTAMP(6));";
 
     std::string query = ss.str();
     bool ok = (mysql_query(conn, query.c_str()) == 0);
@@ -1250,7 +1264,18 @@ std::vector<MarketSnapshotData> RoadmapDbClient::fetch_market_snapshots() {
     MYSQL* conn = pool_->acquire();
     if (!conn) return list;
 
-    const char* query = "SELECT instrument, price, volume, DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s IST') FROM fnf_market_snapshots ORDER BY ts DESC LIMIT 20;";
+    // ts is a UTC-valued DATETIME, so the " IST" label was wrong: it printed UTC wall clocks with an
+    // IST suffix, five and a half hours behind the time it claimed. Shift explicitly, as every other
+    // reader of this column does.
+    //
+    // changePct is the move since the previous stored tick of the same instrument. It was the
+    // constant 0.5 for every row, so the dashboard showed a +0.50% move on everything, always.
+    // With no earlier tick there is no move to report and the value is 0.
+    const char* query =
+        "SELECT s.instrument, s.price, s.volume, DATE_FORMAT(s.ts + INTERVAL 330 MINUTE, '%Y-%m-%d %H:%i:%s IST'), "
+        "  (SELECT p.price FROM fnf_market_snapshots p WHERE p.instrument = s.instrument AND p.ts < s.ts "
+        "   ORDER BY p.ts DESC LIMIT 1) AS prev_price "
+        "FROM fnf_market_snapshots s ORDER BY s.ts DESC LIMIT 20;";
     if (mysql_query(conn, query) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
@@ -1258,12 +1283,14 @@ std::vector<MarketSnapshotData> RoadmapDbClient::fetch_market_snapshots() {
             while ((row = mysql_fetch_row(res))) {
                 MarketSnapshotData m;
                 m.instrument = row[0] ? row[0] : "";
+                double prev = 0.0;
                 try {
                     m.price = row[1] ? std::stod(row[1]) : 0.0;
                     m.volume = row[2] ? std::stod(row[2]) : 0.0;
+                    prev = row[4] ? std::stod(row[4]) : 0.0;
                 } catch(...) {}
                 m.ts = row[3] ? row[3] : "";
-                m.changePct = 0.5;
+                m.changePct = (prev > 0.0) ? ((m.price - prev) / prev * 100.0) : 0.0;
                 list.push_back(m);
             }
             mysql_free_result(res);
@@ -3859,10 +3886,18 @@ std::map<std::string, std::string> RoadmapDbClient::fetch_latest_post_session_re
 
     std::string where = session_date.empty() ? "ORDER BY session_date DESC LIMIT 1"
                                              : ("WHERE session_date = '" + escape_string(conn, session_date) + "' LIMIT 1");
-    std::string q = "SELECT session_date, total_ticks, evaluated_decisions, no_action_count, actionable_count, "
-                    "risk_veto_count, trades_executed, realized_drawdown, avg_ofi, max_ofi, near_miss_count, "
-                    "recommendations_json, DATE_FORMAT(analyzed_at, '%Y-%m-%d %H:%i:%s') "
-                    "FROM cpp_post_session_analysis " + where + ";";
+    // The column names below are the table's real ones (the writer, save_post_session_analysis_record,
+    // inserts the same names). This SELECT used total_ticks, actionable_count, risk_veto_count,
+    // trades_executed, realized_drawdown and analyzed_at, none of which exist, so every call failed
+    // with "Unknown column", returned an empty map without logging, and the pre-market readiness
+    // report then claimed there was never a prior session. The AS aliases keep the map keys the
+    // callers already use.
+    const std::string table = is_test_isolation_ ? "cpp_post_session_analysis_test" : "cpp_post_session_analysis";
+    std::string q = "SELECT session_date, total_ticks_ingested, evaluated_decisions_count, no_action_count, "
+                    "actionable_signals_count, risk_vetoes_count, trades_executed_count, realized_drawdown_inr, "
+                    "avg_ofi, max_ofi, near_miss_count, recommendations_json, "
+                    "DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') "
+                    "FROM " + table + " " + where + ";";
 
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
@@ -3885,6 +3920,8 @@ std::map<std::string, std::string> RoadmapDbClient::fetch_latest_post_session_re
             }
             mysql_free_result(res);
         }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] fetch_latest_post_session_record error: " << mysql_error(conn) << "\n";
     }
     pool_->release(conn);
     return record;
@@ -3896,7 +3933,13 @@ uint64_t RoadmapDbClient::count_historical_candles_for_date(const std::string& s
     if (!conn) return 0;
 
     std::string safe_date = session_date.empty() ? "CURRENT_DATE()" : ("'" + escape_string(conn, session_date) + "'");
-    std::string q = "SELECT COUNT(*) FROM cpp_historical_daily_candles WHERE candle_date = " + safe_date + ";";
+    // The table has no candle_date column (this filtered on one, so the query always failed and the
+    // count was always 0, which the readiness report then presented as "the rollup did not run").
+    // The rollup stores the IST trading day as the candle's `timestamp`, at 00:00:00, so a day's
+    // rows are those whose timestamp falls in [day, day + 1). A range, not DATE(timestamp): the
+    // column stays bare for the index (docs/TIMESTAMP_CONVENTIONS.md, "do not apply DATE()").
+    std::string q = "SELECT COUNT(*) FROM cpp_historical_daily_candles "
+                    "WHERE `timestamp` >= " + safe_date + " AND `timestamp` < (" + safe_date + " + INTERVAL 1 DAY);";
     if (mysql_query(conn, q.c_str()) == 0) {
         MYSQL_RES* res = mysql_store_result(conn);
         if (res) {
@@ -3906,6 +3949,8 @@ uint64_t RoadmapDbClient::count_historical_candles_for_date(const std::string& s
             }
             mysql_free_result(res);
         }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] count_historical_candles_for_date error: " << mysql_error(conn) << "\n";
     }
     release_local(conn);
     return count;

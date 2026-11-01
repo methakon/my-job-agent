@@ -1472,6 +1472,131 @@ void run_solid_and_acid_test_suite() {
     }
 
     // -----------------------------------------------------------------
+    // CATEGORY 25c: AUDIT REMEDIATION, ROUND 2 (A-11, A-12, A-18, A-19, A-20, A-21)
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 25c: Audit remediation, round 2 ---\n";
+
+    {
+        MYSQL* r2 = mysql_init(nullptr);
+        const bool r2_ok = r2 && mysql_real_connect(r2, db_host.c_str(), db_user.c_str(), db_pass.c_str(),
+                                                    db_name.c_str(), db_port, nullptr, 0);
+        TEST("R2 setup: raw connection to the isolated test database", r2_ok);
+        if (r2_ok) {
+            auto exec = [&](const std::string& sql) { return mysql_query(r2, sql.c_str()) == 0; };
+            auto text = [&](const std::string& sql) -> std::string {
+                if (mysql_query(r2, sql.c_str()) != 0) return "<sql error: " + std::string(mysql_error(r2)) + ">";
+                MYSQL_RES* res = mysql_store_result(r2);
+                if (!res) return "<no result>";
+                MYSQL_ROW row = mysql_fetch_row(res);
+                std::string v = (row && row[0]) ? row[0] : "<null>";
+                mysql_free_result(res);
+                return v;
+            };
+
+            // A-12 (post-session record): write through the real writer, read back through the real reader.
+            exec("DELETE FROM cpp_post_session_analysis_test;");
+            db_client->save_post_session_analysis_record("r2-psa-1", "2026-10-08", "CLOSED", 111, 22, 3, 4, 5, 6, 7.5, 0.25, 0.75, 2, "{\"k\":\"v\"}");
+            db_client->save_post_session_analysis_record("r2-psa-2", "2026-10-09", "CLOSED", 999, 88, 7, 6, 5, 4, 3.5, 0.5, 0.9, 1, "{\"latest\":true}");
+            auto latest = db_client->fetch_latest_post_session_record("");
+            TEST("A-12a: the latest post-session record is READ BACK (it always came back empty: unknown columns)",
+                 !latest.empty() && latest["session_date"] == "2026-10-09");
+            TEST("A-12b: its values are the ones written, under the keys the callers use",
+                 latest["total_ticks"] == "999" && latest["evaluated_decisions"] == "88" && latest["actionable_count"] == "6" &&
+                 latest["risk_veto_count"] == "5" && latest["trades_executed"] == "4" &&
+                 latest["recommendations_json"] == "{\"latest\":true}" && !latest["analyzed_at"].empty());
+            auto by_date = db_client->fetch_latest_post_session_record("2026-10-08");
+            TEST("A-12c: a record can be fetched by date", by_date["total_ticks"] == "111" && by_date["near_miss_count"] == "2");
+            TEST("A-12d: an unknown date yields no record", db_client->fetch_latest_post_session_record("2020-01-01").empty());
+            exec("DELETE FROM cpp_post_session_analysis_test;");
+
+            // A-12 (candle count): the table has no candle_date column; count by the IST day in `timestamp`.
+            exec("CREATE TABLE IF NOT EXISTS cpp_historical_daily_candles ("
+                 " instrument_key VARCHAR(64) NOT NULL, symbol VARCHAR(32) NOT NULL, interval_name VARCHAR(16) NOT NULL,"
+                 " `timestamp` DATETIME NOT NULL, open DECIMAL(14,4), high DECIMAL(14,4), low DECIMAL(14,4), close DECIMAL(14,4),"
+                 " volume BIGINT, open_interest BIGINT, ingested_at DATETIME(6),"
+                 " PRIMARY KEY (instrument_key, interval_name, `timestamp`))");
+            exec("DELETE FROM cpp_historical_daily_candles WHERE symbol LIKE 'R2TEST%'");
+            exec("INSERT INTO cpp_historical_daily_candles VALUES "
+                 "('R2TEST|A','R2TESTA','day','2026-10-09 00:00:00',1,2,1,2,0,0,UTC_TIMESTAMP(6)),"
+                 "('R2TEST|B','R2TESTB','day','2026-10-09 00:00:00',1,2,1,2,0,0,UTC_TIMESTAMP(6)),"
+                 "('R2TEST|A','R2TESTA','day','2026-10-08 00:00:00',1,2,1,2,0,0,UTC_TIMESTAMP(6)),"
+                 "('R2TEST|A','R2TESTA','day','2026-10-10 00:00:00',1,2,1,2,0,0,UTC_TIMESTAMP(6))");
+            TEST("A-12e: candles are counted for exactly the requested day (2 on 10-09; neighbours excluded)",
+                 db_client->count_historical_candles_for_date("2026-10-09") >= 2 &&
+                 text("SELECT COUNT(*) FROM cpp_historical_daily_candles WHERE `timestamp` >= '2026-10-09' AND `timestamp` < '2026-10-10' AND symbol LIKE 'R2TEST%'") == "2");
+            TEST("A-12f: a day with no candles counts 0, and a day with one counts 1",
+                 db_client->count_historical_candles_for_date("2026-10-11") == 0 &&
+                 db_client->count_historical_candles_for_date("2026-10-08") >= 1);
+            exec("DELETE FROM cpp_historical_daily_candles WHERE symbol LIKE 'R2TEST%'");
+
+            // A-11: a captured tick is stored with open = high = low = close = ltp; ts is UTC.
+            CanonicalOptionTick tk;
+            tk.instrument_key = "R2TEST|SNAP"; tk.symbol = "R2TESTSNAP"; tk.ltp = 123.45; tk.bid_price = 123.00; tk.ask_price = 124.00; tk.volume = 7;
+            exec("DELETE FROM fnf_market_snapshots WHERE instrument = 'R2TEST|SNAP'");
+            const bool saved = db_client->save_canonical_market_snapshot(tk);
+            TEST("A-11a: the tick is stored", saved && text("SELECT COUNT(*) FROM fnf_market_snapshots WHERE instrument='R2TEST|SNAP'") == "1");
+            TEST("A-11b: open, high, low and close are all the last price, not bid / ask",
+                 text("SELECT CONCAT(open,'/',high,'/',low,'/',close) FROM fnf_market_snapshots WHERE instrument='R2TEST|SNAP'") ==
+                 "123.4500/123.4500/123.4500/123.4500");
+            TEST("A-11c: ts is the UTC wall clock (within 5 s of UTC_TIMESTAMP, whatever the session zone)",
+                 text("SELECT ABS(TIMESTAMPDIFF(SECOND, ts, UTC_TIMESTAMP())) <= 5 FROM fnf_market_snapshots WHERE instrument='R2TEST|SNAP'") == "1");
+
+            // A-18 / A-19: label and change.
+            exec("INSERT INTO fnf_market_snapshots (id, instrument, price, volume, ts, createdAt) VALUES "
+                 "('r2-s1','R2TEST|CHG',100,1,'2099-01-01 04:00:00',UTC_TIMESTAMP(6)),"
+                 "('r2-s2','R2TEST|CHG',110,1,'2099-01-01 04:00:05',UTC_TIMESTAMP(6)),"
+                 "('r2-s3','R2TEST|ONE',50,1,'2099-01-01 04:00:09',UTC_TIMESTAMP(6))");   // far future: always the 'latest 20'
+            auto snaps = db_client->fetch_market_snapshots();
+            double chg = -999, one = -999; std::string chg_ts;
+            for (const auto& m : snaps) {
+                if (m.instrument == "R2TEST|CHG" && m.price == 110.0) { chg = m.changePct; chg_ts = m.ts; }
+                if (m.instrument == "R2TEST|ONE") one = m.changePct;
+            }
+            TEST("A-19a: changePct is the real move vs the previous tick (100 -> 110 = +10%), not a constant 0.5",
+                 std::abs(chg - 10.0) < 1e-6);
+            TEST("A-19b: a first tick has no earlier price, so its change is 0", std::abs(one) < 1e-9);
+            TEST("A-18: a UTC 04:00:05 tick is labelled 09:30:05 IST (shifted, not just suffixed)",
+                 chg_ts == "2099-01-01 09:30:05 IST");
+            exec("DELETE FROM fnf_market_snapshots WHERE instrument LIKE 'R2TEST|%'");
+            mysql_close(r2);
+        }
+    }
+
+    {
+        // A-20: holiday list parsing; a year without data is detectable (no dates are invented).
+        using MC = hermes::MarketCalendar;
+        std::vector<std::string> rej;
+        auto h = MC::parse_holiday_list("2027-01-26, 2027-03-04\n# a comment line\n2027-08-15 # trailing comment\n2027-02-30,garbage,2027-13-01,,2027-1-1", &rej);
+        TEST("A-20a: valid dates are parsed (comma and newline separated, comments ignored)",
+             h.size() == 3 && h.count({2027, 1, 26}) && h.count({2027, 3, 4}) && h.count({2027, 8, 15}));
+        TEST("A-20b: impossible or malformed entries are rejected and reported, not guessed",
+             rej.size() == 4);
+        TEST("A-20c: an empty list is empty", MC::parse_holiday_list("").empty() && MC::parse_holiday_list(" \n , ").empty());
+        TEST("A-20d: 2026 is covered by the built-in list", MC::holiday_data_covers_year(2026));
+        TEST("A-20e: a year with no data is reported as not covered (2031)", !MC::holiday_data_covers_year(2031));
+        TEST("A-20f: a known 2026 holiday is still a holiday and an ordinary day still is not",
+             MC::is_nse_holiday(2026, 10, 20) && !MC::is_nse_holiday(2026, 10, 21));
+        TEST("A-20g: leap day is a real date, Feb 29 of a non-leap year is not",
+             MC::parse_holiday_list("2028-02-29").size() == 1 && MC::parse_holiday_list("2027-02-29").empty());
+    }
+
+    {
+        // A-21: a real per-trade Sharpe. Values worked by hand.
+        TEST("A-21a: fewer than two trades -> 0", per_trade_sharpe({}) == 0.0 && per_trade_sharpe({5.0}) == 0.0);
+        TEST("A-21b: no dispersion -> 0 (not a division by zero)", per_trade_sharpe({3.0, 3.0, 3.0}) == 0.0);
+        // {2,4,6}: mean 4, sample variance (4+0+4)/2 = 4, sd 2 -> 2.0
+        TEST("A-21c: {2,4,6} -> mean 4 / sample sd 2 = 2", std::abs(per_trade_sharpe({2.0, 4.0, 6.0}) - 2.0) < 1e-12);
+        // {-1,1}: mean 0 -> 0
+        TEST("A-21d: a zero-mean series -> 0", std::abs(per_trade_sharpe({-1.0, 1.0})) < 1e-12);
+        TEST("A-21e: losing series is negative", per_trade_sharpe({-5.0, -3.0, -4.0}) < 0.0);
+        BacktestEngine bt(db_client);
+        BacktestResult br = bt.run_parallel_backtest("NIFTY", 2);
+        TEST("A-21f: the backtest reports its trades' P&L and a sharpe consistent with them",
+             br.trade_pnls.size() == static_cast<size_t>(br.total_trades) &&
+             std::abs(br.sharpe_ratio - per_trade_sharpe(br.trade_pnls)) < 1e-12);
+    }
+
+    // -----------------------------------------------------------------
     // CATEGORY 26: CONST INVARIANTS (ENTRY GATES E1-E10 & RULES R-001..R-015)
     // -----------------------------------------------------------------
     std::cout << "\n--- CATEGORY 26: CONST Invariants (Entry Gates E1-E10 & Rules R-001..R-015) ---\n";

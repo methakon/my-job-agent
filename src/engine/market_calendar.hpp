@@ -2,6 +2,9 @@
 #define ENGINE_MARKET_CALENDAR_HPP
 
 #include <string>
+#include <set>
+#include <tuple>
+#include <vector>
 #include <cstdint>
 #include <chrono>
 
@@ -39,6 +42,18 @@ public:
     static IstDateTime get_ist_time(uint64_t epoch_ms = 0);
     static bool is_trading_weekday(const IstDateTime& ist);
     static bool is_nse_holiday(int year, int month, int day);
+
+    // Holiday data. The built-in list covers 2026 only. Further holidays come from the environment
+    // (NSE_HOLIDAYS, a comma-separated list of YYYY-MM-DD) and/or a file (NSE_HOLIDAYS_FILE, one
+    // YYYY-MM-DD per line, '#' starts a comment), read once at first use. Dates are NOT guessed:
+    // a year with no data is reported by holiday_data_covers_year() and logged once, because a
+    // calendar that has no holidays for a year answers "trading day" on every weekday of it.
+    static bool holiday_data_covers_year(int year);
+
+    // Parses the list syntax above. Entries that are not a real calendar date are skipped and, when
+    // `rejected` is given, collected there. Exposed so the parser is testable without the environment.
+    static std::set<std::tuple<int, int, int>> parse_holiday_list(const std::string& text,
+                                                                  std::vector<std::string>* rejected = nullptr);
     static bool is_trading_day(uint64_t epoch_ms = 0);
 
     // True when the YYMMDD expiry embedded in a trading symbol has already passed in IST
