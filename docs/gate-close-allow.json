@@ -1356,6 +1356,54 @@
 			"reason": "Trading Agent workstream - gate warning keyed to the legacy path only (it fired on a correct GATE_CLOSE_ROOT override); Rule 27 recorded; three resolution paths verified. Touches scripts/, so it is in the guard's scope.",
 			"workstream": "Trading Agent C++ Migration",
 			"authority": "operator directive 2026-10-15 (advance the 7d4e720 exemption in its own chore commit with cited authority, then push)"
+		},
+		"05130a9872dbb85984e0ac56f51dc2eeaa29569a": {
+			"short": "05130a9",
+			"reason": "Security hardening (S1) — fix(security): S1-4 default-deny gate on the route table, one-time OAuth state",
+			"workstream": "security-hardening-s1",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent without deployment. Control plane unreachable for a /project-status sync (PM2 empty, no listener on :3010), so the sanctioned exact-SHA exemption path is used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "default-deny gate + one-time OAuth state; ctest 14/16 with the 2 known pre-existing failures"
+		},
+		"4343f13782246d2a74be1000af98ed6b59130ced": {
+			"short": "4343f13",
+			"reason": "Security hardening (S1) — fix(security): S1-3 dispatcher resolves on the route table; unknown routes deny",
+			"workstream": "security-hardening-s1",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent without deployment. Control plane unreachable for a /project-status sync (PM2 empty, no listener on :3010), so the sanctioned exact-SHA exemption path is used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "dispatcher resolves against the route table, not a substring test"
+		},
+		"0e095f090958569401c6838bf21a58e85d2f94f1": {
+			"short": "0e095f0",
+			"reason": "Security hardening (S1) — docs(security): S1-1 handler audit - every route body to an unauthenticated caller",
+			"workstream": "security-hardening-s1",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent without deployment. Control plane unreachable for a /project-status sync (PM2 empty, no listener on :3010), so the sanctioned exact-SHA exemption path is used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "docs-only audit of every route body"
+		},
+		"df7193aaeb28814e111e3cd1f1ff72c80b117b97": {
+			"short": "df7193a",
+			"reason": "Security hardening (S1) — fix(security): S1-A2 parser hardening and is_public allow-list",
+			"workstream": "security-hardening-s1",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent without deployment. Control plane unreachable for a /project-status sync (PM2 empty, no listener on :3010), so the sanctioned exact-SHA exemption path is used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "parser hardening; is_public derived from the table, not from client input"
+		},
+		"28212a0cd8ae314ba8c9346fafe21ac123af2c46": {
+			"short": "28212a0",
+			"reason": "Security hardening (S1) — fix(security): S1-A route table - exact method+path, no substring dispatch",
+			"workstream": "security-hardening-s1",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent without deployment. Control plane unreachable for a /project-status sync (PM2 empty, no listener on :3010), so the sanctioned exact-SHA exemption path is used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "exact method+path route table; verified default-deny on unmatched routes"
+		},
+		"f3ccbd1b2a1f68ed2092c535928a3760db7fdc93": {
+			"short": "f3ccbd1",
+			"reason": "Security hardening (S1) — fix(security): S1 - real request authentication for the roadmap portal",
+			"workstream": "security-hardening-s1",
+			"authority": "operator directive 2026-11-02: push feat/cpp-trading-agent without deployment. Control plane unreachable for a /project-status sync (PM2 empty, no listener on :3010), so the sanctioned exact-SHA exemption path is used instead of GATE_CLOSE_SKIP.",
+			"recorded": "2026-11-02",
+			"evidence": "check_auth substring match replaced by Authenticator; verified 0 substring references remain in roadmap_server.cpp"
 		}
 	}
 }
