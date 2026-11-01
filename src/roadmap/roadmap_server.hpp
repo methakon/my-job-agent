@@ -4,6 +4,7 @@
 #include "db_client.hpp"
 #include <string>
 #include <memory>
+#include <atomic>
 
 class RoadmapServer {
 public:
@@ -12,7 +13,15 @@ public:
 
     void set_db_client(std::shared_ptr<RoadmapDbClient> db_client) { db_client_ = db_client; }
     void start();
+    // Safe to call from another thread or a shutdown path: wakes the blocked accept() so start()
+    // returns.
     void stop();
+
+    // Address the listener binds, from ROADMAP_BIND_ADDR. Defaults to loopback: the portal sits
+    // behind a local reverse proxy / tunnel, and binding every interface exposed the operator
+    // surface to anything that could route to the host. An unparseable value yields "" and the
+    // server refuses to start rather than guessing.
+    static std::string resolve_bind_address(const std::string& configured);
 
     std::string render_home_page(bool is_authenticated = false);
     std::string render_html_page(bool is_authenticated);
@@ -34,7 +43,10 @@ public:
 private:
     int port_;
     std::shared_ptr<RoadmapDbClient> db_client_;
-    bool running_;
+    // Written by stop() on one thread and read by the accept loop on another, so it is atomic. As
+    // a plain bool the loop was free to cache it and never see the write.
+    std::atomic<bool> running_;
+    std::atomic<int> listen_fd_{-1};
 };
 
 #endif // ROADMAP_SERVER_HPP

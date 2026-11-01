@@ -18,10 +18,12 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <cstring>
 
 #include <fcntl.h>
 #include <unistd.h>
 #include <csignal>
+#include <atomic>
 
 // Build revision, injected by CMake (see CMakeLists.txt). The fallback means a build outside a
 // git tree reports "unknown" instead of silently claiming a revision it does not have.
@@ -29,6 +31,15 @@
 #define HERMES_BUILD_GIT_SHA "unknown"
 #endif
 static constexpr const char* kBuildGitSha = HERMES_BUILD_GIT_SHA;
+
+// Set by SIGTERM / SIGINT. The handler does nothing else: only async-signal-safe work is allowed in
+// a handler, and an atomic<bool> store is one. All the actual shutdown happens on the main thread.
+// Before this, only SIGPIPE was handled, so `pm2 stop` / `systemctl stop` (SIGTERM) killed the
+// process mid-statement with no chance to stop the feed, join the worker thread or let queued
+// analytics events drain, and pm2 escalated to SIGKILL after kill_timeout.
+static std::atomic<bool> g_shutdown_requested{false};
+static_assert(std::atomic<bool>::is_always_lock_free, "signal handler needs a lock-free flag");
+static void handle_termination_signal(int) { g_shutdown_requested.store(true); }
 
 int main(int argc, char* argv[]) {
     std::cout.setf(std::ios::unitbuf);
@@ -148,6 +159,15 @@ int main(int argc, char* argv[]) {
     int server_port = EnvLoader::get_int("ROADMAP_PORT", 8080);
 
     signal(SIGPIPE, SIG_IGN);
+    {
+        struct sigaction sa;
+        std::memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = handle_termination_signal;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;   // no SA_RESTART: let a blocking call return so the flag is noticed
+        sigaction(SIGTERM, &sa, nullptr);
+        sigaction(SIGINT, &sa, nullptr);
+    }
 
     std::cout << "🌐 [Init] Remote Server DB (Tokens & Accounts): " << remote_host << ":" << remote_port << "/" << remote_db << "\n";
     std::cout << "⚡ [Init] Local Fast DB (Ticks & Historical Candles): " << local_host << ":" << local_port << "/" << local_db << "\n";
@@ -163,7 +183,6 @@ int main(int argc, char* argv[]) {
     std::thread http_thread([server]() {
         server->start();
     });
-    http_thread.detach();
 
     if (db_client->test_connection()) {
         std::cout << "✅ [Remote Database] Remote Server Connection Successful (Tokens & Common Data)!\n";
@@ -209,7 +228,6 @@ int main(int argc, char* argv[]) {
 
     // Launch Background Token Validation & Live Tick Ingestion Supervisor Thread IMMEDIATELY
     std::thread supervisor_thread([db_client, &receiver, &soak_monitor, feed_supervisor]() {
-        bool last_active_state = false;
         int check_counter = 0;
         size_t total_saved_ticks = 0;
         size_t expired_contract_ticks_skipped = 0;
@@ -255,7 +273,7 @@ int main(int argc, char* argv[]) {
 
         refresh_trade_cache();
 
-        while (true) {
+        while (!g_shutdown_requested.load()) {
             check_counter++;
 
             // Periodically check and hot-reload dynamic strategy configuration (every 60s)
@@ -371,7 +389,18 @@ int main(int argc, char* argv[]) {
                 // single contract that expired on 2026-10-01 still held 2,754 journal rows.
                 // They also stayed subscribed on the feed. Skipping here is the earliest
                 // point in the path that still has the symbol to test.
-                if (hermes::MarketCalendar::is_contract_expired(tick.symbol)) {
+                //
+                // The tri-state form is used on purpose. is_contract_expired() answers "false" for a
+                // symbol whose expiry cannot be read, so an unreadable contract sailed through as if
+                // it were live. MarketCalendar documents that entry paths must treat UNKNOWN as
+                // blocking, and this counter (declared above, never incremented) is where that was
+                // meant to be reported. Index quotes are not contracts and carry no expiry, so they
+                // are excluded from the UNKNOWN check; they are not option candidates anyway.
+                const auto expiry = hermes::MarketCalendar::expiry_state(tick.symbol);
+                const bool is_index_symbol =
+                    tick.instrument_key.find("_INDEX|") != std::string::npos ||
+                    tick.symbol.rfind("NSE_INDEX|", 0) == 0 || tick.symbol.rfind("BSE_INDEX|", 0) == 0;
+                if (expiry == hermes::MarketCalendar::ExpiryState::EXPIRED) {
                     ++expired_contract_ticks_skipped;
                     // Coarse interval on purpose: a per-tick line here would recreate the
                     // unbounded-log problem this project has already been bitten by.
@@ -379,6 +408,14 @@ int main(int argc, char* argv[]) {
                         std::cout << "⏭️  [Engine] Skipped " << expired_contract_ticks_skipped
                                   << " ticks for already-expired contracts (latest: "
                                   << tick.symbol << ")\n";
+                    }
+                    continue;
+                }
+                if (expiry == hermes::MarketCalendar::ExpiryState::UNKNOWN && !is_index_symbol && !tick.symbol.empty()) {
+                    ++unverifiable_expiry_ticks_skipped;
+                    if (unverifiable_expiry_ticks_skipped == 1 || unverifiable_expiry_ticks_skipped % 5000 == 0) {
+                        std::cout << "⏭️  [Engine] Skipped " << unverifiable_expiry_ticks_skipped
+                                  << " ticks whose expiry cannot be read (latest: " << tick.symbol << ")\n";
                     }
                     continue;
                 }
@@ -539,7 +576,6 @@ int main(int argc, char* argv[]) {
             check_counter++;
         }
     });
-    supervisor_thread.detach();
 
     // Initialize Step 2 & 3: Backtest & SIMD Feature Engine Verification
     try {
@@ -560,11 +596,23 @@ int main(int argc, char* argv[]) {
         std::cerr << "⚠️ [Engine Warning] Backtest engine deferred due to DB reconnect\n";
     }
 
-    // Keep server process running persistently
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    // Run until SIGTERM / SIGINT, then shut down in dependency order.
+    while (!g_shutdown_requested.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
+    std::cout << "🛑 [Shutdown] Termination signal received; stopping.\n";
+    // 1. Stop taking new market data, so nothing new is queued behind the consumer.
+    feed_supervisor->stop();
+    // 2. Join the decision loop (it exits at the top of its cycle; its longest sleep is 2 s). It
+    //    holds references to locals of this function, so it must be joined before they are
+    //    destroyed; as a detached thread it would have run on against freed objects.
+    if (supervisor_thread.joinable()) supervisor_thread.join();
+    receiver.stop_receiver();
+    // 3. Stop the HTTP listener (wakes its blocked accept()) and wait for the thread.
+    server->stop();
+    if (http_thread.joinable()) http_thread.join();
+    std::cout << "✅ [Shutdown] Clean exit.\n";
     return 0;
 }
 

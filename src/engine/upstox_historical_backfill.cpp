@@ -1,12 +1,15 @@
 #include "engine/upstox_historical_backfill.hpp"
+#include "common/http_client.hpp"
 #include <iostream>
 #include <sstream>
 #include <cstdio>
-#include <array>
 #include <algorithm>
 #include <cmath>
 #include <thread>
 #include <chrono>
+#include <cstdint>
+#include <iomanip>
+#include <cctype>
 
 namespace {
 
@@ -17,16 +20,91 @@ std::string url_encode(const std::string& value) {
     escaped << std::hex;
 
     for (char c : value) {
-        if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
+        const unsigned char u = static_cast<unsigned char>(c);   // isalnum(char) is undefined for negatives
+        if (std::isalnum(u) || c == '-' || c == '_' || c == '.' || c == '~') {
             escaped << c;
         } else {
-            escaped << '%' << std::uppercase << (int)(unsigned char)c;
+            // setw(2): without it a byte below 0x10 printed as one digit ("%A" for a newline), a
+            // malformed escape.
+            escaped << '%' << std::uppercase << std::setw(2) << static_cast<int>(u);
         }
     }
     return escaped.str();
 }
 
+// Days since 1970-01-01 for a proleptic Gregorian date, and the inverse (Howard Hinnant's civil
+// algorithms). Plain integer arithmetic, so the chunking below does not depend on the host's
+// timezone database or on how complete <chrono>'s calendar support is.
+int64_t days_from_civil(int y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    const int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const unsigned yoe = static_cast<unsigned>(y - era * 400);
+    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + static_cast<int64_t>(doe) - 719468;
+}
+
+void civil_from_days(int64_t z, int& y, unsigned& m, unsigned& d) {
+    z += 719468;
+    const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    const unsigned doe = static_cast<unsigned>(z - era * 146097);
+    const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    y = static_cast<int>(yoe) + static_cast<int>(era) * 400;
+    const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const unsigned mp = (5 * doy + 2) / 153;
+    d = doy - (153 * mp + 2) / 5 + 1;
+    m = mp < 10 ? mp + 3 : mp - 9;
+    y += m <= 2;
+}
+
+bool parse_ymd(const std::string& s, int& y, unsigned& m, unsigned& d) {
+    if (s.size() < 10 || s[4] != '-' || s[7] != '-') return false;
+    for (size_t i : {0u, 1u, 2u, 3u, 5u, 6u, 8u, 9u}) {
+        if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+    }
+    y = std::stoi(s.substr(0, 4));
+    m = static_cast<unsigned>(std::stoi(s.substr(5, 2)));
+    d = static_cast<unsigned>(std::stoi(s.substr(8, 2)));
+    if (m < 1 || m > 12 || d < 1) return false;
+    int ry; unsigned rm, rd;
+    civil_from_days(days_from_civil(y, m, d), ry, rm, rd);   // round-trip rejects 02-30 and the like
+    return ry == y && rm == m && rd == d;
+}
+
+std::string format_ymd(int64_t day_number) {
+    int y; unsigned m, d;
+    civil_from_days(day_number, y, m, d);
+    char buf[48];   // worst case for the format below, so the compiler can prove no truncation
+    snprintf(buf, sizeof(buf), "%04d-%02u-%02u", y, m, d);
+    return buf;
+}
+
 } // namespace
+
+std::vector<std::pair<std::string, std::string>> UpstoxHistoricalBackfillEngine::chunk_date_range(
+    const std::string& from_date, const std::string& to_date, int window_days) {
+    std::vector<std::pair<std::string, std::string>> chunks;
+    int fy, ty; unsigned fm, fd, tm, td;
+    if (window_days < 1 || !parse_ymd(from_date, fy, fm, fd) || !parse_ymd(to_date, ty, tm, td)) {
+        chunks.emplace_back(from_date, to_date);   // unreadable range: one request, as the daily path does
+        return chunks;
+    }
+    const int64_t first = days_from_civil(fy, fm, fd);
+    const int64_t last = days_from_civil(ty, tm, td);
+    if (last < first) {
+        chunks.emplace_back(from_date, to_date);
+        return chunks;
+    }
+    // Windows of `window_days` calendar days from `from_date`, the last one clamped to `to_date`.
+    // The old loop iterated day-of-month from from_day to to_day within from_date's month, and it
+    // never read to_year or to_month: a range crossing a month boundary (28 Oct .. 2 Nov) had
+    // from_day > to_day, so the loop body never ran and nothing was fetched at all.
+    for (int64_t day = first; day <= last; day += window_days) {
+        const int64_t end = std::min<int64_t>(last, day + window_days - 1);
+        chunks.emplace_back(format_ymd(day), format_ymd(end));
+    }
+    return chunks;
+}
 
 UpstoxHistoricalBackfillEngine::UpstoxHistoricalBackfillEngine() {}
 
@@ -117,26 +195,11 @@ std::vector<UpstoxCandleRecord> UpstoxHistoricalBackfillEngine::fetch_historical
 
     std::string encoded_key = url_encode(instrument_key);
 
-    // Date range chunking helper for intraday data to prevent Upstox 1000-candle payload truncation
+    // Intraday requests are split into 3-day windows to stay under Upstox's 1000-candle response
+    // cap. Daily requests go through as one range.
     std::vector<std::pair<std::string, std::string>> date_chunks;
-    if (interval != "day" && from_date.length() >= 10 && to_date.length() >= 10) {
-        // Chunk range into 3-day windows
-        int from_year = std::stoi(from_date.substr(0, 4));
-        int from_month = std::stoi(from_date.substr(5, 2));
-        int from_day = std::stoi(from_date.substr(8, 2));
-
-        int to_year = std::stoi(to_date.substr(0, 4));
-        int to_month = std::stoi(to_date.substr(5, 2));
-        int to_day = std::stoi(to_date.substr(8, 2));
-
-        // Generate 3-day window chunks
-        for (int day = from_day; day <= to_day; day += 3) {
-            int end_d = std::min(to_day, day + 2);
-            char buf1[32], buf2[32];
-            snprintf(buf1, sizeof(buf1), "%04d-%02d-%02d", from_year, from_month, day);
-            snprintf(buf2, sizeof(buf2), "%04d-%02d-%02d", from_year, from_month, end_d);
-            date_chunks.push_back({buf1, buf2});
-        }
+    if (interval != "day") {
+        date_chunks = chunk_date_range(from_date, to_date, 3);
     } else {
         date_chunks.push_back({from_date, to_date});
     }
@@ -145,23 +208,28 @@ std::vector<UpstoxCandleRecord> UpstoxHistoricalBackfillEngine::fetch_historical
         std::string chunk_from = chunk.first;
         std::string chunk_to = chunk.second;
 
-        std::string url = "https://api.upstox.com/v2/historical-candle/" + encoded_key + "/" + interval + "/" + chunk_to + "/" + chunk_from;
-        std::string cmd = "curl -s -m 15 \"" + url + "\" -H \"Accept: application/json\"";
+        std::string url = "https://api.upstox.com/v2/historical-candle/" + encoded_key + "/" + url_encode(interval) + "/" + chunk_to + "/" + chunk_from;
 
         std::string response;
         bool chunk_ok = false;
 
         for (int attempt = 0; attempt < 3; ++attempt) {
             out_report.retry_count += attempt;
-            std::array<char, 4096> buffer;
             response.clear();
 
-            FILE* pipe = popen(cmd.c_str(), "r");
-            if (pipe) {
-                while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-                    response += buffer.data();
-                }
-                pclose(pipe);
+            // In-process HTTPS request; the URL is passed to libcurl as data. It used to be
+            // interpolated into a `curl "<url>"` shell command, so a quote in an instrument key
+            // or interval ended the string and ran the remainder in a shell.
+            hermes::http::Request req;
+            req.method = "GET";
+            req.url = url;
+            req.headers = {"Accept: application/json"};
+            req.timeout_secs = 15;
+            const hermes::http::Response http = hermes::http::perform(req);
+            if (http.transport_ok) {
+                response = http.body;
+            } else {
+                out_report.error_message = http.error;
             }
 
             if (response.find("\"status\":\"success\"") != std::string::npos && response.find("\"candles\":[") != std::string::npos) {

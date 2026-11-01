@@ -29,6 +29,7 @@
 #include "../src/engine/upstox_historical_backfill.hpp"
 #include "../src/engine/historical_edge_engine.hpp"
 #include "../src/common/crypto_util.hpp"
+#include "../src/common/http_client.hpp"
 #include "../src/market_data/upstox/upstox_decoder.hpp"
 #include "../src/market_data/fyers/fyers_decoder.hpp"
 #include "../src/market_data/broker_feed_supervisor.hpp"
@@ -42,6 +43,7 @@
 #include "../src/engine/spread_position.hpp"
 #include "../src/engine/predictive_kelly_sizer.hpp"
 #include <cstdlib>
+#include <unistd.h>
 #include "test_db_config.hpp"
 #include "../src/roadmap/db_client.hpp"
 #include "../src/roadmap/roadmap_server.hpp"
@@ -1238,10 +1240,235 @@ void run_solid_and_acid_test_suite() {
     std::cout << "\n--- CATEGORY 25: Gate 21 Final Acceptance & System Release ---\n";
 
     {
+        // The old G21-01 asserted that acceptance was UNLOCKED on a database with no evidence in it.
+        // That passed only because every check returned true unconditionally, so the test was
+        // certifying the defect. Acceptance must depend on evidence, so these assert it can fail,
+        // and that it names why.
         FinalAcceptanceValidator validator(db_client);
+        db_client->execute_raw_sql("DELETE FROM cpp_post_session_analysis_test;");
         Phase1ReleaseReport report = validator.evaluate_phase1_acceptance();
 
-        TEST("Gate G21-01, G21-02 & G21-03: Final acceptance validator verifies all Gates 0-19 GREEN, OOS rule promotion, and stable paper run", report.phase1_final_acceptance_unlocked && report.gates_0_to_19_verified_green && report.oos_tested_rule_promoted && report.minimum_stable_paper_period_passed && report.gate_verifications.size() >= 20);
+        TEST("Gate G21-01: with no evidence, final acceptance is NOT unlocked",
+             report.phase1_final_acceptance_unlocked == false);
+        TEST("Gate G21-02: every missing piece of evidence is named, none is invented",
+             !report.unverified_reasons.empty() &&
+             report.oos_tested_rule_promoted == false &&
+             report.risk_breaches_known == false &&
+             report.total_unhandled_risk_breaches == -1);
+        TEST("Gate G21-03: no fabricated per-gate evidence strings are produced",
+             [&]() {
+                 for (const auto& v : report.gate_verifications) {
+                     if (v.evidence_ref.rfind("ci_test_gate.sh_pass_record_", 0) == 0) return false;
+                 }
+                 return true;
+             }());
+
+        // The paper-session check reads the database: below the minimum it fails, at the minimum
+        // it passes, and an unreadable count is not a pass.
+        int found = -1; bool known = false;
+        TEST("Gate G21-04: zero analysed sessions does not satisfy a 14-session minimum",
+             validator.verify_paper_session_stability(14, &found, &known) == false && known && found == 0);
+        for (int d = 1; d <= 14; ++d) {
+            char date[16];
+            std::snprintf(date, sizeof(date), "2026-09-%02d", d);
+            db_client->save_post_session_analysis_record(std::string("g21-") + date, date, "CLOSED", 1, 1, 1, 0, 0, 0, 0.0, 0.0, 0.0, 0, "{}");
+        }
+        TEST("Gate G21-05: 14 distinct analysed sessions satisfy the 14-session minimum",
+             validator.verify_paper_session_stability(14, &found, &known) && known && found == 14);
+        TEST("Gate G21-06: a 15-session minimum is not met by 14 sessions (the boundary is exact)",
+             validator.verify_paper_session_stability(15, &found, &known) == false && found == 14);
+        db_client->execute_raw_sql("DELETE FROM cpp_post_session_analysis_test;");
+
+        FinalAcceptanceValidator no_db(nullptr);
+        TEST("Gate G21-07: with no database client nothing is verified",
+             no_db.verify_all_gates_green() == false && no_db.verify_paper_session_stability(1) == false &&
+             no_db.evaluate_phase1_acceptance().phase1_final_acceptance_unlocked == false);
+    }
+
+    // -----------------------------------------------------------------
+    // CATEGORY 25b: AUDIT REMEDIATION (2026-11-02): pool capacity, TLS policy, in-process HTTP,
+    // backfill date windows, operator reason on the config audit row, transport-free checks.
+    // -----------------------------------------------------------------
+    std::cout << "\n--- CATEGORY 25b: Audit remediation ---\n";
+
+    {
+        // POOL-01: the ceiling arithmetic. 0 means "4 x pool_size"; it can never be below pool_size
+        // or zero, whatever is requested.
+        TEST("POOL-01: default ceiling is 4 x the warm pool size",
+             MySQLConnectionPool::effective_max_connections(5, 0) == 20);
+        TEST("POOL-02: an explicit ceiling is honoured",
+             MySQLConnectionPool::effective_max_connections(5, 8) == 8);
+        TEST("POOL-03: a ceiling below the warm size is raised to it, never left unusable",
+             MySQLConnectionPool::effective_max_connections(5, 2) == 5);
+        TEST("POOL-04: a zero-sized pool still has a ceiling of at least one",
+             MySQLConnectionPool::effective_max_connections(0, 0) >= 1);
+
+        // TLS-01..: unset means PREFERRED on loopback and REQUIRED anywhere else; a typo never weakens it.
+        using TP = MySQLConnectionPool::TlsPolicy;
+        TEST("TLS-01: loopback with no setting keeps PREFERRED (SSH tunnel / local server)",
+             MySQLConnectionPool::resolve_tls_policy("127.0.0.1", "") == TP::PREFERRED &&
+             MySQLConnectionPool::resolve_tls_policy("localhost", "") == TP::PREFERRED);
+        TEST("TLS-02: a non-loopback host with no setting REQUIRES TLS",
+             MySQLConnectionPool::resolve_tls_policy("10.0.0.99", "") == TP::REQUIRED &&
+             MySQLConnectionPool::resolve_tls_policy("db.example.com", "") == TP::REQUIRED);
+        TEST("TLS-03: an explicit recognised setting wins, case-insensitively",
+             MySQLConnectionPool::resolve_tls_policy("10.0.0.99", "verify_identity") == TP::VERIFY_IDENTITY &&
+             MySQLConnectionPool::resolve_tls_policy("127.0.0.1", "Required") == TP::REQUIRED &&
+             MySQLConnectionPool::resolve_tls_policy("127.0.0.1", "DISABLED") == TP::DISABLED);
+        TEST("TLS-04: an unrecognised setting is treated as REQUIRED, not weakened",
+             MySQLConnectionPool::resolve_tls_policy("127.0.0.1", "prefered") == TP::REQUIRED);
+    }
+
+    {
+        // POOL-05: the live ceiling. A pool of 1 warm / 2 max hands out two connections; a third
+        // acquire waits for the acquire timeout and returns nullptr instead of opening a third.
+        // A released connection becomes available again.
+        setenv("MYSQL_POOL_ACQUIRE_TIMEOUT_MS", "300", 1);
+        MySQLConnectionPool small(db_host, db_port, db_user, db_pass, db_name, 1, 2);
+        unsetenv("MYSQL_POOL_ACQUIRE_TIMEOUT_MS");
+
+        MYSQL* c1 = small.acquire();
+        MYSQL* c2 = small.acquire();
+        TEST("POOL-05: two connections are available under a ceiling of two", c1 != nullptr && c2 != nullptr && c1 != c2);
+        const auto t0 = std::chrono::steady_clock::now();
+        MYSQL* c3 = small.acquire();
+        const auto waited_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        TEST("POOL-06: a third acquire does NOT open a third connection; it times out with nullptr",
+             c3 == nullptr && small.open_connections() == 2);
+        TEST("POOL-07: that refusal waited for the timeout rather than failing instantly or hanging",
+             waited_ms >= 250 && waited_ms < 5000);
+
+        // A blocked acquire is woken by a release, not left to time out.
+        std::thread releaser([&]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            small.release(c1);
+        });
+        // (the acquire timeout was fixed at construction: 300 ms, so the release at ~100 ms lands inside it)
+        MYSQL* c4 = small.acquire();
+        releaser.join();
+        TEST("POOL-08: a waiting acquire receives a connection when another is released", c4 != nullptr);
+        TEST("POOL-09: the pool did not exceed its ceiling while serving that", small.open_connections() <= 2);
+
+        // Releasing a handle the pool does not own must not poison the queue.
+        MYSQL* stranger = mysql_init(nullptr);
+        small.release(stranger);
+        small.release(c2);
+        if (c4) small.release(c4);
+        MYSQL* again = small.acquire();
+        TEST("POOL-10: releasing a foreign handle is ignored (it is never handed out)", again != nullptr && again != stranger);
+        if (again) small.release(again);
+        mysql_close(stranger);
+    }
+
+    {
+        // BIND-01..: the portal listens on loopback unless an operator names another address, and a
+        // value that is not an IPv4 literal refuses to start (it must never fall back to all interfaces).
+        TEST("BIND-01: unset means loopback", RoadmapServer::resolve_bind_address("") == "127.0.0.1");
+        TEST("BIND-02: an explicit IPv4 address is honoured", RoadmapServer::resolve_bind_address("10.1.2.3") == "10.1.2.3");
+        TEST("BIND-03: an explicit all-interfaces request is honoured (operator decision, logged at startup)",
+             RoadmapServer::resolve_bind_address("0.0.0.0") == "0.0.0.0");
+        TEST("BIND-04: garbage is refused, not defaulted to open",
+             RoadmapServer::resolve_bind_address("garbage").empty() &&
+             RoadmapServer::resolve_bind_address("999.1.1.1").empty() &&
+             RoadmapServer::resolve_bind_address("localhost").empty() &&
+             RoadmapServer::resolve_bind_address("127.0.0.1; rm").empty());
+    }
+
+    {
+        // HTTP-01: only well-formed https URLs are performed; nothing can steer the scheme or inject.
+        using hermes::http::is_acceptable_url;
+        TEST("HTTP-01: a plain https URL is acceptable", is_acceptable_url("https://api.upstox.com/v2/login/authorization/token"));
+        TEST("HTTP-02: http, file, ftp and scheme-less URLs are refused",
+             !is_acceptable_url("http://api.upstox.com/") && !is_acceptable_url("file:///etc/passwd") &&
+             !is_acceptable_url("ftp://h/") && !is_acceptable_url("api.upstox.com/path") && !is_acceptable_url(""));
+        TEST("HTTP-03: whitespace and control characters are refused (no header/shell smuggling)",
+             !is_acceptable_url("https://h/ x") && !is_acceptable_url("https://h/\r\nX: y") &&
+             !is_acceptable_url(std::string("https://h/a") + '\0' + "b") && !is_acceptable_url("https://h/\t"));
+        TEST("HTTP-04: an empty host is refused", !is_acceptable_url("https:///path") && !is_acceptable_url("https://"));
+        {
+            hermes::http::Request bad;
+            bad.url = "https://127.0.0.1:1/";   // refused before any connection: header with a line break
+            bad.headers = {"X-Test: ok\r\nInjected: yes"};
+            const auto r = hermes::http::perform(bad);
+            TEST("HTTP-05: a header containing a line break is refused without a request", !r.transport_ok && !r.error.empty());
+            hermes::http::Request plain;
+            plain.url = "http://127.0.0.1:1/";
+            const auto r2 = hermes::http::perform(plain);
+            TEST("HTTP-06: a non-https request is refused without a connection attempt",
+                 !r2.transport_ok && r2.error.find("https") != std::string::npos);
+        }
+        {
+            // The shape of the old attack: a value containing a quote and shell syntax is only data now.
+            hermes::http::Request evil;
+            evil.method = "POST";
+            evil.url = "https://127.0.0.1:1/";   // closed port: fails at connect, not in a shell
+            evil.body = "code=x'; touch /tmp/hermes_pwned_by_http_client; echo '";
+            evil.timeout_secs = 2;
+            const auto r = hermes::http::perform(evil);
+            TEST("HTTP-07: a shell-metacharacter body is carried as data (transport fails, nothing executes)",
+                 !r.transport_ok && access("/tmp/hermes_pwned_by_http_client", F_OK) != 0);
+        }
+    }
+
+    {
+        // CHUNK-01..: backfill date windows.
+        using BF = UpstoxHistoricalBackfillEngine;
+        auto c1 = BF::chunk_date_range("2026-10-01", "2026-10-07", 3);
+        TEST("CHUNK-01: 7 days in 3-day windows -> 3 windows, the last clamped",
+             c1.size() == 3 && c1[0] == std::make_pair(std::string("2026-10-01"), std::string("2026-10-03")) &&
+             c1[1] == std::make_pair(std::string("2026-10-04"), std::string("2026-10-06")) &&
+             c1[2] == std::make_pair(std::string("2026-10-07"), std::string("2026-10-07")));
+        // The defect: from_day (28) > to_day (2) so the old loop never ran and returned NOTHING.
+        auto c2 = BF::chunk_date_range("2026-10-28", "2026-11-02", 3);
+        TEST("CHUNK-02: a range crossing a month boundary still produces windows (old code produced none)",
+             c2.size() == 2 && c2.front().first == "2026-10-28" && c2[0].second == "2026-10-30" &&
+             c2[1].first == "2026-10-31" && c2[1].second == "2026-11-02");
+        auto c3 = BF::chunk_date_range("2026-12-30", "2027-01-02", 3);
+        TEST("CHUNK-03: a range crossing a year boundary is handled",
+             c3.size() == 2 && c3[0].second == "2027-01-01" && c3[1].first == "2027-01-02" && c3[1].second == "2027-01-02");
+        auto c4 = BF::chunk_date_range("2028-02-27", "2028-03-01", 3);
+        TEST("CHUNK-04: leap-day February is counted (2028-02-29 exists)",
+             c4.size() == 2 && c4[0].second == "2028-02-29" && c4[1].first == "2028-03-01");
+        auto c5 = BF::chunk_date_range("2026-10-05", "2026-10-05", 3);
+        TEST("CHUNK-05: a single day is a single window", c5.size() == 1 && c5[0].first == c5[0].second);
+        auto c6 = BF::chunk_date_range("2026-11-02", "2026-10-28", 3);
+        TEST("CHUNK-06: an inverted range falls back to one verbatim request, not an empty plan",
+             c6.size() == 1 && c6[0].first == "2026-11-02" && c6[0].second == "2026-10-28");
+        auto c7 = BF::chunk_date_range("not-a-date", "2026-10-28", 3);
+        TEST("CHUNK-07: an unreadable date falls back to one verbatim request",
+             c7.size() == 1 && c7[0].first == "not-a-date");
+        auto c8 = BF::chunk_date_range("2026-02-30", "2026-03-02", 3);
+        TEST("CHUNK-08: an impossible calendar date (Feb 30) is not silently normalised",
+             c8.size() == 1 && c8[0].first == "2026-02-30");
+        size_t covered = 0;
+        for (const auto& w : BF::chunk_date_range("2026-01-01", "2026-12-31", 3)) {
+            (void)w; ++covered;
+        }
+        TEST("CHUNK-09: a full year is 122 windows of at most 3 days (365 days / 3, rounded up)", covered == 122);
+    }
+
+    {
+        // CFG-REASON-01: the operator's reason is stored on the audit row (it used to be discarded).
+        auto& scm_r = hermes::StrategyConfigManager::instance();
+        scm_r.load_from_db(db_client.get());
+        const double before = scm_r.get_ofi_threshold();
+        const std::string new_val = (before > 0.84 && before < 0.86) ? "0.83" : "0.85";
+        bool changed = scm_r.update_parameter(db_client.get(), "ofi_threshold", new_val, "AUDIT_REMEDIATION_TEST",
+                                              "reason text with a ' quote and a ; semicolon");
+        auto audits = db_client->fetch_strategy_config_audit(5);
+        bool reason_stored = false;
+        for (const auto& a : audits) {
+            if (a.at("config_key") == "ofi_threshold" && a.at("approved_by") == "AUDIT_REMEDIATION_TEST" &&
+                a.at("reason").find("reason text with a ' quote and a ; semicolon") != std::string::npos &&
+                a.at("reason").find("Trigger-enforced audit") != std::string::npos) {
+                reason_stored = true;
+                break;
+            }
+        }
+        TEST("CFG-REASON-01: the operator reason is recorded on the audit row, alongside the trigger note",
+             changed && reason_stored);
+        // put the baseline back
+        scm_r.update_parameter(db_client.get(), "ofi_threshold", "0.85", "OPERATOR", "");
     }
 
     // -----------------------------------------------------------------
@@ -1795,6 +2022,26 @@ void run_solid_and_acid_test_suite() {
         TEST("PSA-02: End-of-day data archival rollup executes safely without deleting unverified rows",
              !arch_report.retention_policy_note.empty());
 
+        // PSA-02b..d: execution_success must be able to be FALSE. It used to be computed as
+        // (candles_rolled_up > 0 || snapshots_archived >= 0) with an unsigned right-hand side,
+        // which is always true, so a run against a dead database still reported success.
+        TEST("PSA-02b: archival against a healthy database reports success",
+             arch_report.execution_success == true);
+        {
+            auto dead_db = std::make_shared<RoadmapDbClient>("127.0.0.1", 3398, db_user, db_pass, db_name);
+            dead_db->set_test_isolation(true);
+            hermes::PostSessionAnalyzer dead_analyzer(dead_db);
+            auto dead_report = dead_analyzer.run_daily_data_archival("2026-10-09");
+            TEST("PSA-02c: archival against an unreachable database reports FAILURE, not success",
+                 dead_report.execution_success == false);
+        }
+        {
+            hermes::PostSessionAnalyzer null_analyzer(nullptr);
+            auto null_report = null_analyzer.run_daily_data_archival("2026-10-09");
+            TEST("PSA-02d: archival with no database client reports FAILURE",
+                 null_report.execution_success == false);
+        }
+
         // Test PSA-03: In-process autonomous EOD trigger inside BrokerFeedSupervisor
         OptionTickReceiver dummy_rx;
         BrokerFeedSupervisor sup(db_client, dummy_rx, {"NSE_INDEX|Nifty 50"});
@@ -2102,9 +2349,28 @@ void run_solid_and_acid_test_suite() {
 
     // Item DPNL-07: RoadmapDbClient::fetch_open_positions_with_exit_evaluation database query execution
     {
-        auto open_positions = db_client->fetch_open_positions_with_exit_evaluation();
-        TEST("DPNL-07: RoadmapDbClient::fetch_open_positions_with_exit_evaluation executes clean SQL against database",
-             open_positions.size() >= 0);
+        // The previous assertion was `open_positions.size() >= 0`. size() is unsigned, so that is
+        // always true: it passed whether the query ran or failed, because the function swallows
+        // SQL errors and returns an empty vector. To prove the query really executes, seed one
+        // OPEN trade in the isolated table and require it to come back.
+        MYSQL* dpnl_db = mysql_init(nullptr);
+        const bool dpnl_connected = dpnl_db && mysql_real_connect(dpnl_db, db_host.c_str(), db_user.c_str(),
+                                                                   db_pass.c_str(), db_name.c_str(), db_port, nullptr, 0);
+        TEST("DPNL-07 setup: raw connection to the isolated test database is available", dpnl_connected);
+        if (dpnl_connected) {
+            auto dpnl_exec = [&](const std::string& sql) { return mysql_query(dpnl_db, sql.c_str()) == 0; };
+            dpnl_exec("DELETE FROM cpp_trade_reports_test;");
+            const bool dpnl_seeded =
+                dpnl_exec("INSERT INTO cpp_trade_reports_test (id, tradeUuid, instrument, side, quantity, entryPrice, "
+                          "exitPrice, grossPnl, cost, netPnl, status, orderedAt, signal_timestamp, algoSource, executionMode) VALUES "
+                          "('TEST-DPNL07-1','dpnl07-u1','SENSEX26123172400CE (BSE_FO|7)','BUY',25,100.0,0.0,0.0,0.0,0.0,"
+                          "'OPEN','2026-10-10 09:30:00','2026-10-10 09:30:00.000000','OFI_Microstructure_Breakout','PAPER');");
+            auto open_positions = db_client->fetch_open_positions_with_exit_evaluation();
+            TEST("DPNL-07: RoadmapDbClient::fetch_open_positions_with_exit_evaluation executes clean SQL against database",
+                 dpnl_seeded && open_positions.size() == 1 && open_positions[0].trade_id == "TEST-DPNL07-1");
+            dpnl_exec("DELETE FROM cpp_trade_reports_test;");
+            mysql_close(dpnl_db);
+        }
     }
 
     // Item PMRA-01: PreMarketReadinessAnalyzer report generation & safety invariants
@@ -3101,39 +3367,46 @@ void run_solid_and_acid_test_suite() {
         using MC = hermes::MarketCalendar;
         using ES = hermes::MarketCalendar::ExpiryState;
 
+        // The clock is pinned. These cases were written on 2026-10-15 and passed an implicit
+        // "now", so EXP-03 (expiry 2026-10-15) started failing on 2026-10-16 and EXP-02 (expiry
+        // 2026-12-31) would fail on 2027-01-01. The classifier was correct; the test depended on
+        // the date it ran. Every call below passes this epoch (2026-10-15 12:00:00 IST), as the
+        // EXP-01a..n block above already does.
+        const uint64_t exp_today = 1792045800000ULL;
+
         // Recognisable expiries. 2026-10-01 is before today (2026-10-15).
         TEST("EXP-01: a recognisable past expiry reports EXPIRED",
-             MC::expiry_state("SENSEX26100172400CE") == ES::EXPIRED);
+             MC::expiry_state("SENSEX26100172400CE", exp_today) == ES::EXPIRED);
         TEST("EXP-02: a recognisable future expiry reports NOT_EXPIRED",
-             MC::expiry_state("SENSEX26123172400CE") == ES::NOT_EXPIRED);
+             MC::expiry_state("SENSEX26123172400CE", exp_today) == ES::NOT_EXPIRED);
         TEST("EXP-03: expiring today is still tradable - NOT_EXPIRED",
-             MC::expiry_state("SENSEX26101572400CE") == ES::NOT_EXPIRED);
+             MC::expiry_state("SENSEX26101572400CE", exp_today) == ES::NOT_EXPIRED);
 
         // The three ways a symbol can be unreadable.
         TEST("EXP-04: a symbol with no date run reports UNKNOWN, not NOT_EXPIRED",
-             MC::expiry_state("SOMEINDEX") == ES::UNKNOWN);
+             MC::expiry_state("SOMEINDEX", exp_today) == ES::UNKNOWN);
         TEST("EXP-05: the month-name form (NIFTY26OCT24500CE) reports UNKNOWN",
-             MC::expiry_state("NIFTY26OCT24500CE") == ES::UNKNOWN);
+             MC::expiry_state("NIFTY26OCT24500CE", exp_today) == ES::UNKNOWN);
         TEST("EXP-06: the bare index does not read as a live contract",
-             MC::expiry_state("NIFTY50") == ES::UNKNOWN);
+             MC::expiry_state("NIFTY50", exp_today) == ES::UNKNOWN);
 
         // The core of item 7: the decision does not depend on any database constraint.
         TEST("EXP-07: eligibility is decided from the symbol alone, with no index involved",
-             MC::expiry_state("SENSEX26100172400CE") == ES::EXPIRED &&
-             MC::expiry_state("SENSEX26123172400CE") == ES::NOT_EXPIRED &&
-             MC::expiry_state("SENSEX26100172400CE") != MC::expiry_state("SENSEX26123172400CE"));
+             MC::expiry_state("SENSEX26100172400CE", exp_today) == ES::EXPIRED &&
+             MC::expiry_state("SENSEX26123172400CE", exp_today) == ES::NOT_EXPIRED &&
+             MC::expiry_state("SENSEX26100172400CE", exp_today) != MC::expiry_state("SENSEX26123172400CE", exp_today));
 
         // And the refusal is not silent: UNKNOWN is a distinct state, so a caller can count and
         // report it instead of folding it into the expired total.
         TEST("EXP-08: UNKNOWN is distinct from EXPIRED, so it can be reported separately",
-             MC::expiry_state("SOMEINDEX") != ES::EXPIRED && MC::expiry_state("SOMEINDEX") != ES::NOT_EXPIRED);
+             MC::expiry_state("SOMEINDEX", exp_today) != ES::EXPIRED && MC::expiry_state("SOMEINDEX", exp_today) != ES::NOT_EXPIRED);
 
         // The boolean compatibility form keeps its previous surface for callers that only ask
         // "is it expired", and deliberately does not answer for UNKNOWN.
         TEST("EXP-09: the boolean form still answers only for readable expiries",
-             MC::is_contract_expired("SENSEX26100172400CE") == true &&
-             MC::is_contract_expired("SENSEX26172400CE") == false &&
-             MC::is_contract_expired("SOMEINDEX") == false);
+             MC::is_contract_expired("SENSEX26100172400CE", exp_today) == true &&
+             MC::is_contract_expired("SENSEX26172400CE", exp_today) == false &&
+             MC::is_contract_expired("SOMEINDEX", exp_today) == false);
     }
 
 

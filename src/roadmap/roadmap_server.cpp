@@ -1,6 +1,7 @@
 #include "roadmap_server.hpp"
 #include "../common/env_loader.hpp"
 #include "../common/crypto_util.hpp"
+#include "../common/http_client.hpp"
 #include "../engine/market_calendar.hpp"
 #include "../engine/strategy_config_manager.hpp"
 #include "../analytics/visitor_tracker.hpp"
@@ -21,6 +22,8 @@
 #include <iomanip>
 #include <fstream>
 #include <chrono>
+#include <atomic>
+#include <ctime>
 
 RoadmapServer::RoadmapServer(int port, std::shared_ptr<RoadmapDbClient> db_client)
     : port_(port), db_client_(db_client), running_(false) {}
@@ -61,6 +64,34 @@ namespace rt = hermes::route_table;
 static hermes::http_auth::OneTimeStateStore& oauth_state_store() {
     static hermes::http_auth::OneTimeStateStore store(300);
     return store;
+}
+
+// Operator browser sessions. A session exists only because POST /auth/login issued it: the token
+// is 32 random bytes from the kernel CSPRNG, held server-side with an expiry, and validated by
+// lookup. There is no constant a client can present to be treated as logged in. (The previous
+// cookie value was the literal "operator_valid_session", the same for everyone, and check_auth
+// accepted it -- and also accepted the mere text "x-operator-password" anywhere in the request.)
+static hermes::http_auth::SessionStore& session_store() {
+    static hermes::http_auth::SessionStore store(8 * 3600);
+    return store;
+}
+
+// Failed-login budget per client address: 5 failures in 15 minutes, then 429 until they age out.
+static hermes::http_auth::AttemptLimiter& login_limiter() {
+    static hermes::http_auth::AttemptLimiter limiter(5, 15 * 60);
+    return limiter;
+}
+
+// Secrets accepted in the x-operator-password header (scripts, tooling). Read per request so a
+// rotated value takes effect without a restart. Neither is a fallback default: when none is
+// configured the header path simply never matches.
+static std::vector<std::string> configured_operator_secrets() {
+    std::vector<std::string> v;
+    const std::string a = EnvLoader::get("OPERATOR_PASSWORD", "");
+    const std::string b = EnvLoader::get("SESSION_PASSWORD", "");
+    if (!a.empty()) v.push_back(a);
+    if (!b.empty()) v.push_back(b);
+    return v;
 }
 
 
@@ -1437,11 +1468,15 @@ std::string RoadmapServer::render_html_page(bool is_authenticated) {
     return ss.str();
 }
 
+// The one authentication decision. See http_auth.hpp for the rules; in short, a request is
+// authenticated only by a configured secret in the x-operator-password header VALUE, or by a live
+// server-issued session token in that header or in the auth_token cookie. Everything else,
+// including the mere presence of a header name or a cookie-shaped string anywhere in the request,
+// is unauthenticated.
 static bool check_auth(const std::string& req) {
-    // Check cookie or header
-    if (req.find("auth_token=operator_valid_session") != std::string::npos) return true;
-    if (req.find("x-operator-password") != std::string::npos) return true;
-    return false;
+    hermes::http_auth::Authenticator auth(configured_operator_secrets(),
+        [](const std::string& token) { return session_store().valid(token); });
+    return auth.allow(req);
 }
 
 static std::string extract_post_param(const std::string& body, const std::string& param) {
@@ -1546,16 +1581,54 @@ static std::string url_encode(const std::string& value) {
     return escaped.str();
 }
 
-static std::string extract_query_param(const std::string& req, const std::string& param) {
-    auto pos = req.find(param + "=");
-    if (pos == std::string::npos) return "";
-    auto start = pos + param.length() + 1;
-    auto end = req.find_first_of(" &\r\n?", start);
-    std::string val = (end == std::string::npos) ? req.substr(start) : req.substr(start, end - start);
-    while (!val.empty() && (val.back() == '\r' || val.back() == '\n' || val.back() == ' ' || val.back() == '\t')) {
-        val.pop_back();
+// Reads one string field out of a flat JSON object, tolerating whitespace around the colon and
+// backslash escapes in the value. Not a general parser; it exists so a token response is not
+// matched by a brittle literal like "access_token":" (which fails on {"access_token": "..."}).
+static std::string json_string_field(const std::string& json, const std::string& key) {
+    const std::string needle = "\"" + key + "\"";
+    size_t pos = 0;
+    while ((pos = json.find(needle, pos)) != std::string::npos) {
+        size_t i = pos + needle.size();
+        while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r')) ++i;
+        if (i >= json.size() || json[i] != ':') { pos += needle.size(); continue; }
+        ++i;
+        while (i < json.size() && (json[i] == ' ' || json[i] == '\t' || json[i] == '\n' || json[i] == '\r')) ++i;
+        if (i >= json.size() || json[i] != '"') { pos += needle.size(); continue; }
+        ++i;
+        std::string out;
+        while (i < json.size() && json[i] != '"') {
+            if (json[i] == '\\' && i + 1 < json.size()) { ++i; }
+            out.push_back(json[i]);
+            ++i;
+        }
+        return out;
     }
-    return val;
+    return "";
+}
+
+// provider_tokens.expiresAt for a freshly exchanged token, from the token's OWN exp claim, as a
+// UTC DATETIME string. Returns "" when the token carries no readable exp: a token of unknown
+// lifetime is not stored (the caller treats "" as a failed exchange). This replaces a hardcoded
+// "2026-12-31 23:59:59" written for every token regardless of what the broker issued, which made
+// every token look valid for weeks when broker tokens last hours, and would have made every new
+// token look already expired from 2027-01-01.
+static std::string expiry_from_token(const std::string& token) {
+    const int64_t exp = crypto_util::extract_jwt_exp(token);
+    if (exp <= 0) return "";
+    const std::time_t t = static_cast<std::time_t>(exp);
+    std::tm tmv{};
+    if (!gmtime_r(&t, &tmv)) return "";
+    char buf[32];
+    if (std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv) == 0) return "";
+    return buf;
+}
+
+// Bounded, single-line excerpt of a provider response for the log. Never the token: this is only
+// used on the failure paths, where no access token was found.
+static std::string log_excerpt(const std::string& s) {
+    std::string out = s.substr(0, 200);
+    for (char& c : out) if (c == '\n' || c == '\r') c = ' ';
+    return out;
 }
 
 static std::string exchange_upstox_code_for_token(const std::string& code, std::string& out_expires_at) {
@@ -1565,38 +1638,35 @@ static std::string exchange_upstox_code_for_token(const std::string& code, std::
 
     if (client_id.empty() || client_secret.empty() || code.empty()) return "";
 
-    std::string post_data = "code=" + url_encode(code) +
-                            "&client_id=" + url_encode(client_id) +
-                            "&client_secret=" + url_encode(client_secret) +
-                            "&redirect_uri=" + url_encode(redirect_uri) +
-                            "&grant_type=authorization_code";
+    // Every value is percent-encoded into a form body that goes to libcurl as DATA. There is no
+    // shell, so nothing in `code` (which arrives on an unauthenticated callback URL) can change
+    // what runs. This was popen("curl ... -d '" + post_data + "'").
+    hermes::http::Request req;
+    req.method = "POST";
+    req.url = "https://api.upstox.com/v2/login/authorization/token";
+    req.headers = {"Accept: application/json", "Content-Type: application/x-www-form-urlencoded"};
+    req.body = "code=" + url_encode(code) +
+               "&client_id=" + url_encode(client_id) +
+               "&client_secret=" + url_encode(client_secret) +
+               "&redirect_uri=" + url_encode(redirect_uri) +
+               "&grant_type=authorization_code";
+    req.timeout_secs = 15;
 
-    std::string cmd = "curl -s -m 15 -X POST 'https://api.upstox.com/v2/login/authorization/token' "
-                      "-H 'Accept: application/json' "
-                      "-H 'Content-Type: application/x-www-form-urlencoded' "
-                      "-d '" + post_data + "'";
-
-    std::array<char, 4096> buffer;
-    std::string response;
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (pipe) {
-        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-            response += buffer.data();
-        }
-        pclose(pipe);
+    const hermes::http::Response res = hermes::http::perform(req);
+    if (!res.transport_ok) {
+        std::cerr << "❌ [UpstoxOAuth] Token exchange transport failure: " << res.error << "\n";
+        return "";
     }
-
-    auto pos = response.find("\"access_token\":\"");
-    if (pos != std::string::npos) {
-        auto start = pos + 16;
-        auto end = response.find("\"", start);
-        if (end != std::string::npos) {
-            std::string token = response.substr(start, end - start);
-            out_expires_at = "2026-12-31 23:59:59";
-            return token;
+    const std::string token = json_string_field(res.body, "access_token");
+    if (res.ok_2xx() && !token.empty()) {
+        out_expires_at = expiry_from_token(token);
+        if (out_expires_at.empty()) {
+            std::cerr << "❌ [UpstoxOAuth] Token has no readable exp claim; refusing to store a token of unknown lifetime\n";
+            return "";
         }
+        return token;
     }
-    std::cerr << "❌ [UpstoxOAuth] Token exchange failed. Response: " << response << "\n";
+    std::cerr << "❌ [UpstoxOAuth] Token exchange failed. HTTP " << res.status << " " << log_excerpt(res.body) << "\n";
     return "";
 }
 
@@ -1614,33 +1684,29 @@ static std::string exchange_fyers_code_for_token(const std::string& code, std::s
         app_id_hash += buf;
     }
 
-    std::string json_body = "{\"grant_type\":\"authorization_code\",\"appIdHash\":\"" + app_id_hash + "\",\"code\":\"" + code + "\"}";
+    hermes::http::Request req;
+    req.method = "POST";
+    req.url = "https://api-t1.fyers.in/api/v3/validate-authcode";
+    req.headers = {"Content-Type: application/json"};
+    req.body = "{\"grant_type\":\"authorization_code\",\"appIdHash\":\"" + hermes::http_auth::json_escape(app_id_hash) +
+               "\",\"code\":\"" + hermes::http_auth::json_escape(code) + "\"}";
+    req.timeout_secs = 15;
 
-    std::string cmd = "curl -s -m 15 -X POST 'https://api-t1.fyers.in/api/v3/validate-authcode' "
-                      "-H 'Content-Type: application/json' "
-                      "-d '" + json_body + "'";
-
-    std::array<char, 4096> buffer;
-    std::string response;
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (pipe) {
-        while (fgets(buffer.data(), buffer.size(), pipe) != nullptr) {
-            response += buffer.data();
-        }
-        pclose(pipe);
+    const hermes::http::Response res = hermes::http::perform(req);
+    if (!res.transport_ok) {
+        std::cerr << "❌ [FyersOAuth] Token exchange transport failure: " << res.error << "\n";
+        return "";
     }
-
-    auto pos = response.find("\"access_token\":\"");
-    if (pos != std::string::npos) {
-        auto start = pos + 16;
-        auto end = response.find("\"", start);
-        if (end != std::string::npos) {
-            std::string token = response.substr(start, end - start);
-            out_expires_at = "2026-12-31 23:59:59";
-            return token;
+    const std::string token = json_string_field(res.body, "access_token");
+    if (res.ok_2xx() && !token.empty()) {
+        out_expires_at = expiry_from_token(token);
+        if (out_expires_at.empty()) {
+            std::cerr << "❌ [FyersOAuth] Token has no readable exp claim; refusing to store a token of unknown lifetime\n";
+            return "";
         }
+        return token;
     }
-    std::cerr << "❌ [FyersOAuth] Token exchange failed. Response: " << response << "\n";
+    std::cerr << "❌ [FyersOAuth] Token exchange failed. HTTP " << res.status << " " << log_excerpt(res.body) << "\n";
     return "";
 }
 
@@ -2257,12 +2323,28 @@ std::string RoadmapServer::render_admin_visitor_detail_page(bool is_authenticate
     return ss.str();
 }
 
+std::string RoadmapServer::resolve_bind_address(const std::string& configured) {
+    const std::string addr = configured.empty() ? std::string("127.0.0.1") : configured;
+    in_addr probe{};
+    if (inet_pton(AF_INET, addr.c_str(), &probe) != 1) return "";   // IPv4 literal only
+    return addr;
+}
+
 void RoadmapServer::start() {
     mysql_thread_init();
     signal(SIGPIPE, SIG_IGN);
+
+    const std::string bind_addr = resolve_bind_address(EnvLoader::get("ROADMAP_BIND_ADDR", ""));
+    if (bind_addr.empty()) {
+        std::cerr << "[RoadmapServer] ROADMAP_BIND_ADDR is not a valid IPv4 address; refusing to start\n";
+        mysql_thread_end();
+        return;
+    }
+
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         std::cerr << "[RoadmapServer] Failed to create socket\n";
+        mysql_thread_end();
         return;
     }
 
@@ -2274,26 +2356,42 @@ void RoadmapServer::start() {
 
     sockaddr_in address{};
     address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
+    inet_pton(AF_INET, bind_addr.c_str(), &address.sin_addr);
     address.sin_port = htons(port_);
 
     if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        std::cerr << "[RoadmapServer] Bind failed on port " << port_ << "\n";
+        std::cerr << "[RoadmapServer] Bind failed on " << bind_addr << ":" << port_ << "\n";
         close(server_fd);
+        mysql_thread_end();
         return;
     }
 
-    if (listen(server_fd, 10) < 0) {
+    if (listen(server_fd, 64) < 0) {
         std::cerr << "[RoadmapServer] Listen failed\n";
         close(server_fd);
+        mysql_thread_end();
         return;
     }
+    listen_fd_.store(server_fd);
 
     // Initialize Cookie-Less Privacy-Conscious Visitor Analytics System
     analytics::AnalyticsConfig a_cfg;
     a_cfg.secret = EnvLoader::get("ANALYTICS_SECRET", "");
     if (a_cfg.secret.empty() || a_cfg.secret == "<GENERATE-AT-DEPLOYMENT-TIME>") {
-        a_cfg.secret = "hermes_secret_analytics_salt_c920fba6840713b1";
+        // This used to fall back to a fixed string committed to the repository. The secret keys
+        // the HMAC that pseudonymises visitor IPs, so a public key lets anyone with a copy of the
+        // visitors table recompute the hash for a chosen IP and confirm that address visited.
+        // Without a configured secret, use a random one for this process: visitors still
+        // de-duplicate within a run, but the hashes cannot be recomputed from anything public, and
+        // identities restart on each launch until ANALYTICS_SECRET is set.
+        a_cfg.secret = hermes::http_auth::random_hex_32();
+        if (a_cfg.secret.empty()) {
+            std::cerr << "❌ [RoadmapServer] ANALYTICS_SECRET is unset and no random secret could be generated; "
+                         "visitor analytics disabled\n";
+        } else {
+            std::cerr << "⚠️ [RoadmapServer] ANALYTICS_SECRET is not set. Using a random per-process secret: visitor "
+                         "identities will not persist across restarts. Set ANALYTICS_SECRET in .env.\n";
+        }
     }
     std::string proxies_str = EnvLoader::get("ANALYTICS_TRUSTED_PROXIES", "");
     if (!proxies_str.empty()) {
@@ -2314,19 +2412,27 @@ void RoadmapServer::start() {
     a_cfg.queue_capacity = 10000;
 
     try {
-        analytics::VisitorTracker::instance().init(a_cfg, db_client_);
+        if (!a_cfg.secret.empty()) analytics::VisitorTracker::instance().init(a_cfg, db_client_);
     } catch (const std::exception& e) {
         std::cerr << "⚠️ [RoadmapServer] Failed to initialize VisitorTracker: " << e.what() << "\n";
     }
 
-    running_ = true;
-    std::cout << "🚀 [RoadmapServer] Multi-Page C++ Web Portal started on http://0.0.0.0:" << port_ << "/\n";
+    running_.store(true);
+    std::cout << "🚀 [RoadmapServer] Multi-Page C++ Web Portal started on http://" << bind_addr << ":" << port_ << "/\n";
+    if (bind_addr != "127.0.0.1") {
+        std::cerr << "⚠️ [RoadmapServer] Listening on " << bind_addr
+                  << " (ROADMAP_BIND_ADDR). The operator surface is reachable beyond this host.\n";
+    }
 
     while (running_) {
         sockaddr_in client_addr{};
         socklen_t addrlen = sizeof(client_addr);
         int new_socket = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
-        if (new_socket < 0) continue;
+        if (new_socket < 0) {
+            if (!running_.load()) break;                       // stop() woke us: leave the loop
+            if (errno != EINTR) usleep(10000);                 // EMFILE and friends: do not spin
+            continue;
+        }
 
         auto req_start_time = std::chrono::steady_clock::now();
         auto req_captured_time = std::chrono::system_clock::now();
@@ -2358,6 +2464,11 @@ void RoadmapServer::start() {
 
                 std::string clean_path = rl.ok ? rl.path : std::string("/");
                 std::string raw_query  = rl.ok ? rl.query : std::string("");
+
+                // Query values come from the parsed query string only -- never from a scan of the
+                // whole request, which also matched header and body text (a Cookie or Referer
+                // containing "state=" or "code=" was read as a query parameter).
+                auto qp = [&](const char* name) { return hermes::http_auth::query_param(raw_query, name); };
 
                 std::cout << "🌐 [RoadmapServer] Incoming Request: " << clean_path << "\n";
 
@@ -2482,15 +2593,17 @@ void RoadmapServer::start() {
                     break;
 
                 case rt::Route::AdminVisitors: {
-                    std::string page_str = extract_query_param(req, "page");
-                    std::string limit_str = extract_query_param(req, "limit");
-                    std::string search_ip = extract_query_param(req, "search");
-                    std::string country_filter = extract_query_param(req, "country");
-                    std::string bot_str = extract_query_param(req, "bot");
+                    std::string page_str = qp("page");
+                    std::string limit_str = qp("limit");
+                    std::string search_ip = qp("search");
+                    std::string country_filter = qp("country");
+                    std::string bot_str = qp("bot");
                     int page = 1; int limit = 20; int bot_filter = -1;
                     try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
                     try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
                     try { if (!bot_str.empty()) bot_filter = std::stoi(bot_str); } catch(...) {}
+                    page = std::max(1, std::min(page, 100000));   // bound what reaches OFFSET / LIMIT
+                    limit = std::max(1, std::min(limit, 200));
                     body = render_admin_visitors_page(is_auth, page, limit, search_ip, country_filter, bot_filter);
                     break;
                 }
@@ -2500,7 +2613,15 @@ void RoadmapServer::start() {
                     if (clean_path.length() > 16 && clean_path.rfind("/admin/visitors/", 0) == 0) {
                         v_id = clean_path.substr(16);
                     } else {
-                        v_id = extract_query_param(req, "id");
+                        v_id = qp("id");
+                    }
+                    if (!hermes::http_auth::is_valid_visitor_id(v_id)) {
+                        // Ids are server-generated ("cid_" + hex). Anything else is not one, so it
+                        // is refused before it can reach a query or a page.
+                        status_code = 404;
+                        content_type = "application/json";
+                        body = "{\"error\":\"Not Found\"}";
+                        break;
                     }
                     body = render_admin_visitor_detail_page(is_auth, v_id);
                     break;
@@ -2523,12 +2644,14 @@ void RoadmapServer::start() {
 
                 case rt::Route::PaperTrading:
                 case rt::Route::FnfTrading: {
-                    std::string page_str = extract_query_param(req, "page");
-                    std::string limit_str = extract_query_param(req, "limit");
+                    std::string page_str = qp("page");
+                    std::string limit_str = qp("limit");
                     int page = 1;
                     int limit = 20;
                     try { if (!page_str.empty()) page = std::stoi(page_str); } catch(...) {}
                     try { if (!limit_str.empty()) limit = std::stoi(limit_str); } catch(...) {}
+                    page = std::max(1, std::min(page, 100000));
+                    limit = std::max(1, std::min(limit, 200));
                     body = render_paper_trading_page(is_auth, "", page, limit);
                     break;
                 }
@@ -2546,26 +2669,57 @@ void RoadmapServer::start() {
                     std::string post_body = (body_pos != std::string::npos) ? req.substr(body_pos + 4) : "";
                     std::string email = extract_post_param(post_body, "email");
                     std::string password = extract_post_param(post_body, "password");
-                    std::string session_pwd = EnvLoader::get("SESSION_PASSWORD", "");
-                    std::string operator_pwd = EnvLoader::get("OPERATOR_PASSWORD", "");
 
-                    bool is_valid = (!session_pwd.empty() && password == session_pwd) ||
-                                    (!operator_pwd.empty() && password == operator_pwd) ||
-                                    (db_client_ && db_client_->verify_operator_password(email, password));
+                    if (!login_limiter().allowed(canonical_ip)) {
+                        std::cout << "🚫 [Auth] Login throttled for " << canonical_ip << " (too many failures)\n";
+                        status_code = 429;
+                        extra_headers = "Retry-After: 900\r\n";
+                        body = render_login_page("Too many failed attempts. Try again later.");
+                        break;
+                    }
+
+                    // Constant-time comparison against each configured secret; the DB-backed
+                    // operator check is the same one the previous code used.
+                    bool is_valid = false;
+                    for (const std::string& secret : configured_operator_secrets()) {
+                        is_valid |= hermes::http_auth::constant_time_equal(password, secret);
+                    }
+                    if (!is_valid && db_client_) {
+                        is_valid = db_client_->verify_operator_password(email, password);
+                    }
 
                     if (is_valid) {
-                        status_code = 303;
-                        extra_headers = "Set-Cookie: auth_token=operator_valid_session; Path=/; HttpOnly\r\nLocation: /dashboard\r\n";
-                        body = "Redirecting to dashboard...";
+                        const std::string token = session_store().issue();
+                        if (token.empty()) {
+                            // The CSPRNG failed: there is no safe token to hand out, so no login.
+                            std::cerr << "❌ [Auth] Could not issue a session token (/dev/urandom); refusing login\n";
+                            status_code = 503;
+                            content_type = "application/json";
+                            body = "{\"error\":\"Session could not be issued\"}";
+                        } else {
+                            login_limiter().reset(canonical_ip);
+                            const bool via_https =
+                                hermes::http_auth::header_value(req, "x-forwarded-proto") == "https";
+                            status_code = 303;
+                            extra_headers = "Set-Cookie: auth_token=" + token +
+                                            "; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800" +
+                                            (via_https ? "; Secure" : "") + "\r\nLocation: /dashboard\r\n";
+                            body = "Redirecting to dashboard...";
+                        }
                     } else {
+                        login_limiter().record_failure(canonical_ip);
                         body = render_login_page("Invalid operator password. Please try again.");
                     }
                     break;
                 }
 
                 case rt::Route::Logout:
+                    // Revoke server-side. Clearing the cookie in the browser is not enough: a copy
+                    // of the token would stay valid until it expired.
+                    session_store().revoke(hermes::http_auth::cookie_value(req, "auth_token"));
+                    session_store().revoke(hermes::http_auth::header_value(req, "x-operator-password"));
                     status_code = 303;
-                    extra_headers = "Set-Cookie: auth_token=; Path=/; Max-Age=0\r\nLocation: /\r\n";
+                    extra_headers = "Set-Cookie: auth_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0\r\nLocation: /\r\n";
                     body = "Redirecting...";
                     break;
 
@@ -2618,13 +2772,14 @@ void RoadmapServer::start() {
                     for (size_t i = 0; i < patterns.size(); ++i) {
                         const auto& p = patterns[i];
                         if (i > 0) ss << ",";
-                        ss << "{\"id\":\"" << p.at("id") << "\",\"underlying\":\"" << p.at("underlying")
-                           << "\",\"time_bucket_15m\":\"" << p.at("time_bucket_15m") << "\",\"dow\":" << p.at("day_of_week")
+                        namespace ha = hermes::http_auth;
+                        ss << "{\"id\":\"" << ha::json_escape(p.at("id")) << "\",\"underlying\":\"" << ha::json_escape(p.at("underlying"))
+                           << "\",\"time_bucket_15m\":\"" << ha::json_escape(p.at("time_bucket_15m")) << "\",\"dow\":" << p.at("day_of_week")
                            << ",\"dte\":" << p.at("days_to_expiry") << ",\"ticks\":" << p.at("sample_ticks_count")
                            << ",\"session_days\":" << p.at("sample_session_days") << ",\"volatility\":" << p.at("realized_volatility")
                            << ",\"persistence\":" << p.at("directional_persistence") << ",\"spread_pct\":" << p.at("avg_spread_pct")
-                           << ",\"oi_buildup\":" << p.at("avg_oi_buildup_rate") << ",\"status\":\"" << p.at("gating_status")
-                           << "\",\"advisory_modifier\":" << p.at("advisory_confidence_modifier") << ",\"summary\":\"" << p.at("hypothesis_summary") << "\"}";
+                           << ",\"oi_buildup\":" << p.at("avg_oi_buildup_rate") << ",\"status\":\"" << ha::json_escape(p.at("gating_status"))
+                           << "\",\"advisory_modifier\":" << p.at("advisory_confidence_modifier") << ",\"summary\":\"" << ha::json_escape(p.at("hypothesis_summary")) << "\"}";
                     }
                     ss << "]}";
                     body = ss.str();
@@ -2671,8 +2826,8 @@ void RoadmapServer::start() {
                 }
 
                 case rt::Route::UpstoxCallback: {
-                    std::string code = extract_query_param(req, "code");
-                    std::string state = extract_query_param(req, "state");
+                    std::string code = qp("code");
+                    std::string state = qp("state");
                     if (!oauth_state_store().consume(state)) {
                         // No valid, unspent state: this callback does not follow a token/init this
                         // server issued. The code is not exchanged and no token is written, so a
@@ -2731,9 +2886,9 @@ void RoadmapServer::start() {
                 }
 
                 case rt::Route::FyersCallback: {
-                    std::string code = extract_query_param(req, "auth_code");
-                    if (code.empty()) code = extract_query_param(req, "code");
-                    std::string state = extract_query_param(req, "state");
+                    std::string code = qp("auth_code");
+                    if (code.empty()) code = qp("code");
+                    std::string state = qp("state");
                     if (!oauth_state_store().consume(state)) {
                         std::cout << "🚫 [FyersOAuth] Callback rejected: missing, unknown, spent or expired state\n";
                         status_code = 401;
@@ -2812,13 +2967,16 @@ void RoadmapServer::start() {
                         ss << ",\"recent_audits\":[";
                         for (size_t i = 0; i < audits.size(); ++i) {
                             if (i > 0) ss << ",";
-                            ss << "{\"id\":\"" << audits[i]["id"] << "\","
-                               << "\"key\":\"" << audits[i]["config_key"] << "\","
-                               << "\"old\":\"" << audits[i]["old_value"] << "\","
-                               << "\"new\":\"" << audits[i]["new_value"] << "\","
-                               << "\"by\":\"" << audits[i]["approved_by"] << "\","
-                               << "\"reason\":\"" << audits[i]["reason"] << "\","
-                               << "\"at\":\"" << audits[i]["created_at"] << "\"}";
+                            // Operator-entered text: unescaped, a quote or newline in a reason made
+                            // the whole document invalid JSON.
+                            namespace ha = hermes::http_auth;
+                            ss << "{\"id\":\"" << ha::json_escape(audits[i]["id"]) << "\","
+                               << "\"key\":\"" << ha::json_escape(audits[i]["config_key"]) << "\","
+                               << "\"old\":\"" << ha::json_escape(audits[i]["old_value"]) << "\","
+                               << "\"new\":\"" << ha::json_escape(audits[i]["new_value"]) << "\","
+                               << "\"by\":\"" << ha::json_escape(audits[i]["approved_by"]) << "\","
+                               << "\"reason\":\"" << ha::json_escape(audits[i]["reason"]) << "\","
+                               << "\"at\":\"" << ha::json_escape(audits[i]["created_at"]) << "\"}";
                         }
                         ss << "]";
                     }
@@ -2847,7 +3005,9 @@ void RoadmapServer::start() {
             else if (status_code == 401) reason_phrase = "Unauthorized";
             else if (status_code == 303) reason_phrase = "See Other";
             else if (status_code == 404) reason_phrase = "Not Found";
+            else if (status_code == 429) reason_phrase = "Too Many Requests";
             else if (status_code == 500) reason_phrase = "Internal Server Error";
+            else if (status_code == 503) reason_phrase = "Service Unavailable";
 
             std::stringstream response;
             response << "HTTP/1.1 " << status_code << " " << reason_phrase << "\r\n"
@@ -2909,10 +3069,15 @@ void RoadmapServer::start() {
         while (read(new_socket, dump_buf, sizeof(dump_buf)) > 0) {}
         close(new_socket);
     }
+    listen_fd_.store(-1);
     close(server_fd);
     mysql_thread_end();
 }
 
 void RoadmapServer::stop() {
-    running_ = false;
+    running_.store(false);
+    // accept() blocks indefinitely, so clearing the flag alone never ends the loop. shutdown() on
+    // the listening socket makes a blocked accept() return (the fd itself is closed by start()).
+    const int fd = listen_fd_.load();
+    if (fd >= 0) ::shutdown(fd, SHUT_RDWR);
 }

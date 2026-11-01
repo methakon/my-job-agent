@@ -251,9 +251,11 @@ public:
         for (size_t i = plaintext.size() - pad_val; i < plaintext.size(); ++i) {
             if (plaintext[i] != pad_val) return "";
         }
-        plaintext.resize(plaintext.size() - pad_val);
-
-        return std::string(reinterpret_cast<const char*>(plaintext.data()), plaintext.size());
+        // Build the result from the unpadded length directly. (The previous resize() of the vector
+        // was where GCC 11 flagged a possible huge memset: it could not carry the pad_val <= size
+        // check across the loop above. pad_val is validated, so size - pad_val cannot underflow.)
+        const size_t unpadded = plaintext.size() - pad_val;
+        return std::string(reinterpret_cast<const char*>(plaintext.data()), unpadded);
     }
 };
 
@@ -283,9 +285,10 @@ inline std::string encrypt_token(const std::string& plaintext, const std::string
     if (plaintext.empty() || secret.empty()) return plaintext;
     auto key = Sha256::hash(secret);
     uint8_t iv[16];
-    if (RAND_bytes(iv, 16) <= 0) {
-        for (int i = 0; i < 16; i++) iv[i] = static_cast<uint8_t>(rand() % 256);
-    }
+    // A CBC IV must be unpredictable. If the CSPRNG fails there is no safe IV, so fail closed with
+    // "" rather than fall back to rand(), which is unseeded here and so repeats on every start.
+    // Callers must treat "" as failure and must not store it.
+    if (RAND_bytes(iv, 16) <= 0) return "";
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (!ctx) return "";
     EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key.data(), iv);

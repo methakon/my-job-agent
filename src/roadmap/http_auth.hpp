@@ -34,6 +34,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace hermes {
 namespace http_auth {
@@ -123,6 +124,104 @@ inline std::string header_value(const std::string& req, const char* name) {
     return "";
 }
 
+// Extract one cookie VALUE from the request's Cookie header(s). Returns "" when absent.
+//
+// Only the request head is read (via header_value), so a cookie-looking string in a body, a query
+// or another header cannot be mistaken for one. Cookie names are matched exactly and case
+// sensitively, as browsers send them.
+inline std::string cookie_value(const std::string& req, const char* name) {
+    const std::string header = header_value(req, "cookie");
+    if (header.empty()) return "";
+    const std::string want(name);
+    size_t pos = 0;
+    while (pos < header.size()) {
+        size_t end = header.find(';', pos);
+        if (end == std::string::npos) end = header.size();
+        size_t s = pos;
+        while (s < end && (header[s] == ' ' || header[s] == '\t')) ++s;
+        const size_t eq = header.find('=', s);
+        if (eq != std::string::npos && eq < end && header.compare(s, eq - s, want) == 0 && eq - s == want.size()) {
+            size_t e = end;
+            while (e > eq + 1 && (header[e - 1] == ' ' || header[e - 1] == '\t')) --e;
+            return header.substr(eq + 1, e - (eq + 1));
+        }
+        pos = end + 1;
+    }
+    return "";
+}
+
+// Exact-key lookup in a query string ("a=1&b=2"). The key must equal `name` (so "homepage=" does
+// not satisfy a lookup for "page"), the first match wins, and the value is percent-decoded.
+// `parse_request_line` already stripped the query from the path and rejected control characters,
+// so this is the only place a query value is read, and it never sees the headers or the body.
+inline std::string query_param(const std::string& query, const std::string& name) {
+    size_t pos = 0;
+    while (pos <= query.size()) {
+        size_t amp = query.find('&', pos);
+        if (amp == std::string::npos) amp = query.size();
+        const size_t eq = query.find('=', pos);
+        if (eq != std::string::npos && eq < amp && query.compare(pos, eq - pos, name) == 0 && eq - pos == name.size()) {
+            const std::string raw = query.substr(eq + 1, amp - (eq + 1));
+            std::string out;
+            out.reserve(raw.size());
+            for (size_t i = 0; i < raw.size(); ++i) {
+                if (raw[i] == '+') {
+                    out.push_back(' ');
+                } else if (raw[i] == '%' && i + 2 < raw.size() &&
+                           std::isxdigit(static_cast<unsigned char>(raw[i + 1])) &&
+                           std::isxdigit(static_cast<unsigned char>(raw[i + 2]))) {
+                    out.push_back(static_cast<char>(std::strtol(raw.substr(i + 1, 2).c_str(), nullptr, 16)));
+                    i += 2;
+                } else {
+                    out.push_back(raw[i]);   // a lone or malformed '%' is kept literally
+                }
+            }
+            return out;
+        }
+        if (amp >= query.size()) break;
+        pos = amp + 1;
+    }
+    return "";
+}
+
+// A visitor id is server-generated ("cid_" + hex) and travels in a URL path, so anything outside
+// [A-Za-z0-9_-] (traversal, percent-encoding, quotes, markup, whitespace) or longer than 64
+// characters is not one. Checked before the value reaches a query or a rendered page.
+inline bool is_valid_visitor_id(const std::string& id) {
+    if (id.empty() || id.size() > 64) return false;
+    for (char ch : id) {
+        const bool ok = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') ||
+                        (ch >= 'A' && ch <= 'Z') || ch == '-' || ch == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// JSON string-body escaping for values interpolated into a JSON document by hand.
+inline std::string json_escape(const std::string& in) {
+    std::string out;
+    out.reserve(in.size() + 8);
+    for (char ch : in) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out.push_back(static_cast<char>(c));
+                }
+        }
+    }
+    return out;
+}
+
 // Random, expiring session tokens. Issued from a CSPRNG (not rand()), stored server-side, and
 // validated by lookup. A token is never compared against a constant, so no value in the source
 // can authenticate anything.
@@ -136,6 +235,14 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         sessions_[token] = static_cast<long>(::time(nullptr)) + ttl_;
         return token;
+    }
+
+    // Ends a session server-side. Clearing the browser cookie alone leaves a copied token usable
+    // until it expires, so logout must delete the entry here.
+    void revoke(const std::string& token) {
+        if (token.empty()) return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        sessions_.erase(token);
     }
 
     bool valid(const std::string& token) {
@@ -196,21 +303,85 @@ private:
     std::unordered_map<std::string, long> states_;
 };
 
+// Bounds repeated failures per key (client address). Login is public by necessity, so without a
+// limit it is a free password-guessing oracle.
+class AttemptLimiter {
+public:
+    AttemptLimiter(int max_failures, long window_seconds) : max_(max_failures), window_(window_seconds) {}
+
+    // False once `key` has reached the failure budget inside the window.
+    bool allowed(const std::string& key, long now = 0) {
+        if (now == 0) now = static_cast<long>(::time(nullptr));
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = failures_.find(key);
+        if (it == failures_.end()) return true;
+        prune(it->second, now);
+        if (it->second.empty()) { failures_.erase(it); return true; }
+        return static_cast<int>(it->second.size()) < max_;
+    }
+
+    void record_failure(const std::string& key, long now = 0) {
+        if (now == 0) now = static_cast<long>(::time(nullptr));
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (failures_.size() > 4096) failures_.clear();   // bound memory against address churn
+        std::vector<long>& v = failures_[key];
+        prune(v, now);
+        v.push_back(now);
+    }
+
+    void reset(const std::string& key) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        failures_.erase(key);
+    }
+
+private:
+    void prune(std::vector<long>& v, long now) const {
+        std::vector<long> keep;
+        for (long t : v) if (now - t < window_) keep.push_back(t);
+        v.swap(keep);
+    }
+
+    int max_;
+    long window_;
+    std::mutex mutex_;
+    std::unordered_map<std::string, std::vector<long>> failures_;
+};
+
 // The single decision point for request authentication.
+//
+// A request is authenticated by exactly one of:
+//   * the x-operator-password HEADER carrying a configured secret (constant-time compare), or a
+//     live session token (lookup) -- for scripts and the gate tooling;
+//   * the auth_token COOKIE carrying a live session token (lookup only, never a secret) -- for
+//     the browser session that POST /auth/login issues.
+// A cookie is never compared against a configured secret or a constant, so no string that appears
+// in source (or in a Set-Cookie someone observed) can authenticate unless the server issued it.
 class Authenticator {
 public:
     using SessionLookup = std::function<bool(const std::string&)>;
 
     Authenticator(std::string operator_password, SessionLookup lookup)
-        : password_(std::move(operator_password)), lookup_(std::move(lookup)) {}
+        : lookup_(std::move(lookup)) {
+        if (!operator_password.empty()) passwords_.push_back(std::move(operator_password));
+    }
 
-    // True only when the x-operator-password header VALUE equals the configured secret
-    // (constant time), or when that value is a session token that validates by lookup.
+    Authenticator(std::vector<std::string> operator_passwords, SessionLookup lookup)
+        : lookup_(std::move(lookup)) {
+        for (auto& p : operator_passwords) if (!p.empty()) passwords_.push_back(std::move(p));
+    }
+
     bool allow(const std::string& req) const {
         const std::string presented = header_value(req, "x-operator-password");
-        if (presented.empty()) return false;                     // absence denies
-        if (!password_.empty() && constant_time_equal(presented, password_)) return true;
-        if (lookup_ && lookup_(presented)) return true;
+        if (!presented.empty()) {
+            // Every configured secret is compared (no early exit on a match) to keep the timing
+            // independent of which one matched.
+            bool match = false;
+            for (const std::string& p : passwords_) match |= constant_time_equal(presented, p);
+            if (match) return true;
+            if (lookup_ && lookup_(presented)) return true;
+        }
+        const std::string cookie = cookie_value(req, "auth_token");
+        if (!cookie.empty() && lookup_ && lookup_(cookie)) return true;
         return false;
     }
 
@@ -224,7 +395,7 @@ public:
     }
 
 private:
-    std::string password_;
+    std::vector<std::string> passwords_;
     SessionLookup lookup_;
 };
 

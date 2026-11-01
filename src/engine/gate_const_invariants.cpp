@@ -113,7 +113,9 @@ EntryGateResult ConstInvariantsEngine::evaluate_entry_gates(const EntryGateEvalu
     return res;
 }
 
-PositionHealthState ConstInvariantsEngine::transition_health_state(PositionHealthState current, double current_drawdown_pct, double duration_min) {
+// The health state is a pure function of drawdown. `current` and `duration_min` are part of the
+// interface (a hysteresis or time-in-state rule would use them) but no such rule exists yet.
+PositionHealthState ConstInvariantsEngine::transition_health_state(PositionHealthState /*current*/, double current_drawdown_pct, double /*duration_min*/) {
     if (current_drawdown_pct >= 50.0) return PositionHealthState::BLACK;
     if (current_drawdown_pct >= 30.0) return PositionHealthState::RED;
     if (current_drawdown_pct >= 20.0) return PositionHealthState::ORANGE;

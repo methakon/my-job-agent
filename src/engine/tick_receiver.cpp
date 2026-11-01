@@ -67,7 +67,9 @@ bool OptionTickReceiver::get_latest_tick(CanonicalOptionTick& out_tick) {
     return ring_buffer_.pop(out_tick);
 }
 
-CanonicalOptionTick OptionTickReceiver::parse_fyers_payload(const std::string& raw_json) {
+CanonicalOptionTick OptionTickReceiver::parse_fyers_payload(const std::string& /*raw_json*/) {
+    // STUB: ignores the payload and returns a fixed sample tick. Nothing calls it (the live feed
+    // supplies CanonicalOptionTick objects directly); it must not be wired in as a parser.
     CanonicalOptionTick tick;
     tick.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch()).count();
@@ -87,7 +89,8 @@ CanonicalOptionTick OptionTickReceiver::parse_fyers_payload(const std::string& r
     return tick;
 }
 
-CanonicalOptionTick OptionTickReceiver::parse_upstox_payload(const std::string& raw_json) {
+CanonicalOptionTick OptionTickReceiver::parse_upstox_payload(const std::string& /*raw_json*/) {
+    // STUB: see parse_fyers_payload.
     CanonicalOptionTick tick;
     tick.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::system_clock::now().time_since_epoch()).count();

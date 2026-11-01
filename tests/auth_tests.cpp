@@ -42,14 +42,6 @@ static bool legacy_allows(const std::string& req) {
     return false;
 }
 
-// Compile with -DUSE_LEGACY_AUTH to run these same tests against the OLD predicate. Every bypass
-// test must then FAIL, which is the executable proof that the suite pins the defect.
-#ifdef USE_LEGACY_AUTH
-#define ALLOW(req) legacy_allows(req)
-#else
-#define ALLOW(req) ALLOW(req)
-#endif
-
 static std::string req_with(const std::string& head_lines, const std::string& body) {
     return "POST /answer HTTP/1.1\r\nHost: x\r\n" + head_lines + "\r\n" + body;
 }
@@ -444,6 +436,106 @@ int main() {
         CHECK_MSG(!parse_request_line("GET / HTTP/1.9\r\n").ok, "PARSE-02: HTTP/1.9 rejected");
         CHECK_MSG(!parse_request_line("GET / HTTP/2\r\n").ok, "PARSE-02: HTTP/2 rejected");
         CHECK_MSG(!parse_request_line("GET / http/1.1\r\n").ok, "PARSE-02: lowercase version rejected");
+    }
+
+    // =========================================================================================
+    // Cookie sessions, revocation, multi-secret, throttling, and request-value helpers.
+    // =========================================================================================
+    {
+        // COOKIE-01: the cookie authenticates ONLY as a server-issued token, never as a constant.
+        SessionStore cs(3600);
+        const std::string tok = cs.issue();
+        Authenticator ca(std::vector<std::string>{SECRET}, [&cs](const std::string& t) { return cs.valid(t); });
+
+        const std::string good = "GET /dashboard HTTP/1.1\r\nHost: x\r\nCookie: auth_token=" + tok + "\r\n\r\n";
+        CHECK_MSG(ca.allow(good), "COOKIE-01: an issued session token in the cookie must authenticate");
+        CHECK_MSG(!ca.allow("GET /dashboard HTTP/1.1\r\nHost: x\r\nCookie: auth_token=operator_valid_session\r\n\r\n"),
+                  "COOKIE-01: the legacy hardcoded cookie value must be denied");
+        CHECK_MSG(!ca.allow("GET /dashboard HTTP/1.1\r\nHost: x\r\nCookie: auth_token=" + SECRET + "\r\n\r\n"),
+                  "COOKIE-01: a cookie is never compared to the configured secret");
+        CHECK_MSG(!ca.allow("GET /dashboard HTTP/1.1\r\nHost: x\r\nCookie: auth_token=" + tok + "x\r\n\r\n"),
+                  "COOKIE-01: a modified token must be denied");
+        CHECK_MSG(!ca.allow("GET /dashboard?auth_token=" + tok + " HTTP/1.1\r\nHost: x\r\n\r\n"),
+                  "COOKIE-01: a token in the query string is not a cookie");
+        CHECK_MSG(!ca.allow("POST /x HTTP/1.1\r\nHost: x\r\n\r\nCookie: auth_token=" + tok),
+                  "COOKIE-01: a cookie line in the body is not a header");
+
+        // COOKIE-02: cookie parsing picks the right pair among several and matches names exactly.
+        CHECK(cookie_value("GET / HTTP/1.1\r\nCookie: a=1; auth_token=abc; b=2\r\n\r\n", "auth_token") == "abc");
+        CHECK(cookie_value("GET / HTTP/1.1\r\nCookie: xauth_token=abc\r\n\r\n", "auth_token").empty());
+        CHECK(cookie_value("GET / HTTP/1.1\r\nCookie: auth_token_x=abc\r\n\r\n", "auth_token").empty());
+        CHECK(cookie_value("GET / HTTP/1.1\r\nHost: h\r\n\r\n", "auth_token").empty());
+        CHECK(cookie_value("GET / HTTP/1.1\r\ncookie: auth_token=abc\r\n\r\n", "auth_token") == "abc");
+
+        // COOKIE-03: revoke ends the session server-side; a copied cookie stops working.
+        cs.revoke(tok);
+        CHECK_MSG(!ca.allow(good), "COOKIE-03: a revoked session token must no longer authenticate");
+        cs.revoke("");   // must be harmless
+    }
+    {
+        // MULTI-01: either configured secret works; an empty one never does; absence denies.
+        Authenticator two(std::vector<std::string>{"alpha-secret", "beta-secret"}, nullptr);
+        CHECK(two.allow(req_with("x-operator-password: alpha-secret\r\n", "")));
+        CHECK(two.allow(req_with("x-operator-password: beta-secret\r\n", "")));
+        CHECK(!two.allow(req_with("x-operator-password: gamma-secret\r\n", "")));
+        Authenticator none(std::vector<std::string>{"", ""}, nullptr);
+        CHECK_MSG(!none.allow(req_with("x-operator-password: \r\n", "")), "MULTI-01: no configured secret => header path denies");
+        CHECK_MSG(!none.allow(req_with("x-operator-password: anything\r\n", "")), "MULTI-01: no configured secret => any value denied");
+    }
+    {
+        // THROTTLE-01: 3 failures in the window block the 4th attempt; success resets; old ones age out.
+        AttemptLimiter lim(3, 100);
+        CHECK(lim.allowed("ip", 1000));
+        lim.record_failure("ip", 1000); lim.record_failure("ip", 1001);
+        CHECK(lim.allowed("ip", 1002));
+        lim.record_failure("ip", 1002);
+        CHECK_MSG(!lim.allowed("ip", 1003), "THROTTLE-01: the budget is exhausted after 3 failures");
+        CHECK_MSG(lim.allowed("other", 1003), "THROTTLE-01: another address is unaffected");
+        CHECK_MSG(lim.allowed("ip", 1000 + 101 + 2), "THROTTLE-01: failures older than the window no longer count");
+        lim.record_failure("ip", 2000); lim.record_failure("ip", 2000); lim.record_failure("ip", 2000);
+        CHECK(!lim.allowed("ip", 2001));
+        lim.reset("ip");
+        CHECK_MSG(lim.allowed("ip", 2001), "THROTTLE-01: reset (successful login) clears the count");
+    }
+    {
+        // QUERY-01: exact key, first match, percent-decoding, and no reads from outside the query.
+        CHECK(query_param("page=3&limit=10", "page") == "3");
+        CHECK(query_param("page=3&limit=10", "limit") == "10");
+        CHECK_MSG(query_param("homepage=9&page=3", "page") == "3", "QUERY-01: 'homepage' is not 'page'");
+        CHECK_MSG(query_param("xstate=evil&state=ok", "state") == "ok", "QUERY-01: a longer key must not satisfy a shorter lookup");
+        CHECK(query_param("code=a%2Fb+c", "code") == "a/b c");
+        CHECK_MSG(query_param("code=100%", "code") == "100%", "QUERY-01: a trailing lone % is kept, not read past the end");
+        CHECK_MSG(query_param("code=%4", "code") == "%4", "QUERY-01: a truncated escape is kept literally");
+        CHECK_MSG(query_param("code=%ZZ", "code") == "%ZZ", "QUERY-01: a non-hex escape is kept literally");
+        CHECK(query_param("a=1&a=2", "a") == "1");
+        CHECK(query_param("flag&x=1", "flag").empty());
+        CHECK(query_param("", "x").empty());
+        CHECK(query_param("x=", "x").empty());
+        CHECK(query_param("x=1", "y").empty());
+    }
+    {
+        // JSON-01: escaping makes any value safe inside a hand-built JSON string.
+        CHECK(json_escape("plain") == "plain");
+        CHECK(json_escape("a\"b") == "a\\\"b");
+        CHECK(json_escape("a\\b") == "a\\\\b");
+        CHECK(json_escape("l1\nl2\r\t") == "l1\\nl2\\r\\t");
+        CHECK(json_escape(std::string("x\x01y")) == "x\\u0001y");
+        CHECK(json_escape("") == "");
+        // the shell metacharacters that made popen() unsafe are harmless data once escaped as JSON
+        CHECK(json_escape("'; rm -rf / #") == "'; rm -rf / #");
+    }
+    {
+        // ID-01: visitor ids are server-generated; anything else is not one.
+        CHECK(is_valid_visitor_id("cid_0123456789abcdef0123456789abcdef0123456789abcdef"));
+        CHECK(is_valid_visitor_id("abc-123_DEF"));
+        CHECK(!is_valid_visitor_id(""));
+        CHECK(!is_valid_visitor_id("../../etc/passwd"));
+        CHECK(!is_valid_visitor_id("a%2Fb"));
+        CHECK(!is_valid_visitor_id("a b"));
+        CHECK(!is_valid_visitor_id("<script>"));
+        CHECK(!is_valid_visitor_id("a'b"));
+        CHECK(!is_valid_visitor_id(std::string(65, 'a')));
+        CHECK(is_valid_visitor_id(std::string(64, 'a')));
     }
 
     std::cout << "\n  checks=" << checks << "  failures=" << failures << "\n";

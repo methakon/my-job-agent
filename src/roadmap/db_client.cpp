@@ -13,21 +13,58 @@
 #include <algorithm>
 #include <unordered_map>
 #include <cmath>
+#include <thread>
+#include <chrono>
 
 // MySQLConnectionPool implementation
-MySQLConnectionPool::MySQLConnectionPool(std::string host, int port, std::string user, std::string password, std::string db_name, size_t pool_size)
-    : host_(std::move(host)), port_(port), user_(std::move(user)), password_(std::move(password)), db_name_(std::move(db_name)), pool_size_(pool_size) {
+bool MySQLConnectionPool::is_loopback_host(const std::string& host) {
+    return host == "127.0.0.1" || host == "localhost" || host == "::1" || host.rfind("127.", 0) == 0;
+}
+
+MySQLConnectionPool::TlsPolicy MySQLConnectionPool::resolve_tls_policy(const std::string& host, const std::string& setting) {
+    std::string v;
+    for (char c : setting) v.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    if (v.empty()) return is_loopback_host(host) ? TlsPolicy::PREFERRED : TlsPolicy::REQUIRED;
+    if (v == "DISABLED")        return TlsPolicy::DISABLED;
+    if (v == "PREFERRED")       return TlsPolicy::PREFERRED;
+    if (v == "REQUIRED")        return TlsPolicy::REQUIRED;
+    if (v == "VERIFY_CA")       return TlsPolicy::VERIFY_CA;
+    if (v == "VERIFY_IDENTITY") return TlsPolicy::VERIFY_IDENTITY;
+    return TlsPolicy::REQUIRED;   // a typo must not weaken the connection
+}
+
+size_t MySQLConnectionPool::effective_max_connections(size_t pool_size, size_t requested_max) {
+    const size_t base = pool_size == 0 ? 1 : pool_size;
+    const size_t max = requested_max == 0 ? base * 4 : requested_max;
+    return max < base ? base : max;
+}
+
+MySQLConnectionPool::MySQLConnectionPool(std::string host, int port, std::string user, std::string password, std::string db_name,
+                                         size_t pool_size, size_t max_connections)
+    : host_(std::move(host)), port_(port), user_(std::move(user)), password_(std::move(password)), db_name_(std::move(db_name)),
+      pool_size_(pool_size), max_connections_(effective_max_connections(pool_size, max_connections)) {
+    // Timeouts. connect was already 5 s; read/write had none, so a server that stopped answering
+    // mid-statement blocked the calling thread (and its checked-out connection) indefinitely.
+    // The defaults are deliberately generous because the end-of-day rollup is one long statement.
+    connect_timeout_s_ = static_cast<unsigned int>(std::max(1, EnvLoader::get_int("MYSQL_CONNECT_TIMEOUT_SEC", 5)));
+    read_timeout_s_    = static_cast<unsigned int>(std::max(1, EnvLoader::get_int("MYSQL_READ_TIMEOUT_SEC", 120)));
+    write_timeout_s_   = static_cast<unsigned int>(std::max(1, EnvLoader::get_int("MYSQL_WRITE_TIMEOUT_SEC", 60)));
+    acquire_timeout_   = std::chrono::milliseconds(std::max(100, EnvLoader::get_int("MYSQL_POOL_ACQUIRE_TIMEOUT_MS", 10000)));
+    tls_policy_        = resolve_tls_policy(host_, EnvLoader::get("MYSQL_SSL_MODE", ""));
+
     mysql_library_init(0, nullptr, nullptr);
     for (size_t i = 0; i < pool_size_; ++i) {
         MYSQL* conn = create_connection();
         if (conn) {
+            all_created_connections_.insert(conn);
             pool_.push(conn);
         } else {
             std::cerr << "⚠️ [MySQLPool] Warning: Initial connection attempt deferred for pool slot " << (i + 1) << "\n";
             break; // Don't block startup loop if DB host is temporarily unreachable
         }
     }
-    std::cout << "✅ [MySQLPool] Native C++ Connection Pool Initialized (Active Connections: " << pool_.size() << " / " << pool_size_ << ")\n";
+    std::cout << "✅ [MySQLPool] Native C++ Connection Pool Initialized (Active Connections: " << pool_.size() << " / " << pool_size_
+              << ", ceiling " << max_connections_ << ")\n";
 }
 
 MySQLConnectionPool::~MySQLConnectionPool() {
@@ -41,6 +78,16 @@ MySQLConnectionPool::~MySQLConnectionPool() {
     while (!pool_.empty()) {
         pool_.pop();
     }
+}
+
+bool MySQLConnectionPool::owns(MYSQL* conn) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return all_created_connections_.find(conn) != all_created_connections_.end();
+}
+
+size_t MySQLConnectionPool::open_connections() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return all_created_connections_.size();
 }
 
 bool MySQLConnectionPool::apply_session_time_zone(MYSQL* conn) {
@@ -73,9 +120,18 @@ MYSQL* MySQLConnectionPool::create_connection() {
         return nullptr;
     }
 
-    unsigned int timeout = 5;
-    mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
+    mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &connect_timeout_s_);
+    mysql_options(conn, MYSQL_OPT_READ_TIMEOUT, &read_timeout_s_);
+    mysql_options(conn, MYSQL_OPT_WRITE_TIMEOUT, &write_timeout_s_);
+
     enum mysql_ssl_mode ssl_mode = SSL_MODE_PREFERRED;
+    switch (tls_policy_) {
+        case TlsPolicy::DISABLED:        ssl_mode = SSL_MODE_DISABLED; break;
+        case TlsPolicy::PREFERRED:       ssl_mode = SSL_MODE_PREFERRED; break;
+        case TlsPolicy::REQUIRED:        ssl_mode = SSL_MODE_REQUIRED; break;
+        case TlsPolicy::VERIFY_CA:       ssl_mode = SSL_MODE_VERIFY_CA; break;
+        case TlsPolicy::VERIFY_IDENTITY: ssl_mode = SSL_MODE_VERIFY_IDENTITY; break;
+    }
     mysql_options(conn, MYSQL_OPT_SSL_MODE, &ssl_mode);
 
     if (!mysql_real_connect(conn, host_.c_str(), user_.c_str(), password_.c_str(), db_name_.c_str(), port_, nullptr, 0)) {
@@ -94,34 +150,64 @@ MYSQL* MySQLConnectionPool::create_connection() {
         return nullptr;   // fail closed: never trade or account on an unknown clock
     }
 
-    all_created_connections_.insert(conn);
+    // The caller registers the connection under mutex_; this function touches no shared state, so
+    // it can run without the lock held while a slow connect is in flight.
     return conn;
 }
 
 MYSQL* MySQLConnectionPool::acquire() {
     std::unique_lock<std::mutex> lock(mutex_);
-    MYSQL* conn = nullptr;
-    if (pool_.empty()) {
-        conn = create_connection();
-    } else {
-        conn = pool_.front();
-        pool_.pop();
-    }
+    const auto deadline = std::chrono::steady_clock::now() + acquire_timeout_;
 
-    if (!conn) {
-        conn = create_connection();
-    } else if (mysql_ping(conn) != 0) {
-        all_created_connections_.erase(conn);
-        mysql_close(conn);
-        conn = create_connection();
-    }
+    for (;;) {
+        // 1. Reuse an idle connection, verifying it is still alive.
+        if (!pool_.empty()) {
+            MYSQL* conn = pool_.front();
+            pool_.pop();
+            lock.unlock();
+            const bool alive = (mysql_ping(conn) == 0);
+            lock.lock();
+            if (alive) return conn;
+            all_created_connections_.erase(conn);
+            lock.unlock();
+            mysql_close(conn);
+            lock.lock();
+            cv_.notify_one();   // a ceiling slot was freed
+            continue;           // re-evaluate: reuse another idle connection or open a replacement
+        }
 
-    return conn;
+        // 2. Open a new one, but only while under the hard ceiling. Connections being opened
+        //    right now count, or N racing threads could each pass the check and overshoot.
+        if (all_created_connections_.size() + creating_ < max_connections_) {
+            ++creating_;
+            lock.unlock();
+            MYSQL* conn = create_connection();
+            lock.lock();
+            --creating_;
+            if (conn) {
+                all_created_connections_.insert(conn);
+                return conn;
+            }
+            cv_.notify_one();   // the reserved slot is free again
+            return nullptr;     // the server is unreachable: fail now, as before, rather than wait
+        }
+
+        // 3. At the ceiling: wait for a release, up to the deadline.
+        if (cv_.wait_until(lock, deadline) == std::cv_status::timeout && pool_.empty() &&
+            all_created_connections_.size() + creating_ >= max_connections_) {
+            std::cerr << "❌ [MySQLPool] acquire timed out after " << acquire_timeout_.count()
+                      << " ms: all " << max_connections_ << " connections are in use\n";
+            return nullptr;
+        }
+    }
 }
 
 void MySQLConnectionPool::release(MYSQL* conn) {
     if (!conn) return;
     std::lock_guard<std::mutex> lock(mutex_);
+    // Only a connection this pool opened and still owns may re-enter the queue. A handle that was
+    // already closed (acquire() drops dead ones) would otherwise be queued as a dangling pointer.
+    if (all_created_connections_.find(conn) == all_created_connections_.end()) return;
     pool_.push(conn);
     cv_.notify_one();
 }
@@ -190,7 +276,10 @@ MYSQL* RoadmapDbClient::acquire_local() {
 
 void RoadmapDbClient::release_local(MYSQL* conn) {
     if (!conn) return;
-    if (pool_local_) {
+    // acquire_local() falls back to the remote pool when the local one is unavailable, so the
+    // connection must go back to whichever pool opened it. Releasing a remote connection into the
+    // local pool would hand it out later as if it were a local one.
+    if (pool_local_ && pool_local_->owns(conn)) {
         pool_local_->release(conn);
     } else {
         pool_->release(conn);
@@ -511,12 +600,15 @@ bool RoadmapDbClient::verify_operator_password(const std::string& email, const s
     return verified;
 }
 
+// There is one paper portfolio, so the query has no WHERE clause and any id selects it. `user_id`
+// is escaped below but not used to filter; callers pass either the portfolio id or a user id.
+// Filtering by it would change which callers get data, so it is left as is and documented.
 UserPortfolioData RoadmapDbClient::fetch_user_portfolio(const std::string& user_id) {
     UserPortfolioData p;
     MYSQL* conn = pool_->acquire();
     if (!conn) return p;
 
-    std::string safe_uid = escape_string(conn, user_id);
+    (void)user_id;   // see the note above: a single portfolio, not filtered per user
     std::string query = "SELECT id, id as userId, capital, deployed, netPnl, autoTradeEnabled, 'UPSTOX_PAPER' as executionProvider, executionMode FROM " + portfolios_table() + " LIMIT 1;";
 
     if (mysql_query(conn, query.c_str()) == 0) {
@@ -655,7 +747,8 @@ std::vector<UserTradeData> RoadmapDbClient::fetch_user_trades(const std::string&
     return trades;
 }
 
-int RoadmapDbClient::fetch_user_trade_count(const std::string& user_id) {
+// Counts every trade in the (single) paper book; `user_id` does not filter, as with fetch_user_portfolio.
+int RoadmapDbClient::fetch_user_trade_count(const std::string& /*user_id*/) {
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;
     int count = 0;
@@ -767,6 +860,15 @@ bool RoadmapDbClient::save_broker_access_token(const std::string& provider, cons
     if (provider == "fyers") {
         std::string secret = EnvLoader::get("ENCRYPTION_KEY", EnvLoader::get("APP_SECRET", ""));
         token_to_store = crypto_util::encrypt_token(token, secret);
+        // encrypt_token returns the plaintext unchanged when no secret is configured and "" when
+        // the CSPRNG fails. The column is accessTokenEncrypted: storing either would put a bearer
+        // token in the database in the clear (or store nothing), so neither is allowed through.
+        if (token_to_store.empty() || token_to_store == token) {
+            std::cerr << "❌ [RoadmapDbClient] save_broker_access_token: cannot encrypt the " << provider
+                      << " token (ENCRYPTION_KEY / APP_SECRET unset, or no entropy); refusing to store it\n";
+            pool_->release(conn);
+            return false;
+        }
     }
 
     std::string safe_token = escape_string(conn, token_to_store);
@@ -1048,7 +1150,11 @@ bool RoadmapDbClient::ensure_test_schema() {
         "END;");
 
     pool_->release(conn);
-    return (r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0);
+    // r6 and r7 (the isolated trade-report and portfolio tables) used to be assigned and then
+    // never read, so a failed CREATE for either still reported a ready test schema and the
+    // DELETEs above ran against tables that did not exist. r_trigger is the same trigger r5
+    // recreates, so either failing means the SCM audit tests have nothing to fire.
+    return (r1 == 0 && r2 == 0 && r3 == 0 && r4 == 0 && r5 == 0 && r6 == 0 && r7 == 0 && r_trigger == 0);
 }
 
 void RoadmapDbClient::cleanup_test_schema() {
@@ -1970,7 +2076,10 @@ std::pair<long long, long long> RoadmapDbClient::fetch_stored_tick_counts() {
     return cached_counts;
 }
 
-std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_archived_tick_samples(int limit_days) {
+std::vector<std::map<std::string, std::string>> RoadmapDbClient::fetch_archived_tick_samples(int /*limit_days*/) {
+    // NOTE: the window is a fixed 1 day (and 5000 rows) below; the argument (30 at the only call
+    // site) is not applied. Honouring it would widen the input to the seasonality patterns that
+    // adjust live confidence, so that is a trading-behaviour change left to the operator.
     std::vector<std::map<std::string, std::string>> rows;
     MYSQL* conn = pool_->acquire();
     if (!conn) return rows;
@@ -2380,9 +2489,34 @@ bool RoadmapDbClient::save_post_session_analysis_record(
     return true;
 }
 
-uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& session_date) {
+bool RoadmapDbClient::count_analysed_sessions(uint64_t& out_count) {
+    out_count = 0;
+    MYSQL* conn = pool_->acquire();
+    if (!conn) return false;
+    const std::string table = is_test_isolation_ ? "cpp_post_session_analysis_test" : "cpp_post_session_analysis";
+    const std::string q = "SELECT COUNT(DISTINCT session_date) FROM " + table + ";";
+    bool ok = false;
+    if (mysql_query(conn, q.c_str()) == 0) {
+        MYSQL_RES* res = mysql_store_result(conn);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row && row[0]) {
+                try { out_count = static_cast<uint64_t>(std::stoull(row[0])); ok = true; } catch (...) {}
+            }
+            mysql_free_result(res);
+        }
+    } else {
+        std::cerr << "❌ [RoadmapDbClient] count_analysed_sessions error: " << mysql_error(conn) << "\n";
+    }
+    pool_->release(conn);
+    return ok;
+}
+
+uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& session_date, bool* out_ok) {
+    if (out_ok) *out_ok = false;
     if (is_test_isolation_) {
         // Under test isolation, do not pollute production daily candles table
+        if (out_ok) *out_ok = true;   // an intentional skip, not a failure
         return 0;
     }
     if (!session_date.empty() && session_date.length() >= 10) {
@@ -2392,6 +2526,7 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
             int d = std::stoi(session_date.substr(8, 2));
             if (hermes::MarketCalendar::is_nse_holiday(y, m, d)) {
                 std::cout << "ℹ️ [RoadmapDbClient] Date " << session_date << " is an exchange holiday. Skipping daily candle rollup.\n";
+                if (out_ok) *out_ok = true;   // an intentional skip, not a failure
                 return 0;
             }
         } catch (...) {}
@@ -2412,6 +2547,7 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
                 std::cout << "ℹ️ [RoadmapDbClient] Target date " << safe_date << " is a weekend. Skipping daily candle rollup.\n";
                 mysql_free_result(w_res);
                 pool_->release(conn);
+                if (out_ok) *out_ok = true;   // an intentional skip, not a failure
                 return 0;
             }
             mysql_free_result(w_res);
@@ -2444,6 +2580,7 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
     uint64_t affected = 0;
     if (mysql_query(conn, rollup_sql.c_str()) == 0) {
         affected = mysql_affected_rows(conn);
+        if (out_ok) *out_ok = true;
         std::cout << "✅ [RoadmapDbClient] Daily candle rollup succeeded. Affected/Upserted candles: " << affected << "\n";
     } else {
         std::cerr << "❌ [RoadmapDbClient] rollup_ticks_to_daily_candles error: " << mysql_error(conn) << "\n";
@@ -2453,8 +2590,9 @@ uint64_t RoadmapDbClient::rollup_ticks_to_daily_candles(const std::string& sessi
     return affected;
 }
 
-uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& boundary_date, uint64_t& out_deleted) {
+uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& boundary_date, uint64_t& out_deleted, bool* out_ok) {
     out_deleted = 0;
+    if (out_ok) *out_ok = false;   // set true only on the completed path at the bottom
     MYSQL* conn = pool_->acquire();
     if (!conn) return 0;
 
@@ -2549,6 +2687,7 @@ uint64_t RoadmapDbClient::archive_market_snapshots_before(const std::string& bou
         if (deleted < kBatch) break;   // partial batch means the range is exhausted
     }
 
+    if (out_ok) *out_ok = true;
     std::cout << "\u2705 [RoadmapDbClient] Archived " << copied_total << " row(s) before " << safe_date
               << " 00:00 IST; removed " << out_deleted << " from the live table.\n";
     pool_->release(conn);
@@ -2695,6 +2834,24 @@ bool RoadmapDbClient::update_strategy_config_param(
         return false;
     }
 
+    // The AFTER UPDATE trigger writes the audit row with a generic "value updated from X to Y"
+    // reason, so the operator's own reason was accepted by this function and then discarded. Store
+    // it on that row, in the same transaction. mysql_affected_rows() is 2 only when an existing row
+    // really changed value (the case the trigger fires for); an insert (1) or a no-op (0) creates
+    // no audit row, and updating the "latest" row then would rewrite an older, unrelated entry.
+    if (!reason.empty() && mysql_affected_rows(conn) == 2) {
+        const std::string audit_table = is_test_isolation_ ? "cpp_strategy_config_audit_test" : "cpp_strategy_config_audit";
+        const std::string set_reason = "UPDATE " + audit_table + " SET reason = CONCAT('" + escape_string(conn, reason) +
+                                       "', ' | ', IFNULL(reason, '')) WHERE config_key = '" + safe_key +
+                                       "' ORDER BY id DESC LIMIT 1;";
+        if (mysql_query(conn, set_reason.c_str()) != 0) {
+            std::cerr << "❌ [RoadmapDbClient] could not record the operator reason on the audit row: "
+                      << mysql_error(conn) << " (change rolled back)\n";
+            pool_->release(conn);
+            return false;   // rolled back by the TransactionGuard: an unexplained change is not applied
+        }
+    }
+
     bool ok = tx.commit();
     pool_->release(conn);
     return ok;
@@ -2779,9 +2936,24 @@ static std::string escape_sql_string(MYSQL* conn, const std::string& str) {
     return std::string(buf.data());
 }
 
-bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& event, 
-                                             const analytics::GeoLocationResult& geo, 
-                                             const std::string& secret) {
+// One attempt at the whole visitor/device/location/session/page-visit transaction.
+//
+// retryable is set when the attempt failed for a reason a fresh attempt can be expected to get
+// past: InnoDB deadlock (1213), lock wait timeout (1205), or losing the race to create the
+// visitor/session row (1062). Anything else is a real failure and is not retried.
+//
+// Why deadlocks happened: INSERTs into analytics_devices / analytics_sessions /
+// analytics_page_visits take SHARED locks on the parent analytics_visitors row through their
+// foreign keys. The closing UPDATE analytics_visitors needs an EXCLUSIVE lock on that same row.
+// Two transactions for one visitor each held the shared lock the other needed to upgrade, and
+// InnoDB killed one of them. The visitor row is now locked FOR UPDATE at the first step, so
+// concurrent transactions for the same visitor queue instead of interleaving, and there is no
+// shared-to-exclusive upgrade left to deadlock on.
+bool RoadmapDbClient::record_analytics_event_attempt(const analytics::AnalyticsEvent& event,
+                                                     const analytics::GeoLocationResult& geo,
+                                                     const std::string& secret,
+                                                     bool& retryable) {
+    retryable = false;
     MYSQL* conn = pool_->acquire();
     if (!conn) return false;
 
@@ -2795,11 +2967,26 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
     try {
         std::string active_lookup_hash = hmac_sha256_hex(secret, event.canonical_ip);
         std::string visitor_id;
-        bool is_new_visitor = false;
 
-        // 1. Resolve Active Visitor Identity
+        // A deadlock (1213) rolls the WHOLE transaction back; a lock wait timeout (1205) rolls
+        // back the statement. Either way, carrying on would run the remaining statements outside
+        // the transaction (autocommit is on again) and commit a fragment of the visit. Most
+        // statements below used to ignore their result, so this is checked after each of them.
+        auto txn_lost = [&]() -> bool {
+            const unsigned e = mysql_errno(conn);
+            return e == 1213 || e == 1205;
+        };
+        auto abort_for_retry = [&]() -> bool {
+            retryable = true;
+            mysql_query(conn, "ROLLBACK;");
+            pool_->release(conn);
+            return false;
+        };
+
+        // 1. Resolve Active Visitor Identity. FOR UPDATE takes the exclusive row lock now, which
+        //    is what keeps concurrent transactions for one visitor from interleaving (see above).
         std::string q_vis = "SELECT id FROM analytics_visitors WHERE active_lookup_hash = '" + 
-                            escape_sql_string(conn, active_lookup_hash) + "' AND is_redacted = 0 LIMIT 1;";
+                            escape_sql_string(conn, active_lookup_hash) + "' AND is_redacted = 0 LIMIT 1 FOR UPDATE;";
         if (mysql_query(conn, q_vis.c_str()) == 0) {
             MYSQL_RES* res = mysql_store_result(conn);
             if (res) {
@@ -2809,11 +2996,12 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                 }
                 mysql_free_result(res);
             }
+        } else if (txn_lost()) {
+            return abort_for_retry();
         }
 
         if (visitor_id.empty()) {
             visitor_id = generate_random_cid();
-            is_new_visitor = true;
             std::ostringstream ins_vis;
             ins_vis << "INSERT INTO analytics_visitors (id, active_lookup_hash, ip_address, ip_version, identity_generation, is_redacted, "
                     << "first_seen_at, last_seen_at, total_visits, total_page_views, first_user_agent, latest_user_agent, "
@@ -2837,33 +3025,20 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                     << "'" << escape_sql_string(conn, event.bot_name) << "', 'MEDIUM');";
 
             if (mysql_query(conn, ins_vis.str().c_str()) != 0) {
-                // Duplicate key race check on uq_active_lookup_hash
-                if (mysql_errno(conn) == 1062) {
-                    visitor_id.clear();
-                    std::string q_retry = "SELECT id FROM analytics_visitors WHERE active_lookup_hash = '" + 
-                                          escape_sql_string(conn, active_lookup_hash) + "' AND is_redacted = 0 LIMIT 1;";
-                    for (int attempt = 0; attempt < 15 && visitor_id.empty(); ++attempt) {
-                        if (mysql_query(conn, q_retry.c_str()) == 0) {
-                            MYSQL_RES* res = mysql_store_result(conn);
-                            if (res) {
-                                MYSQL_ROW row = mysql_fetch_row(res);
-                                if (row && row[0]) {
-                                    visitor_id = row[0];
-                                    is_new_visitor = false;
-                                }
-                                mysql_free_result(res);
-                            }
-                        }
-                        if (visitor_id.empty()) {
-                            std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                        }
-                    }
-                } else {
-                    std::cerr << "❌ [Analytics] Visitor Insert Failed: " << mysql_error(conn) << "\n";
-                    mysql_query(conn, "ROLLBACK;");
-                    pool_->release(conn);
-                    return false;
+                const unsigned ins_err = mysql_errno(conn);
+                if (ins_err == 1062 || txn_lost()) {
+                    // Another transaction created this visitor first (uq_active_lookup_hash), or
+                    // this one was chosen as a deadlock victim. Start over: the next attempt finds
+                    // the committed row with its FOR UPDATE select. The previous in-transaction
+                    // re-read loop is gone; each loser held a shared lock on the duplicate's index
+                    // record, so a locking re-read from several losers at once deadlocked with
+                    // itself.
+                    return abort_for_retry();
                 }
+                std::cerr << "❌ [Analytics] Visitor Insert Failed: " << mysql_error(conn) << "\n";
+                mysql_query(conn, "ROLLBACK;");
+                pool_->release(conn);
+                return false;
             }
         }
 
@@ -2889,6 +3064,8 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                 << "user_agent = VALUES(user_agent), id = LAST_INSERT_ID(id);";
         if (mysql_query(conn, ins_dev.str().c_str()) == 0) {
             device_id = mysql_insert_id(conn);
+        } else if (txn_lost()) {
+            return abort_for_retry();
         }
 
         // 3. Resolve Location (One approximate location record per visitor)
@@ -2912,6 +3089,8 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                 << "ON DUPLICATE KEY UPDATE looked_up_at = NOW(), id = LAST_INSERT_ID(id);";
         if (mysql_query(conn, ins_loc.str().c_str()) == 0) {
             location_id = mysql_insert_id(conn);
+        } else if (txn_lost()) {
+            return abort_for_retry();
         }
 
         // 4. Resolve Session (Authoritative Multi-Process Concurrency & 30-min Inactivity Window)
@@ -2934,6 +3113,8 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                 }
                 mysql_free_result(res);
             }
+        } else if (txn_lost()) {
+            return abort_for_retry();
         }
 
         if (has_active_session && inactivity_gap < 1800) {
@@ -2946,12 +3127,12 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                      << "page_count = page_count + 1, "
                      << "exit_page = '" << escape_sql_string(conn, event.path) << "' "
                      << "WHERE id = " << session_id << " AND is_active = 1;";
-            mysql_query(conn, upd_sess.str().c_str());
+            if (mysql_query(conn, upd_sess.str().c_str()) != 0 && txn_lost()) return abort_for_retry();
         } else {
             // Inactivity gap >= 30 minutes or no active session: Finalize previous if exists
             if (has_active_session) {
                 std::string q_close = "UPDATE analytics_sessions SET is_active = NULL WHERE id = " + std::to_string(active_sess_id) + ";";
-                mysql_query(conn, q_close.c_str());
+                if (mysql_query(conn, q_close.c_str()) != 0 && txn_lost()) return abort_for_retry();
             }
 
             // Create brand new session
@@ -2973,6 +3154,8 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
 
             if (mysql_query(conn, ins_sess.str().c_str()) == 0) {
                 session_id = mysql_insert_id(conn);
+            } else if (txn_lost()) {
+                return abort_for_retry();
             } else if (mysql_errno(conn) == 1062) {
                 // Handled race condition: Another process just inserted active session
                 session_id = 0;
@@ -3032,6 +3215,11 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                << (event.is_bot ? 1 : 0) << ");";
 
         if (mysql_query(conn, ins_pv.str().c_str()) != 0) {
+            if (txn_lost()) {
+                std::cerr << "⚠️ [Analytics] Page Visit Insert hit a lock conflict (" << mysql_errno(conn)
+                          << "); retrying the transaction\n";
+                return abort_for_retry();
+            }
             std::cerr << "❌ [Analytics] Page Visit Insert Failed: " << mysql_error(conn) << "\n";
             mysql_query(conn, "ROLLBACK;");
             pool_->release(conn);
@@ -3047,10 +3235,11 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
                 << "latest_user_agent = '" << escape_sql_string(conn, event.user_agent.substr(0, 512)) << "', "
                 << "referrer_latest = '" << escape_sql_string(conn, event.referer.substr(0, 512)) << "' "
                 << "WHERE id = '" << visitor_id << "';";
-        mysql_query(conn, upd_vis.str().c_str());
+        if (mysql_query(conn, upd_vis.str().c_str()) != 0 && txn_lost()) return abort_for_retry();
 
         // Commit transaction
         if (mysql_query(conn, "COMMIT;") != 0) {
+            if (txn_lost()) return abort_for_retry();
             std::cerr << "❌ [Analytics] Commit Failed: " << mysql_error(conn) << "\n";
             mysql_query(conn, "ROLLBACK;");
             pool_->release(conn);
@@ -3070,6 +3259,26 @@ bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& ev
         pool_->release(conn);
         return false;
     }
+}
+
+bool RoadmapDbClient::record_analytics_event(const analytics::AnalyticsEvent& event,
+                                             const analytics::GeoLocationResult& geo,
+                                             const std::string& secret) {
+    // Retry only what a fresh transaction can fix (deadlock, lock wait timeout, lost creation
+    // race). The backoff is short and grows per attempt, with jitter from the thread id so
+    // writers that collided do not collide again in lock step.
+    constexpr int kMaxAttempts = 5;
+    for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+        bool retryable = false;
+        if (record_analytics_event_attempt(event, geo, secret, retryable)) return true;
+        if (!retryable) return false;
+        if (attempt == kMaxAttempts) break;
+        const auto jitter = static_cast<long>(std::hash<std::thread::id>{}(std::this_thread::get_id()) % 7);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5L * attempt * attempt + jitter));
+    }
+    std::cerr << "❌ [Analytics] Event " << event.request_id << " dropped after " << kMaxAttempts
+              << " attempts (persistent lock contention)\n";
+    return false;
 }
 
 void RoadmapDbClient::run_analytics_retention_purge(int raw_ip_days, int pv_days, int sess_days, int loc_days) {

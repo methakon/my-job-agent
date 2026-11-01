@@ -20,11 +20,13 @@
 // deliberately do not appear, so two runs of the same side produce identical output.
 //
 // Build (identical command for both sides, only the source root differs):
-//   g++ -std=c++20 -O1 -I<ROOT>/src -I<ROOT>/include \
-//       -DHERMES_BUILD_GIT_SHA='"<SHA>"' tests/differential_harness.cpp \
-//       <ROOT>/src/engine/*.cpp <ROOT>/src/roadmap/*.cpp <ROOT>/src/common/*.cpp \
-//       <ROOT>/src/market_data/*.cpp <ROOT>/src/analytics/*.cpp \
+//   g++ -std=c++20 -O1 -I<ROOT>/src -I<ROOT>/include
+//       -DHERMES_BUILD_GIT_SHA='"<SHA>"' tests/differential_harness.cpp
+//       <ROOT>/src/engine/*.cpp <ROOT>/src/roadmap/*.cpp <ROOT>/src/common/*.cpp
+//       <ROOT>/src/market_data/*.cpp <ROOT>/src/analytics/*.cpp
 //       -o <out> -lpthread -lmysqlclient -lcurl -lssl -lcrypto
+//   (one command; the line breaks above are for reading. A comment line must not end in a
+//   backslash, which the compiler would splice onto the next line.)
 //
 // Run:  <harness> <port> <outfile>      (from a directory holding the harness .env)
 
@@ -168,7 +170,7 @@ std::string json_top_level_keys(const std::string& body) {
     return out;
 }
 
-std::string marker_for(const std::string& body, const std::string& ctype) {
+std::string marker_for(const std::string& body, const std::string& /*ctype*/) {   // kept so call sites stay uniform; the marker is derived from the body
     const size_t t = body.find("<title>");
     if (t != std::string::npos) {
         const size_t e = body.find("</title>", t);

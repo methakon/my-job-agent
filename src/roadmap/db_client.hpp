@@ -6,6 +6,7 @@
 #include <queue>
 #include <mutex>
 #include <condition_variable>
+#include <chrono>
 #include <memory>
 #include <map>
 #include <tuple>
@@ -224,11 +225,40 @@ struct SandboxLogData {
 
 class MySQLConnectionPool {
 public:
-    MySQLConnectionPool(std::string host, int port, std::string user, std::string password, std::string db_name, size_t pool_size = 5);
+    // Capacity contract:
+    //   * pool_size       connections are opened eagerly and kept warm.
+    //   * max_connections is a HARD ceiling on connections that exist at once (0 => 4 x pool_size).
+    //                     acquire() never opens more than this; it used to create a new connection
+    //                     whenever the idle queue was empty, so a burst of N threads opened N
+    //                     connections and could exhaust the server's max_connections.
+    //   * acquire()       waits up to the acquire timeout for a connection to be released and
+    //                     returns nullptr on timeout, which every caller already treats as "no
+    //                     database". It never blocks forever.
+    MySQLConnectionPool(std::string host, int port, std::string user, std::string password, std::string db_name,
+                        size_t pool_size = 5, size_t max_connections = 0);
     ~MySQLConnectionPool();
 
     MYSQL* acquire();
     void release(MYSQL* conn);
+
+    // True when this pool opened `conn` and still owns it.
+    bool owns(MYSQL* conn);
+
+    // Connections currently open (idle + checked out). For tests and diagnostics.
+    size_t open_connections();
+    size_t max_connections() const { return max_connections_; }
+
+    // TLS policy. Pure functions so the decision is testable without a server.
+    enum class TlsPolicy { DISABLED, PREFERRED, REQUIRED, VERIFY_CA, VERIFY_IDENTITY };
+    // `setting` is the MYSQL_SSL_MODE value ("" when unset). An explicit, recognised value wins.
+    // Unset: a loopback host (the SSH tunnel / local socket path, where the bytes never cross a
+    // network) keeps PREFERRED, and ANY other host is REQUIRED, so credentials and trade data are
+    // never silently downgraded to plaintext on a real network path. An unrecognised value is
+    // treated as REQUIRED rather than weakened.
+    static TlsPolicy resolve_tls_policy(const std::string& host, const std::string& setting);
+    static bool is_loopback_host(const std::string& host);
+    // Hard ceiling for a requested size: 0 => 4 x pool_size, never below pool_size, never zero.
+    static size_t effective_max_connections(size_t pool_size, size_t requested_max);
 
 private:
     MYSQL* create_connection();
@@ -244,9 +274,16 @@ private:
     std::string password_;
     std::string db_name_;
     size_t pool_size_;
+    size_t max_connections_;
+    unsigned int connect_timeout_s_;
+    unsigned int read_timeout_s_;
+    unsigned int write_timeout_s_;
+    std::chrono::milliseconds acquire_timeout_;
+    TlsPolicy tls_policy_;
 
     std::queue<MYSQL*> pool_;
     std::unordered_set<MYSQL*> all_created_connections_;
+    size_t creating_ = 0;   // connections being opened outside the lock; counted against the ceiling
     std::mutex mutex_;
     std::condition_variable cv_;
 };
@@ -373,8 +410,16 @@ public:
                                           uint64_t actionable_cnt, uint64_t risk_veto_cnt, int trades_executed,
                                           double realized_drawdown, double avg_ofi, double max_ofi, int near_miss_cnt,
                                           const std::string& recommendations_json);
-    uint64_t rollup_ticks_to_daily_candles(const std::string& session_date);
-    uint64_t archive_market_snapshots_before(const std::string& boundary_date, uint64_t& out_deleted);
+    // Number of distinct sessions that have a post-session analysis record. Returns false (and
+    // leaves out_count at 0) when the count could not be read: "no sessions" and "could not look"
+    // are different answers and callers that gate on this must not conflate them.
+    bool count_analysed_sessions(uint64_t& out_count);
+    // Both return a row count, and a count alone cannot distinguish "nothing to do" from "the
+    // statement failed" (each returns 0 / a partial count on error). Pass out_ok to learn which:
+    // it is set true only when the operation completed (an intentional skip such as a holiday or
+    // test isolation counts as completed), and false on a connection or SQL failure.
+    uint64_t rollup_ticks_to_daily_candles(const std::string& session_date, bool* out_ok = nullptr);
+    uint64_t archive_market_snapshots_before(const std::string& boundary_date, uint64_t& out_deleted, bool* out_ok = nullptr);
 
     // Test Isolation & Production Defense-in-Depth Guard
     void set_test_isolation(bool enable) { is_test_isolation_ = enable; }
@@ -418,6 +463,8 @@ public:
 
     // Cookie-Less Privacy-Conscious Visitor Analytics Engine (v8 Master)
     bool record_analytics_event(const analytics::AnalyticsEvent& event, const analytics::GeoLocationResult& geo, const std::string& secret);
+    // Test seam: a single transaction attempt. `retryable` reports whether a fresh attempt could succeed.
+    bool record_analytics_event_attempt(const analytics::AnalyticsEvent& event, const analytics::GeoLocationResult& geo, const std::string& secret, bool& retryable);
     void run_analytics_retention_purge(int raw_ip_days, int pv_days, int sess_days, int loc_days);
     std::map<std::string, std::string> fetch_analytics_summary_stats();
     std::vector<std::map<std::string, std::string>> fetch_analytics_popular_pages(int limit = 10);

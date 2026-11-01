@@ -18,15 +18,22 @@
 #include <fcntl.h>
 #include <poll.h>
 
+#include <chrono>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/rand.h>
+#include <openssl/evp.h>
+#include <openssl/x509v3.h>
 
 class NativeWsTransport {
 public:
     using MessageHandler = std::function<void(const uint8_t* data, size_t len, bool is_binary)>;
     using DisconnectHandler = std::function<void(const std::string& reason)>;
 
-    NativeWsTransport() : sock_(-1), ssl_ctx_(nullptr), ssl_(nullptr), running_(false), connected_(false) {}
+    // Initialiser order follows the member DECLARATION order (running_, connected_, ..., sock_,
+    // ssl_ctx_, ssl_); C++ initialises in declaration order regardless, and -Wreorder flags a
+    // list that implies otherwise.
+    NativeWsTransport() : running_(false), connected_(false), sock_(-1), ssl_ctx_(nullptr), ssl_(nullptr) {}
     ~NativeWsTransport() {
         stop();
     }
@@ -39,6 +46,7 @@ public:
         headers_ = headers;
         running_ = true;
         connected_ = false;
+        close_reason_.clear();
 
         worker_ = std::thread([this]() {
             run_loop();
@@ -135,13 +143,11 @@ private:
             }
         }
 
-        // Generate 4-byte mask key
-        uint8_t mask[4] = {
-            static_cast<uint8_t>(rand() & 0xFF),
-            static_cast<uint8_t>(rand() & 0xFF),
-            static_cast<uint8_t>(rand() & 0xFF),
-            static_cast<uint8_t>(rand() & 0xFF)
-        };
+        // 4-byte mask key. RFC 6455 section 5.3 requires it to be unpredictable to the network,
+        // so it comes from the CSPRNG. It was rand() before: unseeded, so the same sequence on
+        // every start. A frame that cannot be masked safely is not sent.
+        uint8_t mask[4];
+        if (RAND_bytes(mask, sizeof(mask)) != 1) return false;
         for (int i = 0; i < 4; ++i) frame.push_back(mask[i]);
 
         // Mask payload
@@ -170,15 +176,50 @@ private:
         }
     }
 
+    static int64_t now_ms() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    // Called from the reader thread whenever the socket has been idle for a poll interval.
+    // Returns false when the connection must be treated as dead. A healthy peer answers a ping
+    // with a pong (RFC 6455 section 5.5.3), so silence of any kind for kDeadAfterMs means the
+    // path is broken even if no close was ever delivered. Pinging, rather than only timing out
+    // on silence, keeps a legitimately quiet feed (after hours, an illiquid contract) alive.
+    bool keepalive_tick() {
+        const int64_t now = now_ms();
+        if (now - last_rx_ms_.load() > kDeadAfterMs) {
+            close_reason_ = "No data or pong from peer for " + std::to_string(kDeadAfterMs / 1000) +
+                            "s (half-open connection); reconnecting";
+            return false;
+        }
+        if (now - last_ping_ms_ >= kPingEveryMs) {
+            last_ping_ms_ = now;
+            send_frame(nullptr, 0, 0x09);
+        }
+        return true;
+    }
+
     int ssl_read_all(uint8_t* buf, int len) {
         int total = 0;
         while (total < len && running_.load()) {
+            // Bytes OpenSSL has already decrypted and buffered are invisible to poll(): the socket
+            // is empty even though a complete frame is waiting. A TLS record often carries more
+            // than one frame (or the first frame right behind the handshake response), so without
+            // this check the last frame of a burst was held until unrelated traffic arrived, which
+            // on an idle feed could be arbitrarily late.
+            const bool buffered = (SSL_pending(ssl_) > 0);
             struct pollfd pfd;
             pfd.fd = sock_;
             pfd.events = POLLIN;
-            int pr = poll(&pfd, 1, 200);
+            int pr = buffered ? 1 : poll(&pfd, 1, 200);
             if (pr <= 0) {
                 if (pr < 0) return -1;
+                // 200 ms with nothing to read. Previously this looped forever, so a half-open
+                // connection (peer vanished without a FIN/RST) was never noticed and the feed
+                // sat silent until the process restarted. Ping while idle and give up when not
+                // even a pong arrives.
+                if (!keepalive_tick()) return -1;
                 continue;
             }
 
@@ -190,6 +231,7 @@ private:
                 }
                 return -1;
             }
+            last_rx_ms_.store(now_ms());
             total += n;
         }
         return total;
@@ -239,22 +281,53 @@ private:
             return;
         }
 
+        // Verify the server. The feed carries the prices the engine trades on, so an unverified
+        // peer lets anyone on the path inject ticks. Chain validation uses the system trust store
+        // (SSL_CERT_FILE / SSL_CERT_DIR are honoured), and the certificate must match the host.
+        SSL_CTX_set_verify(ssl_ctx_, SSL_VERIFY_PEER, nullptr);
+        if (SSL_CTX_set_default_verify_paths(ssl_ctx_) != 1) {
+            close_socket();
+            if (on_disconnect_) on_disconnect_("No usable CA trust store; refusing an unverified TLS connection");
+            return;
+        }
         ssl_ = SSL_new(ssl_ctx_);
         SSL_set_fd(ssl_, sock_);
         SSL_set_tlsext_host_name(ssl_, parts.host.c_str());
-
-        if (SSL_connect(ssl_) <= 0) {
+        if (SSL_set1_host(ssl_, parts.host.c_str()) != 1) {
             close_socket();
-            if (on_disconnect_) on_disconnect_("TLS handshake failed with " + parts.host);
+            if (on_disconnect_) on_disconnect_("Could not set the expected TLS hostname");
             return;
         }
 
-        // Send HTTP Upgrade Request
+        if (SSL_connect(ssl_) <= 0) {
+            const long verify = SSL_get_verify_result(ssl_);
+            const std::string why = (verify != X509_V_OK)
+                ? std::string(" (certificate: ") + X509_verify_cert_error_string(verify) + ")"
+                : std::string();
+            close_socket();
+            if (on_disconnect_) on_disconnect_("TLS handshake failed with " + parts.host + why);
+            return;
+        }
+
+        // Send HTTP Upgrade Request. The key is 16 fresh random bytes, base64 encoded (RFC 6455
+        // section 4.1); it was the RFC's own sample nonce, a constant shared by every client.
+        std::string ws_key;
+        {
+            uint8_t raw[16];
+            char b64[32] = {0};
+            if (RAND_bytes(raw, sizeof(raw)) != 1) {
+                close_socket();
+                if (on_disconnect_) on_disconnect_("CSPRNG unavailable; refusing to build a WebSocket handshake");
+                return;
+            }
+            EVP_EncodeBlock(reinterpret_cast<unsigned char*>(b64), raw, sizeof(raw));
+            ws_key = b64;
+        }
         std::string http_req = "GET " + parts.path + " HTTP/1.1\r\n"
                              + "Host: " + parts.host + "\r\n"
                              + "Upgrade: websocket\r\n"
                              + "Connection: Upgrade\r\n"
-                             + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                             + "Sec-WebSocket-Key: " + ws_key + "\r\n"
                              + "Sec-WebSocket-Version: 13\r\n";
         for (const auto& h : headers_) {
             http_req += h + "\r\n";
@@ -283,6 +356,8 @@ private:
             return;
         }
 
+        last_rx_ms_.store(now_ms());
+        last_ping_ms_ = now_ms();
         connected_ = true;
 
         // WebSocket Frame Loop
@@ -344,7 +419,7 @@ private:
         close_socket();
 
         if (on_disconnect_) {
-            on_disconnect_("Socket closed");
+            on_disconnect_(close_reason_.empty() ? std::string("Socket closed") : close_reason_);
         }
     }
 
@@ -352,8 +427,14 @@ private:
     std::vector<std::string> headers_;
     MessageHandler on_message_;
     DisconnectHandler on_disconnect_;
+    static constexpr int64_t kPingEveryMs = 15000;   // idle this long -> send a ping
+    static constexpr int64_t kDeadAfterMs  = 45000;   // nothing (data or pong) this long -> dead
+
     std::atomic<bool> running_;
     std::atomic<bool> connected_;
+    std::atomic<int64_t> last_rx_ms_{0};
+    int64_t last_ping_ms_{0};
+    std::string close_reason_;
     std::thread worker_;
     std::mutex send_mutex_;
 

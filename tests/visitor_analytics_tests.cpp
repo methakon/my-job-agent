@@ -222,7 +222,11 @@ static void test_concurrency_stress_barrier(std::shared_ptr<RoadmapDbClient> db_
     int rounds_with_failure = 0;
 
     for (int round = 0; round < ROUNDS; ++round) {
-        std::vector<bool> results(NUM_THREADS, false);
+        // vector<char>, not vector<bool>: vector<bool> packs eight elements into one word, so
+        // sixteen threads each writing "their" element are really racing on shared words, and a
+        // successful call could be recorded as a failure (this test then reported failures with
+        // no error logged anywhere). Each char is its own memory location.
+        std::vector<char> results(NUM_THREADS, 0);
 
         std::atomic<int> ready{0};
         std::atomic<bool> go{false};
@@ -334,7 +338,8 @@ static void test_concurrency_stress_same_ip(std::shared_ptr<RoadmapDbClient> db_
 
     const int NUM_THREADS = 10;
     std::vector<std::thread> threads;
-    std::vector<bool> results(NUM_THREADS, false);
+    // vector<char>: see the note in test_concurrency_stress_barrier (vector<bool> is bit-packed).
+    std::vector<char> results(NUM_THREADS, 0);
 
     for (int i = 0; i < NUM_THREADS; ++i) {
         threads.emplace_back([&, i]() {

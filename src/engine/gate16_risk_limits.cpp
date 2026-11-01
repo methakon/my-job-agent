@@ -135,7 +135,7 @@ IndependentRiskVeto IndependentRiskEngine::verify_order_proposal(
 }
 
 IndependentRiskVeto IndependentRiskEngine::verify_order_proposal_with_margin(
-    const std::string& symbol,
+    const std::string& /*symbol*/,   // risk limits here are portfolio-wide; kept for signature symmetry
     double proposed_risk_inr,
     double required_margin_inr,
     double current_open_exposure_inr,

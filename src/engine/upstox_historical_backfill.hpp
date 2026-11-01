@@ -5,6 +5,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <utility>
 #include <mutex>
 
 struct UpstoxCandleRecord {
@@ -56,7 +57,13 @@ public:
     // Normalize symbol name for MySQL table consistency ("NIFTY50", "NIFTYBANK", "SENSEX")
     static std::string normalize_symbol_for_db(const std::string& symbol);
 
-    // Fetch historical candle data from Upstox V2/V3 REST API via curl
+    // Splits [from_date, to_date] (YYYY-MM-DD, inclusive) into windows of `window_days` calendar
+    // days, the last clamped to to_date. Handles ranges that cross month and year boundaries. An
+    // unreadable or inverted range yields the single pair {from_date, to_date}.
+    static std::vector<std::pair<std::string, std::string>> chunk_date_range(
+        const std::string& from_date, const std::string& to_date, int window_days);
+
+    // Fetch historical candle data from Upstox V2/V3 REST API (in-process HTTPS)
     static std::vector<UpstoxCandleRecord> fetch_historical_candles_api(
         const std::string& instrument_key,
         const std::string& symbol,
