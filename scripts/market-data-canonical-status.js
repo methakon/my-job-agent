@@ -23,7 +23,7 @@
  * CANONICAL_SUMMARY_MS (default 5 min) — read that with `pm2 logs trading-agent`.
  */
 const path = require('path');
-const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent';
+const ROOT = '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent';
 require(path.join(ROOT, 'node_modules/dotenv')).config({ path: path.join(ROOT, '.env') });
 
 const BASE = process.env.PROJECT_STATUS_BASE || process.env.DESK_API_BASE || 'http://127.0.0.1:3010';

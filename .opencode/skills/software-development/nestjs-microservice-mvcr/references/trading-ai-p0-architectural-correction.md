@@ -221,7 +221,7 @@ When reviewing trading AI orchestrator code:
 Run this search to identify legacy reconstruction:
 
 ```bash
-cd /home/swarna-sekhar-dhar/projects/my-job-agent
+cd /home/swarna-sekhar-dhar/projects/algotrading/my-job-agent
 
 # Search for reconstruction patterns
 grep -r "signal\.reasons" src/trading/ || echo "No signal.reasons found"

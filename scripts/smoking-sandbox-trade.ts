@@ -48,7 +48,7 @@
  *     sandbox mode in trading" is exercised even here.
  *
  * Run:
- *   cd /home/swarna-sekhar-dhar/projects/my-job-agent
+ *   cd /home/swarna-sekhar-dhar/projects/algotrading/my-job-agent
  *   npx ts-node --transpile-only scripts/smoking-sandbox-trade.ts
  * ---------------------------------------------------------------------------
  */

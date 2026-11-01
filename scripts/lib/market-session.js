@@ -29,7 +29,7 @@
  *      change shows up as a warning instead of as a silently wrong window.
  */
 const path = require('path');
-const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent';
+const ROOT = '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent';
 require(path.join(ROOT, 'node_modules/dotenv')).config({ path: path.join(ROOT, '.env') });
 const mysql = require(path.join(ROOT, 'node_modules/mysql2/promise'));
 

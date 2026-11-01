@@ -23,7 +23,7 @@
  *     binary reproduces the same ledger on every run.
  *
  * HOW TO RUN:
- *   cd /home/swarna-sekhar-dhar/projects/my-job-agent
+ *   cd /home/swarna-sekhar-dhar/projects/algotrading/my-job-agent
  *   npx ts-node --transpile-only scripts/sandbox-trade-runner.ts
  *
  *   The transpile-only flag is intentional: this runner lives under scripts/,

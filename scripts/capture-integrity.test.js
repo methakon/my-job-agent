@@ -23,7 +23,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent';
+const ROOT = '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent';
 require(ROOT + '/node_modules/dotenv').config({ path: ROOT + '/.env', override: true });
 const mysql = require(ROOT + '/node_modules/mysql2/promise');
 

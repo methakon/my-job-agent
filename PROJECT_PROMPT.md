@@ -1262,7 +1262,7 @@ the headless `trading-agent`, with the app making zero connect attempts.
 10. Company-redirect apply handling (FR-19, always-company rule): jobs whose apply link redirects to company's own page — detect, drive form (FR-15), handle login/register (legit automation or flag manual-apply).
 
 ## Goodbye process (user-mandated)
-Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --rebase` → `push origin/dev`. Never skip even on interrupt. Working directory: `/home/swarna-sekhar-dhar/projects/my-job-agent`; branch: `dev`.
+Update Progress + TODO here (PROJECT_PROMPT.md) → commit on `dev` → `pull --rebase` → `push origin/dev`. Never skip even on interrupt. Working directory: `/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent`; branch: `dev`.
 
 ## Session log — 2026-09-17 (Thu) 17:57 IST (after market close 15:30)
 

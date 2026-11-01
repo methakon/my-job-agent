@@ -1,7 +1,7 @@
 // File the day's trade-learning data gaps as clarifications awaiting the operator.
 const crypto = require('crypto');
 const p = require('path');
-const R = '/home/swarna-sekhar-dhar/projects/my-job-agent';
+const R = '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent';
 require(p.join(R, 'node_modules/dotenv')).config({ path: p.join(R, '.env') });
 const mysql = require(p.join(R, 'node_modules/mysql2/promise'));
 

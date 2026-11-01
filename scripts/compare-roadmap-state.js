@@ -46,15 +46,15 @@ function norm(s) {
 let localParseOut, publicParseOut, dbOutput;
 try {
   localParseOut = execSync('node scripts/parse-roadmap-html.js /tmp/job-roadmap-local.html',
-    { encoding: 'utf8', timeout: 10000, cwd: '/home/swarna-sekhar-dhar/projects/my-job-agent' });
+    { encoding: 'utf8', timeout: 10000, cwd: '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent' });
 } catch (e) { localParseOut = e.stdout || e.message || ''; }
 try {
   publicParseOut = execSync('node scripts/parse-roadmap-html.js /tmp/job-roadmap-public.html',
-    { encoding: 'utf8', timeout: 10000, cwd: '/home/swarna-sekhar-dhar/projects/my-job-agent' });
+    { encoding: 'utf8', timeout: 10000, cwd: '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent' });
 } catch (e) { publicParseOut = e.stdout || e.message || ''; }
 try {
   dbOutput = execSync('node scripts/read-roadmap-db.js',
-    { encoding: 'utf8', timeout: 15000, cwd: '/home/swarna-sekhar-dhar/projects/my-job-agent' });
+    { encoding: 'utf8', timeout: 15000, cwd: '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent' });
 } catch (e) { dbOutput = e.stdout || e.message || ''; }
 
 const dbStatuses = parseDbStatuses(dbOutput);

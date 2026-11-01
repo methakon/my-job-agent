@@ -1,7 +1,7 @@
 #!/bin/bash
 # Trigger database sync and run test-runtime.mjs
 
-cd /home/swarna-sekhar-dhar/projects/my-job-agent
+cd /home/swarna-sekhar-dhar/projects/algotrading/my-job-agent
 
 # Set env vars for this session
 export DB_SYNC_ENABLED=true

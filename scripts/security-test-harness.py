@@ -60,7 +60,7 @@ record("Session cookie SameSite attribute", "Auth",
 
 # Test 1.2: Default session secret
 import subprocess
-result = subprocess.run(["grep", "-n", "SESSION_SECRET", "/home/swarna-sekhar-dhar/projects/my-job-agent/.env"],
+result = subprocess.run(["grep", "-n", "SESSION_SECRET", "/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent/.env"],
                         capture_output=True, text=True)
 env_secret = result.stdout.strip()
 record("SESSION_SECRET is not default/placeholder", "Auth",
@@ -312,7 +312,7 @@ record("Production HTTPS enforced via Cloudflare", "TLS",
 print("\n─── 9. Dependency / Configuration Audit ───")
 
 import subprocess, os
-os.chdir("/home/swarna-sekhar-dhar/projects/my-job-agent")
+os.chdir("/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent")
 
 # Check package.json for known risky deps
 result = subprocess.run(["cat", "package.json"], capture_output=True, text=True)
@@ -419,7 +419,7 @@ print("""
 """)
 
 # Write report to file
-report_path = "/home/swarna-sekhar-dhar/projects/my-job-agent/docs/SECURITY_TEST_REPORT.md"
+report_path = "/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent/docs/SECURITY_TEST_REPORT.md"
 with open(report_path, "w") as f:
     f.write("# my-job-agent Security Test Report\n\n")
     f.write(f"Date: {time.strftime('%Y-%m-%d %H:%M:%S IST')}\n")

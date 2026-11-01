@@ -2,7 +2,7 @@ module.exports = {
   apps: [{
     name: 'my-job-agent',
     script: 'dist/main.js',
-    cwd: '/home/swarna-sekhar-dhar/projects/my-job-agent',
+    cwd: '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent',
     instances: 1,
     exec_mode: 'fork',
     node_args: '--enable-source-maps',

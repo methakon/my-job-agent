@@ -16,7 +16,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent';
+const ROOT = '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent';
 require(ROOT + '/node_modules/dotenv').config({ path: ROOT + '/.env', override: true });
 const mysql = require(ROOT + '/node_modules/mysql2/promise');
 

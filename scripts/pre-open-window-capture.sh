@@ -13,7 +13,7 @@
 # refuses to run if fired after it). Any arguments are passed straight through,
 # e.g.  scripts/pre-open-window-capture.sh --dry-run
 set -u
-REPO="/home/swarna-sekhar-dhar/projects/my-job-agent"
+REPO="/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent"
 NODE="/home/swarna-sekhar-dhar/.local/bin/node"
 cd "$REPO" || exit 1
 export PATH="$(dirname "$NODE"):/usr/local/bin:/usr/bin:/bin:${PATH:-}"

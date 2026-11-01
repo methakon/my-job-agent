@@ -36,7 +36,7 @@ const { execFileSync } = require('child_process');
 // Resolution order: an explicit override, then this repo, then the legacy path -- and the legacy
 // path is announced, never silently used, so the coupling cannot reappear unnoticed.
 const SELF_ROOT = path.resolve(__dirname, '..');
-const LEGACY_ROOT = '/home/swarna-sekhar-dhar/projects/my-job-agent-job';
+const LEGACY_ROOT = '/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent-job';
 const ROOT = [process.env.GATE_CLOSE_ROOT, SELF_ROOT, LEGACY_ROOT]
 	.filter(Boolean)
 	.find((r) => {

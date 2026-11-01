@@ -83,8 +83,8 @@ ALTER TABLE fnf_decision_journal MODIFY detailJson JSON;
 
 ## Related Files
 
-- `/home/swarna-sekhar-dhar/projects/my-job-agent/src/trading/fnf-trading.service.ts`
-- `/home/swarna-sekhar-dhar/projects/my-job-agent/src/trading/fnf-decision-journal.entity.ts`
-- `/home/swarna-sekhar-dhar/projects/my-job-agent/src/trading/fnf-decision-snapshot.ts`
-- `/home/swarna-sekhar-dhar/projects/my-job-agent/src/trading/trading-ai-orchestrator.service.ts`
-- `/home/swarna-sekhar-dhar/projects/my-job-agent/DECISION_SNAPSHOT_FIX.md`
+- `/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent/src/trading/fnf-trading.service.ts`
+- `/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent/src/trading/fnf-decision-journal.entity.ts`
+- `/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent/src/trading/fnf-decision-snapshot.ts`
+- `/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent/src/trading/trading-ai-orchestrator.service.ts`
+- `/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent/DECISION_SNAPSHOT_FIX.md`

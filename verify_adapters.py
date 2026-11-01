@@ -3,7 +3,7 @@ import re
 import sys
 from pathlib import Path
 
-PROJECT = Path("/home/swarna-sekhar-dhar/projects/my-job-agent")
+PROJECT = Path("/home/swarna-sekhar-dhar/projects/algotrading/my-job-agent")
 REPORT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/tmp/test_results.json")
 
 SRC_INTERFACE = PROJECT / "src/applications/portal-adapter.interface.ts"
